@@ -78,6 +78,8 @@ Grok 默认还会读 Claude 的用户配置。同一时刻两边都触发时，8
 - 通知类型 `permission_prompt`、`agent_needs_input`、`elicitation_dialog`、`elicitation_url_dialog`。
 - Claude 的 `Elicitation`。
 
+Grok 给新会话起标题时会另开一个无头会话，工作目录是 `/`，几秒后自己结束。这个会话的 `Stop` 和 `SessionEnd` 不响，所以会话刚开始时不会跟着响一声。钩子用载荷里的 `sessionId` 和 `cwd` 读 `~/.grok/sessions` 下的 `summary.json`。`session_kind` 是 `headless` 且这条会话的 `cwd` 是 `/`，或者记录里是起标题的提示，就跳过。在项目目录里跑完的 `grok -p` 仍会响。`session_kind` 以 `subagent` 开头的也不响。
+
 `idle_prompt` 不接入。它在回合结束大约一分钟后才来，和 `Stop` 叠在一起。
 
 Codex 0.153 的 hook 事件是 `PreToolUse`、`PermissionRequest`、`Stop`、`SessionEnd` 这一组。安装脚本按这个范围写 `~/.codex/hooks.json`。`Notification` 和 `Elicitation` 写在 Claude 和 Grok 的配置里。

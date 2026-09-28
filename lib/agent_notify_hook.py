@@ -12,6 +12,7 @@ import os
 import resource
 import sys
 import time
+from urllib.parse import quote
 
 DEBOUNCE_S = 8.0
 ASK_TOOLS = {
@@ -25,6 +26,13 @@ NOTIFY_TYPES = {
     "elicitation_dialog",
     "elicitation_url_dialog",
 }
+# Grok 起标题的提示。中文这句是当前无头会话里的原文，英文两句在本机 grok 里。
+TITLE_MARKS = (
+    "为下面这条用户消息起一个简短会话标题",
+    "Just generate the session_title",
+    "Generate a session title for the conversation",
+)
+TRANSCRIPT_SCAN_BYTES = 1_500_000
 
 
 def state_dir() -> str:
@@ -73,6 +81,95 @@ def is_ask_tool(name: str) -> bool:
     return leaf in ASK_TOOLS
 
 
+def grok_home() -> str:
+    return os.environ.get("GROK_HOME") or os.path.join(os.path.expanduser("~"), ".grok")
+
+
+def read_json(path: str) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def session_dir(data: dict) -> str | None:
+    transcript = first(data, "transcriptPath", "transcript_path")
+    if isinstance(transcript, str) and transcript:
+        parent = os.path.dirname(transcript)
+        if os.path.isfile(os.path.join(parent, "summary.json")):
+            return parent
+    session_id = first(data, "sessionId", "session_id") or os.environ.get("GROK_SESSION_ID")
+    cwd = first(data, "cwd")
+    if not session_id or not cwd:
+        return None
+    directory = os.path.join(
+        grok_home(),
+        "sessions",
+        quote(str(cwd), safe=""),
+        str(session_id),
+    )
+    if os.path.isfile(os.path.join(directory, "summary.json")):
+        return directory
+    return None
+
+
+def has_title_mark(text: str) -> bool:
+    return any(mark in text for mark in TITLE_MARKS)
+
+
+def transcript_has_title(directory: str) -> bool:
+    for name in ("chat_history.jsonl", "updates.jsonl"):
+        path = os.path.join(directory, name)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                read = 0
+                for line in handle:
+                    read += len(line)
+                    if has_title_mark(line):
+                        return True
+                    if read >= TRANSCRIPT_SCAN_BYTES:
+                        break
+        except OSError:
+            continue
+    return False
+
+
+def side_session(data: dict) -> str | None:
+    """主会话之外、不该响的 Stop / SessionEnd。找不到记录就当主会话。"""
+    try:
+        directory = session_dir(data)
+        if directory is None:
+            return None
+        summary = read_json(os.path.join(directory, "summary.json"))
+        if summary is None:
+            return None
+        kind = str(summary.get("session_kind") or "").lower()
+        if kind.startswith("subagent"):
+            return "subagent"
+        if kind != "headless":
+            return None
+        info = summary.get("info")
+        info_cwd = ""
+        if isinstance(info, dict):
+            info_cwd = str(info.get("cwd") or "")
+        payload_cwd = str(first(data, "cwd") or "")
+        if info_cwd == "/" or payload_cwd == "/":
+            return "title"
+        for key in ("session_summary", "generated_title"):
+            value = summary.get(key)
+            if isinstance(value, str) and has_title_mark(value):
+                return "title"
+        if transcript_has_title(directory):
+            return "title"
+        return None
+    except Exception:
+        return None
+
+
 def decide(data: dict) -> tuple[bool, str]:
     event = event_name(data)
     subagent = first(data, "subagentType", "subagent_type")
@@ -81,6 +178,9 @@ def decide(data: dict) -> tuple[bool, str]:
     if event in {"stop", "sessionend"}:
         if subagent:
             return False, "subagent"
+        side = side_session(data)
+        if side:
+            return False, side
         return True, event
     if event in {"permissionrequest", "elicitation"}:
         return True, event
