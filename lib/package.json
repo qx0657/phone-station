@@ -1,0 +1,7 @@
+{
+  "name": "phone-station",
+  "private": true,
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
