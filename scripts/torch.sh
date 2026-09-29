@@ -21,7 +21,7 @@ usage() {
   print -r -- "status   查看当前开关"
   print -r -- "正整数   指定亮度档。超过手机上限时收到最高档。PGT-AN20 最高 4"
   print -r -- "beat     跟着电脑正在播放的声音闪，Ctrl+C 停下并关灯"
-  print -r -- "         增益默认 1，范围 0.2 到 8，越大越容易亮"
+  print -r -- "         增益默认 2，范围 0.2 到 8，越大越容易亮"
 }
 
 cmd="${1:-on}"
@@ -158,7 +158,7 @@ case "$cmd" in
     esac
     ;;
   beat)
-    gain="${2:-1}"
+    gain="${2:-2}"
     if [[ ! "$gain" =~ '^[0-9]+([.][0-9]+)?$' ]] || ! python3 -c 'import sys; v=float(sys.argv[1]); raise SystemExit(0 if 0.2 <= v <= 8 else 1)' "$gain"; then
       print -u2 -- "增益用 0.2 到 8，例如 1.5"
       usage >&2

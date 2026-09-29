@@ -102,7 +102,7 @@ def main():
     parser.add_argument("--adb", required=True)
     parser.add_argument("--serial", required=True)
     parser.add_argument("--audio", required=True)
-    parser.add_argument("--gain", type=float, default=1.0)
+    parser.add_argument("--gain", type=float, default=2.0)
     args = parser.parse_args()
     if not (0.2 <= args.gain <= 8):
         raise SystemExit("增益用 0.2 到 8")

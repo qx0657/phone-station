@@ -87,7 +87,7 @@ cd phone-station
 ./scripts/torch.sh toggle
 ```
 
-`beat` 跟着电脑正在播放的声音闪，不听麦克风。按 `Ctrl+C` 停下，灯会关掉。增益默认 1，范围 0.2 到 8，越大越容易亮到高档。
+`beat` 跟着电脑正在播放的声音闪，不听麦克风。按 `Ctrl+C` 停下，灯会关掉。增益默认 2，范围 0.2 到 8，越大越容易亮到高档。
 
 ```bash
 ./scripts/torch.sh beat
