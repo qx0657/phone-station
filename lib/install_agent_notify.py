@@ -52,14 +52,25 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def hook_command(root: Path | None = None) -> str:
+CLIENT_FLAG = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "grok": "Grok",
+}
+
+
+def hook_command(tool: str, root: Path | None = None) -> str:
     base = repo_root() if root is None else root
-    return str(base / "scripts" / "agent-notify-hook.sh")
+    script = str(base / "scripts" / "agent-notify-hook.sh")
+    return f"{script} --client {CLIENT_FLAG[tool]}"
 
 
 def is_our_command(command: object) -> bool:
-    text = str(command or "").replace("\\", "/").rstrip()
-    return text.endswith(MARKER)
+    text = str(command or "").replace("\\", "/").strip()
+    if not text:
+        return False
+    head = text.split()[0].strip("\"'")
+    return head.endswith(MARKER)
 
 
 def handler(command: str) -> dict:
@@ -178,11 +189,11 @@ def paths_for(home: Path) -> dict[str, Path]:
     }
 
 
-def install(home: Path, command: str) -> list[Path]:
+def install(home: Path) -> list[Path]:
     written = []
     for tool, file in paths_for(home).items():
         config = read_json(file)
-        install_into(config, tool, command)
+        install_into(config, tool, hook_command(tool))
         write_json(file, config)
         written.append(file)
     return written
@@ -366,9 +377,9 @@ def main(argv: list[str] | None = None) -> int:
         print("不认识的参数。", file=sys.stderr)
         return 1
     home = Path.home()
-    command = hook_command()
-    if not removing and not Path(command).is_file():
-        print(f"找不到 {command}", file=sys.stderr)
+    script = hook_command("grok").split()[0]
+    if not removing and not Path(script).is_file():
+        print(f"找不到 {script}", file=sys.stderr)
         return 1
     if removing:
         changed = remove(home)
@@ -377,11 +388,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {file}")
         print("已经打开的会话要重开一次。")
         return 0
-    written = install(home, command)
+    written = install(home)
     print("已安装")
     for file in written:
         print(f"  {file}")
-    print(f"命令  {command}")
+    print("命令")
+    for tool in ("claude", "codex", "grok"):
+        print(f"  {hook_command(tool)}")
     print(trust_codex(home))
     print("已经打开的 Codex、Claude、Grok 会话要重开一次。")
     return 0

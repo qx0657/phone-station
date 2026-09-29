@@ -15,6 +15,7 @@ import time
 from urllib.parse import quote
 
 DEBOUNCE_S = 8.0
+BODY_LIMIT = 80
 ASK_TOOLS = {
     "AskUserQuestion",
     "ask_user_question",
@@ -244,6 +245,231 @@ def _close_extra_fds() -> None:
             pass
 
 
+def tool_leaf(name: str) -> str:
+    return name.replace(":", ".").split(".")[-1].split("__")[-1]
+
+
+def one_line(value: object, limit: int = BODY_LIMIT) -> str:
+    if not isinstance(value, str):
+        return ""
+    line = ""
+    for part in value.splitlines():
+        part = " ".join(part.split()).strip()
+        if not part or part.startswith("```"):
+            continue
+        line = part
+        break
+    if not line or has_title_mark(line):
+        return ""
+    if len(line) <= limit:
+        return line
+    return line[: limit - 1] + "…"
+
+
+CLIENTS = ("Grok", "Claude", "Codex")
+
+
+def client_from_args(argv: list[str]) -> str:
+    for index, arg in enumerate(argv):
+        if arg != "--client":
+            continue
+        if index + 1 >= len(argv):
+            return ""
+        name = argv[index + 1]
+        if name in CLIENTS:
+            return name
+        return ""
+    return ""
+
+
+def client_from_path(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    norm = value.replace("\\", "/")
+    if "/.grok/sessions/" in norm:
+        return "Grok"
+    if "/.codex/" in norm:
+        return "Codex"
+    if "/.claude/" in norm:
+        return "Claude"
+    return ""
+
+
+def client_name(data: dict, argv: list[str]) -> str:
+    """谁触发的。路径优先，避免 Grok 执行 Claude 配置时被标成 Claude。"""
+    found = client_from_path(first(data, "transcriptPath", "transcript_path"))
+    if found:
+        return found
+    found = client_from_path(
+        first(data, "agent_transcript_path", "agentTranscriptPath")
+    )
+    if found:
+        return found
+    if session_dir(data):
+        return "Grok"
+    if os.environ.get("GROK_HOOK_EVENT") or os.environ.get("GROK_SESSION_ID"):
+        return "Grok"
+    found = client_from_args(argv)
+    if found:
+        return found
+    if os.environ.get("CLAUDE_PROJECT_DIR"):
+        return "Claude"
+    return ""
+
+
+def project_name(data: dict) -> str:
+    cwd = first(data, "cwd", "workspaceRoot", "workspace_root")
+    if not isinstance(cwd, str):
+        return ""
+    name = os.path.basename(cwd.rstrip("/"))
+    if not name or name == "/":
+        return ""
+    return name
+
+
+def tool_fields(data: dict) -> dict:
+    raw = first(data, "tool_input", "toolInput")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def assistant_line(data: dict) -> str:
+    return one_line(first(data, "last_assistant_message", "lastAssistantMessage"))
+
+
+def session_label(data: dict) -> str:
+    directory = session_dir(data)
+    if directory is None:
+        return ""
+    summary = read_json(os.path.join(directory, "summary.json"))
+    if summary is None:
+        return ""
+    for key in ("last_turn_summary", "generated_title", "session_summary"):
+        line = one_line(summary.get(key))
+        if line:
+            return line
+    return ""
+
+
+def permission_detail(data: dict) -> str:
+    tool = tool_leaf(str(first(data, "tool_name", "toolName") or ""))
+    incoming = tool_fields(data)
+    extra = ""
+    for key in ("command", "cmd", "file_path", "filePath", "url", "description"):
+        extra = one_line(incoming.get(key), 60)
+        if extra:
+            break
+    if not extra:
+        extra = one_line(first(data, "message"), 60)
+    if tool and extra:
+        return f"{tool}：{extra}"
+    return tool or extra
+
+
+def question_detail(data: dict) -> str:
+    incoming = tool_fields(data)
+    for key in ("question", "prompt", "message"):
+        line = one_line(incoming.get(key))
+        if line:
+            return line
+    questions = incoming.get("questions")
+    if isinstance(questions, list):
+        for item in questions:
+            if isinstance(item, str):
+                line = one_line(item)
+            elif isinstance(item, dict):
+                line = one_line(item.get("question") or item.get("prompt") or item.get("header"))
+            else:
+                line = ""
+            if line:
+                return line
+    return one_line(first(data, "message"))
+
+
+def url_detail(data: dict) -> str:
+    incoming = tool_fields(data)
+    for value in (first(data, "url"), incoming.get("url"), first(data, "message")):
+        line = one_line(value)
+        if line:
+            return line
+    return ""
+
+
+def shade_kind(reason: str) -> str:
+    leaf = tool_leaf(reason)
+    if reason == "stop" or leaf == "stop":
+        return "stop"
+    if reason == "sessionend" or leaf == "sessionend":
+        return "sessionend"
+    if reason in {"permissionrequest", "permission_prompt"} or leaf in {
+        "permissionrequest",
+        "permission_prompt",
+    }:
+        return "permission"
+    if reason == "elicitation_url_dialog" or leaf == "elicitation_url_dialog":
+        return "url"
+    if reason in ASK_TOOLS or leaf in ASK_TOOLS:
+        return "ask"
+    if reason in {"elicitation", "elicitation_dialog", "agent_needs_input"} or leaf in {
+        "elicitation",
+        "elicitation_dialog",
+        "agent_needs_input",
+    }:
+        return "answer"
+    return "plain"
+
+
+def with_context(data: dict, detail: str, client: str) -> str:
+    parts = []
+    if client:
+        parts.append(client)
+    project = project_name(data)
+    if project:
+        parts.append(project)
+    if detail:
+        parts.append(detail)
+    return " · ".join(parts)
+
+
+def shade_text(reason: str, data: dict | None = None, client: str = "") -> tuple[str, str]:
+    """下拉通知的标题和内容。同一条通知会被后一次调用盖掉。"""
+    payload = data or {}
+    kind = shade_kind(reason)
+    titles = {
+        "stop": "这一轮结束了",
+        "sessionend": "会话结束了",
+        "permission": "需要确认权限",
+        "url": "需要打开一个链接",
+        "ask": "有一个问题要回答",
+        "answer": "需要你的回答",
+    }
+    title = titles.get(kind, "手机工位")
+    if kind == "stop":
+        detail = assistant_line(payload)
+    elif kind == "sessionend":
+        detail = session_label(payload)
+    elif kind == "permission":
+        detail = permission_detail(payload)
+    elif kind == "url":
+        detail = url_detail(payload)
+    elif kind in {"ask", "answer"}:
+        detail = question_detail(payload)
+    else:
+        detail = ""
+    body = one_line(with_context(payload, detail, client)) or with_context(
+        payload, detail, client
+    )
+    if not body:
+        body = "有一条提醒" if title == "手机工位" else title
+    return title, body
+
+
 def spawn(argv: list[str], log_path: str, reason: str) -> None:
     pid = os.fork()
     if pid > 0:
@@ -282,12 +508,21 @@ def run(argv: list[str]) -> int:
     ok, reason = decide(data)
     if dry:
         print(("ring" if ok else "skip") + " " + reason)
+        if ok:
+            title, text = shade_text(reason, data, client_name(data, argv))
+            print(title)
+            print(text)
         return 0
     if not ok or not claim():
         return 0
     directory = state_dir()
     os.makedirs(directory, exist_ok=True)
-    spawn([notify_bin()], os.path.join(directory, "last.log"), reason)
+    title, text = shade_text(reason, data, client_name(data, argv))
+    spawn(
+        [notify_bin(), "--title", title, "--text", text],
+        os.path.join(directory, "last.log"),
+        reason,
+    )
     return 0
 
 

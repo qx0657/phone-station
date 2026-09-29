@@ -11,7 +11,7 @@
 通道：
 
 - 动手：MT 管理器 MCP。长说明在 `docs/mt-mcp.md`，步骤在 `.agents/skills/mt-mcp/SKILL.md`。入口是 `scripts/mt.sh`。
-- 信号：步骤在 `.agents/skills/phone-signal/SKILL.md`。只有用户或上游任务明确要求这一次提醒时才调用 `scripts/notify.sh` 或 `scripts/vibrate.sh`。一轮完成、权限确认和中途询问由已安装的全局 hook 负责，不要在每个任务末尾再跑一遍。安装和卸下用 `scripts/install-agent-notify.sh`，步骤在 `.agents/skills/agent-notify/SKILL.md`，事件在 `docs/notify.md`。
+- 信号：只有用户或上游任务明确要求这一次提醒时才调用 `scripts/notify.sh` 或 `scripts/vibrate.sh`，用法在 `README.md` 的「提醒」。一轮完成、权限确认和中途询问由已安装的全局 hook 负责，不要在每个任务末尾再跑一遍。安装和卸下用 `scripts/install-agent-notify.sh`，步骤在 `.agents/skills/agent-notify/SKILL.md`，事件在 `docs/notify.md`。
 - 看：`scripts/mirror.sh`、`scripts/record.sh`、`scripts/screenshot.sh` 给人看屏幕，依赖本机的 scrcpy。截取当前画面用 `screenshot.sh`。相册里已经存在的截图走图库这一条。
 - 图库截图：判断哪些可以删。标准在 `docs/screenshot-cleanup.md`，步骤在 `.agents/skills/screenshot-cleanup/SKILL.md`。
 
@@ -61,7 +61,7 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 ## 已验证设备上的命令差异
 
 - 震动服务是 `cmd vibrator_manager`，没有 `cmd vibrator`。间隔用 `waveform -a -r 0`，停顿那一步幅度为 0。
-- `cmd notification post` 弹出的通知是 `sound=null`，不能当提示音。`tinyplay` 打不开声卡，也不能播 ogg。
+- `cmd notification post` 的通知对象是 `sound=null`，不能当提示音。PGT-AN20 上它的 `shell_cmd` 通道仍挂着系统通知音。`notify.sh` 自己发一条无声的下拉通知，同一条原地更新；铃声仍走媒体音量。`tinyplay` 打不开声卡，也不能播 ogg。
 - 震动模式下通知音量流被静音。`notify.sh` 把铃声转成 PCM，用 `USAGE_MEDIA` 播放。改播放逻辑时编辑 `lib/notify-sound/` 里的源码，再跑 `lib/notify-sound/build.sh`。不要手改 `lib/notify-sound.dex`，也不要把 R8 的 jar 放进仓库。
 - 系统提示不允许截屏的界面，`screencap` 和 scrcpy 都是黑的。不要加绕过 `FLAG_SECURE` 的脚本，也不要改系统框架。
 - 闪光灯的灯节点 shell 写不了，`settings put secure flashlight_enabled` 也点不亮。`torch.sh` 用 `CameraManager`，调用进程退出后灯会灭，所以开着要留一个 `app_process`。档数读 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL`，这台后置是 4 档；`torch.sh` 不要把 4 写死成唯一合法范围。跟随声音时不要按拍 `setTorchMode(false)`：这会拆掉闪光灯会话，高通相机服务连续开关大约一分钟后会自己退出。短暂停顿保持上一档，安静大约 0.8 秒才关灯。`turnOnTorchWithStrengthLevel` 失败，或相机编号暂时失效时，不要退出监听进程，重新找闪光灯再试。见 `docs/torch.md`。

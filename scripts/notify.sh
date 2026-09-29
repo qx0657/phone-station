@@ -1,18 +1,79 @@
 #!/bin/zsh
 # 说明见仓库根目录 README.md，编译见 docs/notify.md
-# 播放手机当前的通知铃声。
-# 震动/静音模式下系统会把通知音量关掉，所以这里改走媒体音量，按脚本时听得到。
+# 播放手机当前的通知铃声，并在下拉栏里更新同一条通知。
+# 震动/静音模式下系统会把通知音量关掉，所以铃声改走媒体音量，按脚本时听得到。
+# 下拉栏里的那条不发声、不震动。连续调用改同一条的标题和内容，不另起一条。
+# --stack 每次另发一条，原来的留着，也不覆盖上面那一条。
 # 转好的 PCM 和播放程序留在手机上。铃声文件和 dex 都没变时直接播，不再 pull / 转码 / push。
-# 用法: notify.sh
-#       notify.sh /system/media/audio/notifications/Bell.ogg
+# 用法: notify.sh [--title 标题] [--text 内容] [--sound 音频文件] [--stack]
 set -euo pipefail
 DIR=${0:A:h}
 source "$DIR/../lib/common.sh"
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  print -r -- "用法: notify.sh [音频文件]"
-  print -r -- "不带参数时播放系统设置里的通知铃声。"
-  exit 0
+title="手机工位"
+text="有一条提醒"
+sound=""
+mode=replace
+while (( $# )); do
+  case $1 in
+    -h|--help)
+      print -r -- "用法: notify.sh [--title 标题] [--text 内容] [--sound 音频文件] [--stack]"
+      print -r -- "播放系统设置里的通知铃声，并在下拉栏里更新同一条通知。"
+      print -r -- "不写标题时是「手机工位」，不写内容时是「有一条提醒」。"
+      print -r -- "不写 --sound 时用系统设置里的通知铃声。"
+      print -r -- "连续调用会改这一条的文字，不会在下拉里叠成多条。"
+      print -r -- "--stack 每次另发一条，原来的留着，也不覆盖上面那一条。"
+      exit 0
+      ;;
+    --title)
+      shift
+      if (( $# == 0 )); then
+        print -u2 -- "缺少标题。"
+        exit 2
+      fi
+      title=$1
+      ;;
+    --text)
+      shift
+      if (( $# == 0 )); then
+        print -u2 -- "缺少内容。"
+        exit 2
+      fi
+      text=$1
+      ;;
+    --sound)
+      shift
+      if (( $# == 0 )) || [[ -z $1 ]]; then
+        print -u2 -- "缺少音频文件。"
+        exit 2
+      fi
+      if [[ -n $sound ]]; then
+        print -u2 -- "音频文件只能写一个。"
+        exit 2
+      fi
+      sound=$1
+      ;;
+    --stack)
+      mode=stack
+      ;;
+    --)
+      shift
+      if (( $# )); then
+        print -u2 -- "不认识的参数: $1"
+        exit 2
+      fi
+      break
+      ;;
+    *)
+      print -u2 -- "不认识的参数: $1"
+      exit 2
+      ;;
+  esac
+  shift
+done
+if [[ -z $title || -z $text ]]; then
+  print -u2 -- "标题和内容不能是空的。"
+  exit 2
 fi
 
 dex="$DIR/../lib/notify-sound.dex"
@@ -49,6 +110,9 @@ check_script=$(cat <<'EOF'
 set -eu
 expected_dex=$1
 sound_arg=${2-}
+title=$3
+text=$4
+mode=${5:-replace}
 dex=/data/local/tmp/notify-sound.dex
 pcm=/data/local/tmp/notify-sound.pcm
 stamp=/data/local/tmp/notify-sound.stamp
@@ -95,6 +159,9 @@ if [ -n "$skey" ] && [ "$skey" = "$key" ] && [ -n "$sfile" ] && [ -f "$sfile" ];
 fi
 
 if [ "$source_ok" = 1 ] && [ "$dex_ok" = 1 ]; then
+  if ! CLASSPATH=$dex app_process /data/local/tmp Notify "$title" "$text" "$mode"; then
+    echo "通知没有发出。" >&2
+  fi
   echo "播放通知音 $file" >&2
   CLASSPATH=$dex exec app_process /data/local/tmp PlayPcm $pcm 44100
 fi
@@ -133,7 +200,13 @@ EOF
 
 commit_script=$(cat <<'EOF'
 set -eu
+title=$5
+text=$6
+mode=${7:-replace}
 printf "%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$4" > /data/local/tmp/notify-sound.stamp
+if ! CLASSPATH=/data/local/tmp/notify-sound.dex app_process /data/local/tmp Notify "$title" "$text" "$mode"; then
+  echo "通知没有发出。" >&2
+fi
 echo "播放通知音 $2" >&2
 CLASSPATH=/data/local/tmp/notify-sound.dex exec app_process /data/local/tmp PlayPcm /data/local/tmp/notify-sound.pcm 44100
 EOF
@@ -146,9 +219,8 @@ else
   dex_sum=${dex_sum%% *}
 fi
 
-sound="${1:-}"
 set +e
-out=$(run_device "$check_script" "$dex_sum" "$sound")
+out=$(run_device "$check_script" "$dex_sum" "$sound" "$title" "$text" "$mode")
 rc=$?
 set -e
 if (( rc == 0 )); then
@@ -202,7 +274,7 @@ if [[ "$dex_ok" != 1 ]]; then
 fi
 
 set +e
-out=$(run_device "$commit_script" "$key" "$file" "$bytes" "$mtime")
+out=$(run_device "$commit_script" "$key" "$file" "$bytes" "$mtime" "$title" "$text" "$mode")
 rc=$?
 set -e
 [[ -n "$out" ]] && print -r -- "$out"

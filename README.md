@@ -44,7 +44,7 @@ cd phone-station
 | [`record.sh`](#录屏) | 投屏的同时录成视频 |
 | [`screenshot.sh`](#截取当前画面) | 截取当前画面，保存 PNG |
 | [`mt.sh`](#文件和-apk) | 打开手机上 MT 管理器的 MCP |
-| [`notify.sh`](#响一声) | 播放通知铃声 |
+| [`notify.sh`](#响一声) | 播放通知铃声，并更新下拉栏里的一条通知 |
 | [`install-agent-notify.sh`](#会话结束时自动响) | 把铃声接到 Codex、Claude、Grok 的全局 hook |
 | [`vibrate.sh`](#震一下) | 让手机震动 |
 | [`stay-awake.sh`](#保持亮屏) | 拉长息屏时间，充电时不熄屏 |
@@ -165,10 +165,12 @@ USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出�
 
 ```bash
 ./scripts/notify.sh
-./scripts/notify.sh /system/media/audio/notifications/Bell.ogg
+./scripts/notify.sh --title 标题 --text 内容
+./scripts/notify.sh --sound /system/media/audio/notifications/Bell.ogg
+./scripts/notify.sh --stack --title 标题 --text 内容
 ```
 
-不带参数时，播放系统设置里的通知铃声。手机在震动或静音时，系统会把通知音量关掉，所以脚本改走媒体音量，运行时听得到。真正弹出的通知仍按系统铃声模式。转好的音频和播放程序会留在手机上，铃声文件和播放程序没变就直接播。播放程序怎么来的见 [docs/notify.md](docs/notify.md)。
+不带参数时，播放系统设置里的通知铃声，并在下拉栏里更新同一条通知。不写标题时是「手机工位」，不写内容时是「有一条提醒」。`--sound` 改用手机上的另一个音频文件。再跑一次会改这条通知的文字，不会另起一条。`--stack` 每次另发一条，原来的留着，也不覆盖这条。手机在震动或静音时，系统会把通知音量关掉，所以铃声改走媒体音量，运行时听得到。下拉栏里的通知本身不响。转好的音频和播放程序会留在手机上，铃声文件和播放程序没变就直接播。做法见 [docs/notify.md](docs/notify.md)。
 
 ### 任务需要关注时自动响
 
@@ -176,7 +178,7 @@ USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出�
 ./scripts/install-agent-notify.sh
 ```
 
-装到本机的 Codex、Claude、Grok 用户配置。一轮完成、需要权限确认，或中途停下来询问时，会跑 `notify.sh`。Codex 不在会话空闲退出时再次响。已经打开的会话要重开一次。换一台电脑时，在这个仓库里再运行一次。各工具的事件差异、Codex 要信任的条目，见 [docs/notify.md](docs/notify.md)。
+装到本机的 Codex、Claude、Grok 用户配置。一轮完成、需要权限确认，或中途停下来询问时，会跑 `notify.sh`。下拉栏标题是这件事，内容以 Agent 名和目录名开头，例如 `Grok · phone · 这一轮的结果`。Codex 不在会话空闲退出时再次响。已经打开的会话要重开一次。换一台电脑时，在这个仓库里再运行一次。各工具的事件差异、Codex 要信任的条目，见 [docs/notify.md](docs/notify.md)。
 
 卸下：
 
@@ -254,5 +256,4 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 | 做什么 | 步骤 |
 | --- | --- |
 | 连 MT 的 MCP，读改文件或 APK | `.agents/skills/mt-mcp/SKILL.md` |
-| 做完时让手机响或震 | `.agents/skills/phone-signal/SKILL.md` |
 | 判断图库截图能不能删 | `.agents/skills/screenshot-cleanup/SKILL.md` |
