@@ -22,7 +22,9 @@ NOTIFY_MATCHER = (
     "elicitation_dialog|elicitation_url_dialog"
 )
 
-# Codex 0.153 的 hook 事件没有 Notification 和 Elicitation。
+# Codex 用 Stop 表示一轮完成。SessionEnd 还会在主会话空闲退出时触发，
+# 作为铃声提醒会和 Stop 重复，并且可能晚很久才响，所以 Codex 不安装它。
+# Codex 当前也没有 Notification 和 Elicitation hook。
 EVENTS = {
     "claude": [
         ("Stop", None),
@@ -34,7 +36,6 @@ EVENTS = {
     ],
     "codex": [
         ("Stop", None),
-        ("SessionEnd", None),
         ("PermissionRequest", None),
         ("PreToolUse", ASK_MATCHER),
     ],
@@ -137,6 +138,9 @@ def install_into(config: dict, tool: str, command: str) -> None:
     if not isinstance(hooks, dict):
         hooks = {}
         config["hooks"] = hooks
+    # 先清理旧版安装的条目，确保重装能删掉已经移出 EVENTS 的事件。
+    # strip 只识别本仓库的命令，不会动用户或其他插件的 hook。
+    strip(hooks)
     for event, matcher in EVENTS[tool]:
         upsert(hooks, event, matcher, command)
 

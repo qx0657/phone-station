@@ -72,17 +72,24 @@ Grok 默认还会读 Claude 的用户配置。同一时刻两边都触发时，8
 
 会响的时机：
 
-- 主会话这一轮结束（`Stop`），以及会话进程结束（`SessionEnd`）。子会话自己的这两项不响。
-- 中途停下来问人。工具名是 `AskUserQuestion`、`ask_user_question`、`request_user_input`。子会话里弹出的问题也会响。
-- 权限确认（`PermissionRequest`）。
-- 通知类型 `permission_prompt`、`agent_needs_input`、`elicitation_dialog`、`elicitation_url_dialog`。
-- Claude 的 `Elicitation`。
+| 时机 | Codex | Claude | Grok |
+| --- | --- | --- | --- |
+| 主会话一轮结束 `Stop` | 是 | 是 | 是 |
+| 会话进程结束 `SessionEnd` | 否 | 是 | 是 |
+| 权限确认 `PermissionRequest` | 是 | 是 | 否 |
+| 中途询问 `PreToolUse` | 是 | 是 | 是 |
+| 需要输入的 `Notification` | 否 | 是 | 是 |
+| `Elicitation` | 否 | 是 | 否 |
+
+中途询问匹配 `AskUserQuestion`、`ask_user_question`、`request_user_input`。`Notification` 只匹配 `permission_prompt`、`agent_needs_input`、`elicitation_dialog`、`elicitation_url_dialog`。子会话自己的结束不响，子会话中途弹出的问题会响。
+
+Codex 不安装 `SessionEnd`。Codex 的主会话在归档、删除、正常关闭，或没有客户端打开且空闲约 30 分钟后都可能发出 `SessionEnd`。回合完成时 `Stop` 已经提醒，再接 `SessionEnd` 会产生重复或延迟很久的铃声。
 
 Grok 给新会话起标题时会另开一个无头会话，工作目录是 `/`，几秒后自己结束。这个会话的 `Stop` 和 `SessionEnd` 不响，所以会话刚开始时不会跟着响一声。钩子用载荷里的 `sessionId` 和 `cwd` 读 `~/.grok/sessions` 下的 `summary.json`。`session_kind` 是 `headless` 且这条会话的 `cwd` 是 `/`，或者记录里是起标题的提示，就跳过。在项目目录里跑完的 `grok -p` 仍会响。`session_kind` 以 `subagent` 开头的也不响。
 
 `idle_prompt` 不接入。它在回合结束大约一分钟后才来，和 `Stop` 叠在一起。
 
-Codex 0.153 的 hook 事件是 `PreToolUse`、`PermissionRequest`、`Stop`、`SessionEnd` 这一组。安装脚本按这个范围写 `~/.codex/hooks.json`。`Notification` 和 `Elicitation` 写在 Claude 和 Grok 的配置里。
+Codex 的安装范围是 `PreToolUse`、`PermissionRequest`、`Stop`。`Notification` 和 `Elicitation` 只写入支持它们的 Claude 或 Grok 配置。重新运行安装脚本时，会先删除它以前安装的条目，再按当前事件表重建；其他 hook 不受影响。
 
 安装脚本不改 Codex `config.toml` 里的 `notify`。那边若已经有别的命令，回合结束时两份一起跑。
 

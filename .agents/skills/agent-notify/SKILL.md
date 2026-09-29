@@ -3,7 +3,7 @@ name: agent-notify
 description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或从这些配置里卸下。用户说安装会话提醒、卸下会话提醒、一键安装、换电脑也接上时使用。单次响一声、这一轮结束响一声，或只要震动，走 phone-signal。
 ---
 
-# 安装全局会话提醒
+# 安装全局任务提醒
 
 事件、各家配置写到哪、以及为什么铃声在脱离的进程里播，以 `docs/notify.md` 的「全局 hook」为准。
 
@@ -29,4 +29,4 @@ description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或�
 
 ## 和手动响一声分开
 
-会话结束和中途询问由这条全局 hook 播放。用户要现在就响，或只要震动，走 `phone-signal`。
+一轮完成、权限确认和中途询问由这条全局 hook 播放。Codex 的 `SessionEnd` 不接入，避免会话空闲退出时重复或延迟提醒。用户要现在就响，或只要震动，走 `phone-signal`。
