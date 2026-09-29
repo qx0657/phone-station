@@ -1,5 +1,7 @@
 # 图库截图
 
+日常用法见 [../README.md](../README.md) 的「图库里的截图」。
+
 手机相册里的截图在 `/storage/emulated/0/Pictures/Screenshots`。文件名是 `Screenshot_日期_时间_<界面>.jpg`，界面名用来分组，不能单独当删除依据。同目录的 mp4 是录屏，没点名就不放进截图的删除名单。
 
 判断哪张可以删，看以后还用不用得着图里的信息。完全相同的重复张是另一层，见文末。归类和去重由 `.agents/skills/screenshot-cleanup/scripts/cleanup.py` 做。删除不进回收站，用户点名类别或点名按名单删之前不删。点名之后怎么删，写在 `.agents/skills/screenshot-cleanup/SKILL.md`。

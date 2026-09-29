@@ -1,6 +1,6 @@
 # MT 管理器 MCP
 
-这是手机工位的动手通道。手机上的 MT 管理器开 MCP 之后，电脑上的 AI 可以分析、修改 APK，也能读、改、删手机上的文件。官方说明在 <https://mt.cc/guide/ai/mcp.html>。下面的地址、权限和工具表，是 2026-09-28 在这台 Mac 和荣耀 PGT-AN20 上连通过的结果，换机先核对。
+这是手机工位的动手通道。日常用法见 [../README.md](../README.md) 的「文件和 APK」。手机上的 MT 管理器开 MCP 之后，电脑上的 AI 可以分析、修改 APK，也能读、改、删手机上的文件。官方说明在 <https://mt.cc/guide/ai/mcp.html>。下面的地址、权限和工具表，是 2026-09-28 在这台 Mac 和荣耀 PGT-AN20 上连通过的结果，换机先核对。
 
 当时手机上的包是 `bin.mt.plus`，`versionName=2.26.9`，`versionCode=26091198`。服务自报 `MT MCP` `0.2.0`，协议 `2025-03-26`。只有 tools，没有 resources，也没有 prompts。
 

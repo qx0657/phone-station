@@ -11,7 +11,7 @@
 通道：
 
 - 动手：MT 管理器 MCP。长说明在 `docs/mt-mcp.md`，步骤在 `.agents/skills/mt-mcp/SKILL.md`。入口是 `scripts/mt.sh`。
-- 信号：只有用户或上游任务明确要求这一次提醒时才调用 `scripts/notify.sh` 或 `scripts/vibrate.sh`，用法在 `README.md` 的「提醒」。一轮完成、权限确认和中途询问由已安装的全局 hook 负责，不要在每个任务末尾再跑一遍。安装和卸下用 `scripts/install-agent-notify.sh`，步骤在 `.agents/skills/agent-notify/SKILL.md`，事件在 `docs/notify.md`。
+- 信号：只有用户或上游任务明确要求这一次提醒时才调用 `scripts/notify.sh` 或 `scripts/vibrate.sh`，用法在 `README.md` 的「会话提醒」。一轮完成、权限确认和中途询问由已安装的全局 hook 负责，不要在每个任务末尾再跑一遍。安装和卸下用 `scripts/install-agent-notify.sh`，步骤在 `.agents/skills/agent-notify/SKILL.md`，事件在 `docs/notify.md`。
 - 看：`scripts/mirror.sh`、`scripts/record.sh`、`scripts/screenshot.sh` 给人看屏幕，依赖本机的 scrcpy。截取当前画面用 `screenshot.sh`。相册里已经存在的截图走图库这一条。
 - 图库截图：判断哪些可以删。标准在 `docs/screenshot-cleanup.md`，步骤在 `.agents/skills/screenshot-cleanup/SKILL.md`。
 
