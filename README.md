@@ -6,6 +6,7 @@
 
 | 事 | 入口 |
 | --- | --- |
+| 从 Mac 菜单栏连接、投屏、截屏和录屏 | [手机工位 App](#mac-菜单栏-app) |
 | 一轮做完、要确认权限或停下来问时，手机响一声 | [`install-agent-notify.sh`](#会话提醒)。装一次，这台电脑上各个项目的 Codex、Claude、Grok 都走它 |
 | 闪光灯跟着电脑正在播放的声音 | [`torch.sh beat`](#闪光灯) |
 | 读改手机文件，分析或修改 APK | [`mt.sh`](#文件和-apk) |
@@ -20,6 +21,20 @@
 git clone https://github.com/qx0657/phone-station.git
 cd phone-station
 ```
+
+## Mac 菜单栏 App
+
+在 Mac 上构建一个常驻菜单栏的「手机工位.app」。点击手机图标，可以投屏、截取画面、录屏，保持亮屏，开关闪光灯，或让灯跟随这台 Mac 正在播放的声音。连接和断开无线在「连接与配对」。最近的截图与录屏在「更多工具与设置」。同一页可以打开开机自启；把 App 放进「应用程序」后，这项才会被系统记住。版本号在「关于」。录屏或灯光跟随声音时，收起面板不会结束任务。
+
+```bash
+./scripts/build-mac-app.sh
+ditto "build/.phone-station/手机工位.app" "/Applications/手机工位.app"
+open "/Applications/手机工位.app"
+```
+
+构建副本放在 `build/` 下的隐藏目录，避免被系统搜索当成第二个已安装 App。安装版自带这些操作需要的脚本，不依赖仓库检出路径；电脑仍需有 `adb`、`scrcpy` 和 `python3`。依赖状态在「更多工具与设置」。第一次无线配对仍按下文 [连接](#连接) 的步骤操作；App 目前只对已验证的 PGT-AN20 开放设备操作。构建、打包和任务结束的做法见 [docs/mac-app.md](docs/mac-app.md)。
+
+重新构建后，退出已经运行的旧版 App，再打开新生成的 App。
 
 ## 会话提醒
 
@@ -94,7 +109,7 @@ cd phone-station
 ./scripts/torch.sh beat 1.5
 ```
 
-第一次如果系统问权限，允许「屏幕与系统音频录制」或「系统音频录制」。它只拿音量，不录屏幕。灯为什么不能用系统设置项点亮，见 [docs/torch.md](docs/torch.md)。
+第一次如果系统问权限，到「系统设置 → 隐私与安全性 → 系统录音」允许。菜单栏里这次要允许的是「手机工位」。它只拿音量，不录屏幕。允许之后如果灯还是不跟，关掉再打开一次。灯为什么不能用系统设置项点亮，见 [docs/torch.md](docs/torch.md)。
 
 ## 文件和 APK
 
@@ -216,6 +231,8 @@ USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出�
 ```
 
 不带参数时：已经有在线设备（USB 或无线），就只去掉重复连接；一台都没有，就用 mDNS 找局域网地址。第二行是自己指定地址，`192.168.0.103:37135` 只是示例。
+
+PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，仍能通过 mDNS 找到真实 Wi-Fi 地址并连接。如果 `status.sh` 能发现局域网地址、`route -n get <IP>` 显示走 Wi-Fi 接口、`nc -vz -G 3 <IP> <端口>` 成功，但 adb 报 `No route to host`，先运行 `adb kill-server`、`adb start-server`，再运行 `./scripts/connect.sh`。本次这种情况重启电脑上的 adb 后恢复，无需重新配对；重启会中断这台电脑的其他 adb 会话。
 
 已经有一台在线设备时，再手动 `adb connect` 一次，列表里会变成两台，后面的脚本会拒绝继续。
 

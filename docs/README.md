@@ -4,6 +4,7 @@
 
 | 文档 | 对应 | 这篇里有什么 |
 | --- | --- | --- |
+| [mac-app.md](mac-app.md) | `scripts/build-mac-app.sh` | 菜单栏 App 的构建、脚本打包、面板上的亮屏和闪光灯，以及录屏、跟随声音的结束方式。图标不在菜单栏上时，看 Hidden Bar 记下的位置，以及控制中心是否把它算进已禁用的 App |
 | [mt-mcp.md](mt-mcp.md) | `scripts/mt.sh` | MCP 没有 exported。脚本如何打开侧栏并转发端口。工具表，以及当时的文件权限 |
 | [apk-edit.md](apk-edit.md) | 改 APK | MT 覆盖不到的阅读和重打包，以及这台 Mac 上缺哪些命令。分工以这篇为准 |
 | [notify.md](notify.md) | `scripts/notify.sh` | 为什么不走通知音量。下拉通知默认只更新一条，不发声；`--stack` 另发一条。播放程序的源码在 `lib/notify-sound/`，用 `build.sh` 编成 dex。全局 hook 的事件和安装位置 |

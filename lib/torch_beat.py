@@ -215,7 +215,7 @@ def main():
             if not warned and now - started > 3 and mapper.peak <= ABS_GATE * 2:
                 warned = True
                 print(
-                    "还没有收到系统声音。如果弹出了权限窗口，请允许「屏幕与系统音频录制」或「系统音频录制」，并确认电脑正在出声。",
+                    "还没有收到系统声音。若弹出权限窗口，请允许。也可以到「系统设置 → 隐私与安全性 → 系统录音」打开当前应用，允许后重新打开，并确认电脑正在出声。",
                     file=sys.stderr,
                 )
     finally:

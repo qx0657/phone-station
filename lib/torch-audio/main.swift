@@ -84,7 +84,7 @@ private func cleanup() {
 
 private func fail(_ status: OSStatus, _ what: String) -> Never {
     fputs("\(what)失败：\(status)\(fourcc(status))\n", stderr)
-    fputs("到系统设置 → 隐私与安全性，允许「屏幕与系统音频录制」或「系统音频录制」。允许之后重新运行。\n", stderr)
+    fputs("到系统设置 → 隐私与安全性 → 系统录音，允许当前应用。允许之后重新运行。\n", stderr)
     fputs("这里只读取正在播放的音量，不录屏幕，也不改输出设备。\n", stderr)
     fflush(stderr)
     cleanup()
