@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 和菜单栏 App 浅色里的已连接、等待是同一对。 -->
+    <color name="held">#FF2E8552</color>
+    <color name="waiting">#FFB36B1F</color>
+    <color name="note_text">#FF1C1C1E</color>
+    <color name="note_muted">#FF8E8E93</color>
+    <!-- 和 Mac 图标的底是同一块蓝。 -->
+    <color name="icon_background">#FF1F5EC9</color>
+    <color name="page">#FFF2F3F5</color>
+    <color name="card">#FFFFFFFF</color>
+    <color name="hairline">#1F1C1C1E</color>
+    <color name="well">#FFEEEFF3</color>
+    <color name="muted">#FF5E6370</color>
+</resources>

@@ -14,7 +14,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private static let preferredPositionKey = "NSStatusItem Preferred Position Item-0"
     private static let visiblePreferredPosition = 400.0
     private let logger = Logger(subsystem: "com.qx0657.phonestation", category: "lifecycle")
-    private let station = StationModel()
+    private let station = Station()
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var menuBarShowsConnected: Bool?
@@ -46,7 +46,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         button.target = self
         button.action = #selector(togglePopover)
         statusItem = item
-        station.onLinkChange = { [weak self] connected in
+        station.link.onMenuIcon = { [weak self] connected in
             self?.applyMenuBar(connected: connected)
         }
         applyMenuBar(connected: false)
@@ -55,13 +55,13 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         panel.behavior = .transient
         panel.animates = false
         panel.delegate = self
-        let host = NSHostingController(rootView: StationView(model: station))
+        let host = NSHostingController(rootView: StationView(station: station))
         // Hug whichever page is showing. A fixed height leaves a gap under the shorter ones.
         host.sizingOptions = .preferredContentSize
         panel.contentSize = NSSize(width: 360, height: 420)
         panel.contentViewController = host
         popover = panel
-        station.startLinkWatch()
+        station.link.startWatch()
     }
 
     private func applyMenuBar(connected: Bool) {
@@ -69,9 +69,9 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         if menuBarShowsConnected != connected {
             menuBarShowsConnected = connected
             button.image = menuBarImage(connected: connected)
-            logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.statusLabel, privacy: .public)")
+            logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.link.statusLabel, privacy: .public)")
         }
-        let tip = "手机工位：\(station.statusLabel)"
+        let tip = "手机工位：\(station.link.statusLabel)"
         if button.toolTip != tip {
             button.toolTip = tip
         }
@@ -216,7 +216,7 @@ extension PhoneStationApp: NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         removeDismissMonitors()
-        station.dismissRecentPreview()
+        station.files.dismissPreview()
         station.page = .main
     }
 }

@@ -17,14 +17,23 @@ fi
 
 SWIFTC=$(xcrun --find swiftc)
 SDK=$(xcrun --show-sdk-path)
+TARGET="$(uname -m)-apple-macosx13.0"
 mkdir -p "$ROOT/build/.phone-station"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 \
-  -target "$(uname -m)-apple-macosx13.0" -sdk "$SDK" \
+  -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/Reconnect.swift" \
   "$ROOT/app/mac/ReconnectPolicyTest.swift" \
   -o "$POLICY_TEST"
 "$POLICY_TEST"
+ADB_TEST="$ROOT/build/.phone-station/adb-command-line-test"
+"$SWIFTC" -parse-as-library -swift-version 5 \
+  -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/AdbCommandLine.swift" \
+  "$ROOT/app/mac/AdbCommandLineTest.swift" \
+  -o "$ADB_TEST"
+"$ADB_TEST"
+"$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"
 CONTENTS="$STAGING/Contents"
@@ -34,9 +43,10 @@ trap 'rm -rf "$STAGING"' EXIT INT TERM
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES/scripts" "$RESOURCES/lib"
 cp "$ROOT/app/mac/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/README.md" "$RESOURCES/README.md"
-for name in connect.sh disconnect.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh; do
+for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh adb-keep.sh; do
   cp "$ROOT/scripts/$name" "$RESOURCES/scripts/$name"
 done
+cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"
 cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/lib/torch_beat.py" "$RESOURCES/lib/"
 mkdir -p "$RESOURCES/lib/torch-audio"
 cp "$ROOT/lib/torch-audio/main.swift" "$RESOURCES/lib/torch-audio/"
@@ -52,16 +62,19 @@ else
 fi
 chmod +x "$RESOURCES/lib/torch-audio/torch-audio"
 
+sources=()
+for file in "$ROOT"/app/mac/*.swift; do
+  name=${file:t}
+  if [[ $name == *Test.swift || $name == MakeIcon.swift ]]; then
+    continue
+  fi
+  sources+=("$file")
+done
 "$SWIFTC" -parse-as-library -swift-version 5 -O \
-  -target "$(uname -m)-apple-macosx13.0" -sdk "$SDK" \
+  -target "$TARGET" -sdk "$SDK" \
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
   -framework AVFoundation -framework ImageIO \
-  "$ROOT/app/mac/AdbCommandLine.swift" \
-  "$ROOT/app/mac/Reconnect.swift" \
-  "$ROOT/app/mac/PhoneStationApp.swift" \
-  "$ROOT/app/mac/RecentFiles.swift" \
-  "$ROOT/app/mac/StationModel.swift" \
-  "$ROOT/app/mac/StationView.swift" \
+  "${sources[@]}" \
   -o "$CONTENTS/MacOS/PhoneStation"
 
 ICON_WORK="$ROOT/build/.phone-station/icon-work"

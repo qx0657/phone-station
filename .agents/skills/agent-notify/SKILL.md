@@ -5,7 +5,7 @@ description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或�
 
 # 安装全局任务提醒
 
-事件表、下拉通知的标题和内容、Agent 名怎么判断，以及铃声为什么在脱离的进程里播，以 `docs/notify.md` 的「全局 hook」为准。
+事件表、下拉通知的标题和内容、右侧按 Agent 放的图标、Agent 名怎么判断，以及铃声为什么在脱离的进程里播，以 `docs/notify.md` 的「全局 hook」为准。
 
 只有用户要求安装或换电脑接上时才运行安装脚本。只有用户要求卸下时才运行 `--remove`。单次响一声、这一轮结束响一声，或只要震动，用 README「会话提醒」里的命令。
 
@@ -31,4 +31,4 @@ description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或�
 
 ## 和手动响一声分开
 
-一轮完成、权限确认和中途询问由这条全局 hook 播放，并在下拉栏里更新同一条通知。标题是这件事，内容以 Agent 名和目录名开头。各事件的文字在 `docs/notify.md`。Codex 的 `SessionEnd` 不接入，避免会话空闲退出时重复或延迟提醒。用户要现在就响，或只要震动，用 README「会话提醒」里的 `notify.sh` 或 `vibrate.sh`。
+一轮完成、权限确认和中途询问由这条全局 hook 播放，并在下拉栏里更新同一条通知。标题是这件事，内容是目录名加这件事。各事件的文字在 `docs/notify.md`。Codex 的 `SessionEnd` 不接入，避免会话空闲退出时重复或延迟提醒。用户要现在就响，或只要震动，用 README「会话提醒」里的 `notify.sh` 或 `vibrate.sh`。

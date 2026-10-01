@@ -13,10 +13,17 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   print -r -- "用法: connect.sh [IP:端口]"
   print -r -- "不带参数时，已有在线设备（USB 或无线）就只整理重复连接；否则用 mDNS 找局域网地址。"
   print -r -- "不要填手机页面上的 172.19.0.1。"
+  print -r -- "连上之后会在后台运行 host-state.sh watch，让手机把这次连接显示成已连接。"
   exit 0
 fi
 
+ensure_host_state() {
+  nohup "$DIR/host-state.sh" watch >>/tmp/phonestation-host-state.log 2>&1 &
+  disown 2>/dev/null || true
+}
+
 if [[ -z "${1:-}" ]] && python3 "$PY" --adb "$ADB" has-device; then
+  ensure_host_state
   exec python3 "$PY" --adb "$ADB" collapse
 fi
 
@@ -69,6 +76,7 @@ if python3 "$PY" --adb "$ADB" collapse; then
   if [[ -n "${1:-}" && "$connected" == "0" ]]; then
     exit 1
   fi
+  ensure_host_state
   exit 0
 fi
 if [[ "$connected" == "0" ]]; then

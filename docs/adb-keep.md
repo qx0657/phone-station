@@ -1,8 +1,8 @@
 # adb-keep.sh
 
-在手机上安装「无线调试保持」。Wi-Fi 连着、USB 调试还开着时，它把被系统关掉的无线调试重新打开。日常用法见 [../README.md](../README.md) 的「无线调试保持」。
+无线调试保持是手机上「手机工位」里的一项功能。Wi-Fi 连着、USB 调试还开着时，它把被系统关掉的无线调试重新打开。桌面和通知上的名字是「手机工位」。`adb-keep.sh` 安装这个应用，并授好这项功能要的写入权限。会话提醒的下拉通知也由这个应用发出，见 [notify.md](notify.md)。安装入口还放在这个脚本上。以后手机上要在 adb 断开之后还做的事，也放进同一个应用。日常用法见 [../README.md](../README.md) 的「无线调试保持」。
 
-包名是 `dev.phonestation.adbkeep`。源码在 `lib/adb-keep/`，没有 Gradle，也没有 AndroidX。
+包名是 `dev.phonestation.adbkeep`，是这项功能先单独做出来时留下的。换包名会卸掉重装，写入权限和荣耀的启动管理都要再来一次，所以先留着。源码在 `lib/android/`，没有 Gradle，也没有 AndroidX。
 
 ## 开关为什么会自己关
 
@@ -25,19 +25,67 @@ USB 调试还开着时，`adbd` 不会停，但这条 TLS 会话已经断了。�
 
 电脑上的进程只有在 adb 还在线时才能写设置。开关已经关掉、又没有 USB 时，它无事可做。
 
-手机上的 Shizuku（`moe.shizuku.privileged.api`）和 Brevent（`me.piebridge.brevent`）装过。它们的特权进程是 adb shell 拉起来的子进程，无线会话一断就退出，不能再把开关打开。这台手机没有 root（`ro.boot.flash.locked=1`，`ro.build.tags=release-keys`）。
+手机上的 Shizuku（`moe.shizuku.privileged.api`）和 Brevent（`me.piebridge.brevent`）装过。Shizuku 的启动器 fork 之后 `setsid`，服务进程脱离拉起它的那条 shell。设计上一直运行到重启，启动之后可以关掉无线调试。这台手机没有 root（`ro.boot.flash.locked=1`，`ro.build.tags=release-keys`）。2026-10-01 看进程时没有 `shizuku_server`，只有普通应用进程。没有把无线调试关掉再看它还在不在。重启之后它自己起不来，要无线调试已经开着才能再启动。
 
-所以盯开关的是一个普通应用：进程不挂在 adb 会话上，`WRITE_SECURE_SETTINGS` 由 adb 授一次，之后自己写 `adb_wifi_enabled`。
+所以盯开关的是手机上的「手机工位」，无线调试保持是它里面的一项。进程不挂在 adb 会话上，`WRITE_SECURE_SETTINGS` 由 adb 授一次，之后自己写 `adb_wifi_enabled`。
+
+手机工位另外也是 Shizuku 的客户端。清单里有 `moe.shizuku.manager.permission.API_V23`，provider 是 `rikka.shizuku.ShizukuProvider`，authority 是 `dev.phonestation.adbkeep.shizuku`。服务在跑时，权限页可以向它申请授权。授权留在 Shizuku 里。构建从 Maven 取 API 13.1.5，放到 `build/third_party/shizuku/`，不入库。这是远程连接之前的准备。文件、亮屏和通知仍走应用自己的权限，不经过 Shizuku。远程通道还没做。
 
 ## 它什么时候写
 
-三个条件同时成立才写 1：应用里的「自动打开」开着（默认开）、`adb_enabled` 是 1、当前有 Wi-Fi 网络。USB 调试被关掉时不写，避免把用户关掉的调试重新打开。
+三个条件同时成立才写 1：应用里的「保持无线调试」开着（默认开）、`adb_enabled` 是 1、当前有 Wi-Fi 网络。USB 调试被关掉时不写，避免把用户关掉的调试重新打开。
 
 Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要求它是默认网络，也不要求 `NET_CAPABILITY_INTERNET`。这台手机开着 Clash 时，默认网络是 VPN；按默认网络判断会以为没连 Wi-Fi。`getAllNetworks()` 已过时，这里仍用它，就是为了在 VPN 下面看见 Wi-Fi。
 
 系统若觉得当前网络不可信，会把刚写上的 1 立刻拨回 0，并弹出允许对话框。写入之前先把失败次数加一，所以观察者被这次拨回唤醒时，不会马上再写。等待依次是 0、3 秒、15 秒、1 分钟、5 分钟。开关保持为开超过 1.5 秒，或 Wi-Fi 网络的 handle 变了，失败次数清零。平时每 15 分钟再看一次。这段判断在 `KeeperPolicy`，构建时在电脑上跑。
 
 前台服务类型是 `specialUse`。精确闹钟作兜底；`setExactAndAllowWhileIdle` 被拒绝时退到 `setAndAllowWhileIdle`。开机广播和「自己被更新」广播也会拉一次。服务没有 exported：这台 Android 15 上，shell 执行 `am start-foreground-service` 会报 `Requires permission not exported`。安装脚本只启动界面，由应用自己的进程拉起服务。
+
+## 界面
+
+首页是三张卡片，没有应用名大标题。页面底色跟着系统的深色和浅色，卡片比底色抬起一层。开着、已连接用绿，正在退避用琥珀，这两个颜色和菜单栏 App 的已连接、等待是同一对。开关开着时，滑块也是这块绿。
+
+第一张是连接。左边一枚圆底电脑图标，旁边是「已连接」或「未连接」。连着时圆底和字是绿的。下面三行是无线调试、USB 调试、Wi-Fi，每行一枚图标。开着或已连接用绿，关着或未连接是次要色。正要处理的那一行改用和那句相同的颜色：保持住是绿，正在退避是琥珀，其余是正文色。只有这三行说不清的时候，卡片底下才多一句：还不能写这个开关、先等一会儿、正在打开。退避那句下面写还要等多久。句子在 `KeeperCopy`，不依赖 Android，和打开时机一起在电脑上跑。优先级是：没有写入权限，保持关着，无线调试正开着，USB 调试关着，没有 Wi-Fi，正在退避，马上写。
+
+第二张标题是「服务」，两个开关：「保持无线调试」「MCP服务」。平时不另写说明。点这一行和拨开关是一回事。
+
+第三张标题是「设置」。「通知」右边写「弹出」或「不弹出」，「权限」右边读得到的项都开着时写「已允许」，缺了写「还有 N 项」。「MCP说明」右边没有状态。「关于」右边是版本号，读安装包的 `versionName`，读不到写「未知」。行末有进入下一页的标记。说明页标题是「MCP服务」，四段字在 `McpHelp`：怎么连上、能做的、做不到的、交接。不写工具名、地址数字和令牌。长说明仍在 [mcp.md](mcp.md)。关于页标题是「关于」，一张卡片两行：版本，作者。作者是 Glow，字在 `AboutCopy`。
+
+通知页、权限页、铃声页、MCP说明和关于用同一套返回和卡片。通知页改两样：提醒是否弹出，以及铃声。铃声默认「跟随系统」，用的是系统通知铃声。点「铃声」打开本应用的列表：第一项跟随系统，第二项静音，后面是系统通知铃声。当前选中的那一项是绿的，右边有一枚勾。点一项就选定，并试听；静音不播。静音仍发通知。这台 PGT-AN20 的系统铃声页里没有跟随系统和静音，所以这两项放在应用自己的列表里。电脑上 `notify.sh --sound` 指定的那一次仍用指定文件，不看这里。
+
+「提醒弹出」默认开。开着时，会话提醒在屏幕上弹出；关掉就只进下拉栏。常驻的「手机工位」那条不走这个开关，仍是低重要程度。系统建好通知通道后不允许应用再改重要程度，所以弹出和不弹出是两条通道，见 [notify.md](notify.md)。
+
+权限页是一览：写入系统设置、通知、所有文件访问、电池优化、精确闹钟、Shizuku，加上自启动。没开的那一行写怎么去开，点一下打开对应的系统页面。写入系统设置只能在电脑上再运行一次安装，点不了。Shizuku 没安装写「未安装」；服务没在跑写「没在跑」，点一下打开 Shizuku；服务在跑但还没允许写「未授权」，点一下弹出 Shizuku 的允许。这三项还留在这一页，但远程通道还没做，所以不计入「还有 N 项」。已授权仍写「已授权」。重启后服务要在 Shizuku 里再启动，授权还在。自启动读不到，固定写「去设置」，也不计入「还有 N 项」。文案在 `PermissionCopy`，和打开时机一起在电脑上跑。
+
+下拉栏一条常驻通知，渠道 id 是 `keep`，显示名是「手机工位」。重要性低，无声，无角标，不显示时间。点通知打开应用。点「清除」清不掉。
+
+下拉栏只说现在能不能用，不用图标。收起是一行：标题在左，有补充才写在右边。展开后标题跟旁边的通知一样大，不再单独放大。标题下面一行，左边是「无线调试」，右边是「MCP」。开着是绿的，关着是次要色。名称是正文色。右边那一组靠左边的布局占满余下宽度顶过去。不要在这条布局里放普通的 `View` 当间隔：这台 Android 15 的通知胀不开 `android.view.View`，前台服务会被系统杀掉，打开应用就闪退。
+
+电脑连着，标题是「已连接」，绿色。收起时，无线调试和 MCP 都开着就没有右边那句。少开一项才补在右边，例如「MCP 关着」「无线调试关着」，次要色。展开后这两项都在下面那一行，不再把「MCP 关着」重复一遍。没连上、无线调试开着，标题是「等电脑」。只有 MCP 开着，标题是「MCP 开着」，收起时右边是「电脑还没连」，展开时这句留在标题和状态行之间。都没有时是「未连接」。
+
+要处理时标题换成那一句：「等 Wi-Fi」「USB 调试关着」「正在打开」「先等一会儿」「还不能写这个开关」。先等一会儿是琥珀，其余是正文色。电脑还连着时，收起的右边和展开的中间一行都写「电脑还连着」；写不了开关时写「在电脑上运行一次安装」；没连上但 MCP 开着时，收起的右边写「MCP 开着」，展开后状态行已经写出开着，这句不再重复。不写退避还要等多久，也不写关掉之后会再打开。无线调试正开着，或保持已停下，不算要处理。文案在 `StationNote`，和 `KeeperCopy` 一起在电脑上跑。这项不换 id。
+
+「保持无线调试」关着、MCP服务也关着时，没有这条通知。只开着其中一项时通知还在，关着的那项写成关着。两项共用这一条，不再为 MCP 另起一条。
+
+划掉之后服务还在。这台上往旁边划会先露出「删除」，点掉之后它才从下拉栏消失，大约半秒后换一个 id 自己再出现，不响。划掉之后同一个 id 再交给前台服务，不会回到下拉栏，所以每次再出现都换 id。id 从 1 起，避开会话提醒的 2 和 3，也不再用合并前 MCP 那条的 4，到 500 再从 1 绕回去。十五秒里连续划掉超过八次，就先停住，不再自动回来；打开「手机工位」，或无线调试、MCP、连接这三项里有一项变了，会再发出来。
+
+「MCP服务」是开关，不是只读状态，并且和菜单栏是同一项。打开就在手机上把服务拉起来，关掉就停掉，手机会记住。开着时下面一行是手机本机地址，关着时不写地址。地址和通知的说法见 [mcp.md](mcp.md)。
+
+连接状态换句时，第一张卡片顶部那一块交叉淡出，大约四分之一秒。
+
+打开应用时，若「保持无线调试」还开着，界面会让保持服务再看一眼。通知还在下拉栏里就不动。已经划掉、又还没自己回来时，这一眼会把它再发出来。
+
+横向一行里，右侧的开关和状态值必须是自身宽度。写成占满父级宽度时，左侧名称宽度变成 0，屏幕上只剩右边的开关和状态。
+
+## 和电脑的连接
+
+顶部只看一项配置：`settings global phonestation_host_ms`。值是手机本地时间的毫秒。电脑连着时大约每 5 秒写一次。手机读到这个时间距现在不超过 15 秒，就显示已连接；否则显示未连接。0 或空也是未连接。时间用手机上的 `date`，不用电脑的时钟。
+
+写入由 `scripts/host-state.sh` 做。`connect.sh` 连上之后在后台跑 `host-state.sh watch`，直到没有在线设备。已经有一个在写就不会再开一个。菜单栏 App 下次构建之后，设备检查看到在线设备时也会跑一次 `host-state.sh mark`。`disconnect.sh` 在这次断开之后不会再留下设备时，先停掉写入，再把这个值写成 0。还留着 USB 时不写 0，写入继续。
+
+断开之后电脑进不去手机，所以不能靠断线之后再写一次来复位。复位有两条：主动断开时，断开前还能写的那一下写成 0，界面马上变成未连接。会话自己断掉、来不及写 0 时，旧时间过了 15 秒，界面自己变成未连接。配置里可以留着那个旧数字，手机不再把它当成已连接。
+
+不看系统那条「已连接到无线调试」。2026-10-01 这台上，无线会话还在时，用户把这条通知划掉了，活动通知里就没有包名 `android`、id 62。通知没了，不代表电脑没连着。全部清除也会把它清掉。开关 `adb_wifi_enabled` 只说明在听。`dumpsys adb` 里的 `connected_to_adb` 只表示调试线程在跑。`service.adb.tls.port` 在这台上无线调试开着时仍是空的。应用也读不了 `/proc/net/tcp` 和 `/proc/net/tcp6`。不要用这些判断顶部的连接状态。
 
 ## 权限和启动管理
 
@@ -46,19 +94,25 @@ Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要
 - `WRITE_SECURE_SETTINGS`：写 `adb_wifi_enabled`。普通应用不能在界面里申请，只能由 adb 授。
 - `POST_NOTIFICATIONS`：常驻通知。渠道 `keep`，重要性低，无声，同一条不重复响。
 
-同时把包名放进 `deviceidle` 白名单。
+同时用 `appops set --uid` 授 `MANAGE_EXTERNAL_STORAGE`（所有文件访问）。`pm grant` 授不上这项。MCP服务怎么开、能碰到哪些路径，见 [mcp.md](mcp.md)。
 
-荣耀的应用启动管理拦自启动。shell 里没能替用户打开这项。重启后要自己起来，需要在应用启动管理里允许自启动和后台活动。在系统里强行停止之后，进程不会自己回来，需要再打开一次应用。开机这条路径没有在这台上重启验证过。
+同时把包名放进 `deviceidle` 白名单。这就是忽略电池优化。权限页上「电池优化」读 `PowerManager.isIgnoringBatteryOptimizations`。没放开时，点那一行会问要不要设为不受限制。清单里的 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 只为了能打开这个询问。
+
+精确闹钟用清单里的 `USE_EXACT_ALARM`。权限页读 `canScheduleExactAlarms`。没允许时，点那一行打开「闹钟和提醒」。
+
+通知权限安装时已经 `pm grant`。这还不够让会话提醒在屏幕上弹出。这台 MagicOS 会把新建的「提醒」通道从高降到默认，要在该通道里勾上「横幅通知」才锁回去。通道没有声音时，勾选也不会抬上去。`adb-keep.sh` 会在重启应用后去勾；已经是高就不点。屏幕锁着或这一页没打开时，脚本说明要到权限页点「通知」再勾。权限页同时看通知权限和这条通道是不是还能弹出。应用里把「提醒弹出」关掉时，不把「不弹出」算成缺权限。细节在 [notify.md](notify.md)。
+
+荣耀的应用启动管理拦自启动。shell 里没能替用户打开这项，应用也读不到开没开。重启后要自己起来，需要在应用启动管理里允许自启动和后台活动。权限页点「自启动」会打开 `com.hihonor.systemmanager` 的 `StartupAppControlActivity`；打不开再试 `StartupNormalAppListActivity`。在系统里强行停止之后，进程不会自己回来，需要再打开一次应用。开机这条路径没有在这台上重启验证过。
 
 ## 构建
 
-`lib/adb-keep/build.sh` 用本机的 OpenJDK、`platforms/android-35` 和 build-tools 打包。没有这些时，先按 [android-cli.md](android-cli.md) 安装 SDK，再执行 `android sdk install platforms/android-35 build-tools/35.0.0`。
+`lib/android/build.sh` 用本机的 OpenJDK、`platforms/android-35` 和 build-tools 打包。没有这些时，先按 [android-cli.md](android-cli.md) 安装 SDK，再执行 `android sdk install platforms/android-35 build-tools/35.0.0`。
 
-签名存在 `build/adb-keep.keystore`，这个目录不入库。换电脑或删掉 `build/` 之后签名会变。安装脚本遇到 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 会卸掉再装，应用里的开关状态回到默认开，权限会重新授。
+签名存在 `~/.phonestation/adb-keep.keystore`。要换目录就设 `PHONE_STATION_KEY_DIR`，文件名仍是 `adb-keep.keystore`。这份不入库。原来的 `build/adb-keep.keystore` 若还在、而新位置没有，构建会把它拷过去，不删旧文件。删掉 `build/` 不会换签名。换一台电脑时把这一份拷到同一路径再编，才不用卸掉重装。安装脚本遇到 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 会卸掉再装，应用里的开关状态回到默认开，权限会重新授。
 
-公开的 `android.jar` 里没有 `Theme.DeviceDefault.DayNight.NoActionBar`。界面用 `Theme.DeviceDefault.Light.NoActionBar`。图标用的是系统 drawable，包里几乎没有自己的资源。logcat 里可能出现 `No package ID 7f found for resource ID 0x7f080592`，界面和通知仍在。
+公开的 `android.jar` 里没有 `Theme.DeviceDefault.DayNight.NoActionBar`。主题父级用 `Theme.DeviceDefault.DayNight`，再关掉标题栏，于是跟着系统的深色和浅色。这个主题从 Android 10 才有，所以最低系统是 29。这台手机是 Android 15。图标是包里的自适应图标：蓝底、线框手机、手机里一条短横。通知小图标是同一支手机，中间空出这条短横。
 
-菜单栏 App 的打包列表里没有这个脚本。无线调试保持装在手机上，不从菜单栏启动。
+菜单栏「更多工具与设置」里的「安装或更新手机应用」跑的就是这个脚本。仓库里运行时它先编 APK。打进菜单栏 App 的那一份旁边没有源码，装的是构建时放进去的 `phone-app.apk`。无线调试保持仍在手机上的「手机工位」里。
 
 ## 在 PGT-AN20 上验证过的
 
@@ -67,8 +121,57 @@ Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要
 - `pm grant` 之后，用户 0 的 `WRITE_SECURE_SETTINGS` 是 `granted=true`。用户 10 是 `granted=false`，主用户是 0。
 - 应用 uid 写入当前的 `adb_wifi_enabled` 成功，日志是 `AdbKeep: write-ok`。当时值已经是 1，这次写入没有把开关关掉。
 - Clash 开着时，界面仍显示 Wi-Fi 已连接。
-- 前台服务 `isForeground=true`，类型 `0x40000000`。通知标题「无线调试保持」，内容「无线调试开着」，不响。
+- 前台服务 `isForeground=true`，类型 `0x40000000`。通知不响。
+- 同一天卸掉再装，版本是 `versionCode=2`。装好后用户 0 的 `WRITE_SECURE_SETTINGS` 仍是 `granted=true`，用户 10 仍是 `granted=false`。前台服务还在。通知标题是「手机工位」，内容是「无线调试开着」，`sound=null`，标志是常驻、只提示一次、不可划掉。
 - 白名单里有 `dev.phonestation.adbkeep`。下一次精确闹钟挂在 `AlarmReceiver` 上。
-- 界面标题和说明在状态栏下面。状态栏高度约 141px，标题从约 211px 开始。
+- 上一版界面的标题和说明在状态栏下面。状态栏高度约 141px，标题从约 211px 开始。同一天稍后看过这一版：左侧有「自动打开」和「无线调试」「USB 调试」「Wi-Fi」，右侧是开关和对应的值。没有再量状态栏。
+- 同一天再装一版，`versionCode=4`。无线会话还在，USB 内核是 `DISCONNECTED`。界面「电脑」一行是绿色的「无线」，「无线调试」是「开」，「USB 调试」是「开」，「Wi-Fi」是「已连接」。日志是 `AdbKeep: host 无线`。通知监听里原来的健康、微软和 Facebook 还在，本应用这一条是 live。
+- 同一天再装一版，`versionCode=5`。`notify.sh` 把标题「手机工位」、内容「脚本已交给应用」交给应用发出。记录里这条标记是 `alert`、id 是 2，通道不发声。常驻的「无线调试开着」还在，id 仍是 1。日志是 `AdbKeep: alert replace`。细节在 [notify.md](notify.md)。
+- 同一天再装一版，`versionCode=6`。`appops get` 打印 `Uid mode: MANAGE_EXTERNAL_STORAGE: allow`。文件服务的读写记录在 [mcp.md](mcp.md)。
+- 同一天再装一版，`versionCode=7`。界面在无线调试那四行下面有「MCP服务」。服务开着时右边是绿色的「开着」，下面一行是 `http://127.0.0.1:8765/mcp`，整行都在屏幕里。关着时不写地址。下拉通知内容是「MCP服务开着」，渠道名是「MCP服务」。
 
-没有做的：把 `adb_wifi_enabled` 写成 0 看它会不会写回来。当时只有无线会话，写成 0 会立刻断开，电脑就无法确认结果。USB 插着时可以再测这一条。也没有重启手机，所以开机自启还没在这台上看到。
+没有做的：把 `adb_wifi_enabled` 写成 0 看它会不会写回来。当时只有无线会话，写成 0 会立刻断开，电脑就无法确认结果。USB 插着时可以再测这一条。也没有断开这条无线会话。也没有重启手机，所以开机自启还没在这台上看到。
+
+同一天的 `versionName` 8：顶部是绿色的「已连接」，副题是「电脑正在写入连接配置。」下面是「保持无线调试」和「排查」；排查里无线调试、USB 调试是「开」，Wi-Fi 是「已连接」。「MCP服务」是关着的开关。日志是 `AdbKeep: host 已连接`。当时 `phonestation_host_ms` 比手机的 `date +%s` 只差大约一秒，`host-state.sh watch` 在写。没有跑 `disconnect.sh`，所以没在这台上看到写成 0 的那一下；过期变成未连接由电脑上的 `HostLinkTest` 覆盖。
+
+同一天的 `versionName` 9：常驻通知收起时标题是「已连接」，内容是「无线调试开 · MCP服务关」。展开后是这一行，再加「系统关掉之后，这里会再打开。」标志是常驻、只提示一次、不可清除、前台服务，`category=status`，`mSound=null`，`isNoisy=false`。渠道 `mcp` 被标成已删除。当时只有这一条，id 是 1。
+
+在下拉栏里把这条往旁边划，露出「删除」和「通知设置」。点「删除」之后记录里没有这条，日志是 `AdbKeep: note hidden`，进程还在。再回到应用，日志是 `AdbKeep: note again 已连接 / 无线调试开 · MCP服务关`，新记录的 id 是 5，文案和标志与划掉前相同。再打开一次，id 仍是 5，没有第二条 `note again`。
+
+接着 shell 拉起 `FileMcpService`，同一条内容变成「无线调试开 · MCP服务开」，标题仍是「已连接」，还是只有一条。`am stopservice` 之后内容回到「无线调试开 · MCP服务关」，服务已停。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 10：收起时是三列。左列绿点和「已连接」，下面是「电脑」；中列绿点和「开着」，下面是「无线」；右列灰点和「关着」，下面是「MCP」。展开后标题「已连接」是绿的，下一行「电脑正在写入连接配置。」，然后两张卡片「无线调试 / 开着」「MCP 服务 / 关着」，最后一行「系统关掉之后，这里会再打开。」系统记录里的标题仍是「已连接」，内容是「无线调试开着，MCP 关着」。标志是常驻、只提示一次、不可清除、前台服务，`mSound=null`，重要程度 2。当时只有这一条，id 是 1。
+
+下拉栏还开着时，把这条往旁边划，露出「删除」和「通知设置」。点「删除」之后日志先是 `AdbKeep: note dismissed`，紧接着 `note hidden`。大约半秒后是 `note again 已连接 / 无线调试开着，MCP 关着`，同时 `NotificationManager: cancel(1)`。新记录的 id 是 5，还是只有一条，文案和标志与划掉前相同，自定义收起和展开都还在。没有打开应用。没有为这次验证改 `adb_wifi_enabled`，也没有把十五秒里连划八次的停住再跑一遍。
+
+同一天的 `versionName` 11：界面顶部是绿色的电脑图标和「已连接」。下面三行各有一枚图标：无线调试「开」、USB 调试「开」、Wi-Fi「已连接」，都是绿的。再下面是「保持无线调试」和「MCP服务」两个开关。没有「排查」，也没有「电脑正在写入连接配置」。最底下仍是启动管理那一行小字。下拉栏里这条展开着：电脑图标加绿色的「已连接」，两张卡片是「无线调试 / 开着」「MCP 服务 / 关着」。没有「电脑正在写入连接配置」，也没有「关掉之后会再打开」。系统记录里标题是「已连接」，内容是「无线调试开着，MCP 关着」。标志是常驻、只提示一次、不可清除、前台服务，`mSound=null`，重要程度 2，`category=status`。当时这条 id 是 1。没有再划掉。
+
+同一天的 `versionName` 13：底部那句启动管理的小字没有了。三个开关是「保持无线调试」「MCP服务」「提醒弹出」，前两个分别开着、关着，第三个开着。再下面一行「权限」，右边是「已允许」。点进去：写入系统设置、通知、所有文件访问、精确闹钟都是「已允许」，电池优化是「不受限」，自启动是「去设置」，下面写着到应用启动管理里允许自启动和后台活动。通知这一行不是「不弹出」。安装脚本打印了「已勾选横幅通知」。横幅和弹出的记录见 [notify.md](notify.md)。没有重启手机，开机自启仍没在这台上看到。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 14：会话提醒可以在右侧带上 Grok、Claude 或 Codex 的图标。下拉栏里的样子记在 [notify.md](notify.md)。界面没有改。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 18：首页两个开关是「保持无线调试」「MCP服务」，当时分别开着、关着。下面「通知」右边是「弹出」，「权限」右边是「已允许」。通知页里「提醒弹出」开着，铃声右边是「Pixies」。铃声列表第一项是「跟随系统」，第二项是「静音」，后面是系统通知铃声，从 Beckon 排到 Zen，里面有 HONOR Electronic、HONOR Marimba、HONOR Piano、HONOR Strings。当时绿的是 Pixies。没有点任何一项，所以没有试听，选择也没有改。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 19：首页三张卡片。第一张是绿色圆底的电脑图标和「已连接」，下面无线调试「开」、USB 调试「开」、Wi-Fi「已连接」。第二张「服务」里「保持无线调试」开着，「MCP服务」关着。第三张「设置」里「通知」是「弹出」，「权限」是「已允许」。没有为这次验证改 `adb_wifi_enabled`。通知页、权限页和铃声页这次没有在这台上点开。
+
+同一天的 `versionName` 20：MCP 增加了常用目录、占用、手机状态、打开文件、保持亮屏、会话提醒和写入剪贴板。在这台上核对过的记录在 [mcp.md](mcp.md)。没有为这次验证改 `adb_wifi_enabled`，也没有改息屏。
+
+同一天的 `versionName` 21：设置里多了一行「MCP说明」，右边没有状态，行末有进入下一页的标记。点进去标题是「MCP服务」，一张卡片四段。怎么连上写着打开「MCP服务」之后在仓库里运行，下一行是 `./scripts/mcp.sh`，再写界面上的地址只在手机本机。能做的是读改下载、文档和相册里的普通文件，看电量和剩余空间，打开文件、保持亮屏、发提醒、写入剪贴板。做不到的写着别的应用的私有目录、短信和通讯录，以及删掉的文件不进回收站。交接写 `Download/手机工位/inbox` 和 `Download/手机工位/outbox`，并写这两个目录不会自动创建。页面上没有工具名，没有 `127.0.0.1`，没有令牌。当时首页是「已连接」，无线调试和 USB 调试是「开」，Wi-Fi 是「已连接」，「保持无线调试」开着，「MCP服务」关着，「通知」是「弹出」，「权限」是「已允许」。没有为这次验证打开 MCP服务，也没有改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 22：用手机上已有的 `start.sh` 拉起 `shizuku_server`，父进程是 1，用户是 shell。装上之后权限页「Shizuku」先是「未授权」，首页「权限」是「还有 1 项」。点下去是「要允许手机工位使用 Shizuku吗？」，点了「始终允许」。回到权限页是「已授权」。日志是 `AdbKeep: shizuku uid 2000`。服务进程还是原来那个。没有为这次验证改 `adb_wifi_enabled`。远程连接没有做。
+
+同一天的 `versionName` 24：下拉栏里这条展开后只有字。第一行是绿色的「已连接」，下面两行是「无线调试 开着」「MCP服务 关着」。名称是深色，开着是绿的，关着是灰色。左边仍是系统那枚蓝色应用图标。收起后是一行：「已连接」在左，右边是「无线 开着」「MCP 关着」。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 25：展开后改成两行。标题是绿色的「已连接」，和左边的蓝色应用图标齐。下一行是「无线调试开着 · MCP服务关着」，次要色。收起后左边是「已连接」，右边是「无线开着 · MCP关着」。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 26：展开后仍是两行。第一行绿色的「已连接」，和左边的蓝色应用图标齐。第二行左边「无线调试 开」，开是绿的；右边「MCP服务 关」，关是灰色。名称是深色。收起后左边是「已连接」，右边是「无线 开」「MCP 关」。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 27：下拉栏改成一句。展开后大字是绿色的「已连接」，和左边蓝色应用图标齐。下面一行是「MCP 关着」，次要色。当时无线调试开着、MCP 关着、电脑连着。日志是 `note 已连接 / MCP 关着`。没有第二套图标。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 28：设置里多了一行「关于」，右边是 28。点进去标题是「关于」，一张卡片两行：版本是 28，作者是 Glow。当时首页是「已连接」，无线调试和 USB 调试是「开」，Wi-Fi 是「已连接」，「保持无线调试」开着，「MCP服务」关着，「通知」是「弹出」，「权限」是「已允许」。没有为这次验证改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 29。`./scripts/adb-keep.sh` 增量安装成功，签名和手机上的旧版本一致。权限页上 Shizuku 未安装、没在跑或未授权不再算进「还有 N 项」，那一行还在；电脑上 `PermissionCopyTest` 里，所有文件访问没开、Shizuku 未安装，缺的是 1 项。签名从 `build/adb-keep.keystore` 拷到了 `~/.phonestation/adb-keep.keystore`。当时只有无线。没有改 `adb_wifi_enabled`，没有重启。无线调试被关掉之后写回 1，以及开机后服务和常驻通知自己回来，这两步仍没在这台上看到。MCP 记住开着的核对在 [mcp.md](mcp.md)。
+
+同一天的 `versionName` 31：展开布局里用普通 `View` 把「MCP」顶到右边。通知胀不开，系统界面日志是 `Class not allowed to be inflated android.view.View`，应用接着是 `BadForegroundServiceNotificationException`。打开就闪退，进程不留。没有改 `adb_wifi_enabled`。
+
+同一天的 `versionName` 32：间隔改成左边那一组占满余下宽度。打开之后首页还在，关于右边是 32。下拉栏这条展开着：绿色的「已连接」，字高和下面系统那条「已连接到无线调试」一样。下一行左边是「无线调试 开」，开是绿的；右边是「MCP 关」，关是次要色，名称是深色。进程还在。没有改 `adb_wifi_enabled`。

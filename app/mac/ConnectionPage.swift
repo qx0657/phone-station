@@ -1,0 +1,70 @@
+import SwiftUI
+
+struct ConnectionPage: View {
+    @ObservedObject var station: Station
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            StationRows.subpageHeader("连接与配对") { station.page = .main }
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(station.link.headline)
+                        .font(.system(size: 15, weight: .semibold))
+                    if !station.link.connectionLine.isEmpty {
+                        Text(station.link.connectionLine)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Text("无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if station.link.serial == nil {
+                    Button {
+                        station.link.connect()
+                    } label: {
+                        Label(station.link.isReconnecting || station.feedback.activity == "正在连接手机…" ? "正在连接…" : "连接手机",
+                              systemImage: "wifi")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(station.feedback.activity != nil || station.link.isChecking)
+                } else if station.link.transport == "无线连接" {
+                    Button("断开无线连接") { station.link.disconnect() }
+                        .buttonStyle(.bordered)
+                        .disabled(station.feedback.activity != nil)
+                } else {
+                    Text("USB 保持连接。这里只断开无线。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("第一次配对")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("手机打开「无线调试 → 使用配对码配对」，停在那个页面，把 6 位码填在这里。不要用页面上的 172.19 地址。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField("6 位配对码", text: Binding(
+                        get: { station.setup.pairCode },
+                        set: { station.setup.pairCode = $0 }
+                    ))
+                        .textFieldStyle(.roundedBorder)
+                    Button("使用配对码配对") { station.setup.pair() }
+                        .buttonStyle(.bordered)
+                        .disabled(station.feedback.activity != nil)
+                }
+                Button("打开项目说明") { station.login.openGuide() }
+                    .buttonStyle(.bordered)
+                if let text = station.feedbackText {
+                    StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}

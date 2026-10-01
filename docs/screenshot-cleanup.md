@@ -4,7 +4,7 @@
 
 手机相册里的截图在 `/storage/emulated/0/Pictures/Screenshots`。文件名是 `Screenshot_日期_时间_<界面>.jpg`，界面名用来分组，不能单独当删除依据。同目录的 mp4 是录屏，没点名就不放进截图的删除名单。
 
-判断哪张可以删，看以后还用不用得着图里的信息。完全相同的重复张是另一层，见文末。归类和去重由 `.agents/skills/screenshot-cleanup/scripts/cleanup.py` 做。删除不进回收站，用户点名类别或点名按名单删之前不删。点名之后怎么删，写在 `.agents/skills/screenshot-cleanup/SKILL.md`。
+判断哪张可以删，看以后还用不用得着图里的信息。完全相同的重复张是另一层，见文末。归类和去重由 `.agents/skills/screenshot-cleanup/scripts/cleanup.py` 做，在手机上比对，不把原图拉下来。删除不进回收站，用户点名类别或点名按名单删之前不删。点名之后用手机上「手机工位」的 `station_file_delete`，一次一条，步骤在 `.agents/skills/screenshot-cleanup/SKILL.md`。删掉之后服务会请媒体库再扫这个文件。
 
 下面的张数和体积是 2026-09-29 在荣耀 PGT-AN20 上数的。下次先重新数，不要沿用。
 

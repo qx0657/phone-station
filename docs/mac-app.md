@@ -1,14 +1,14 @@
 # Mac 菜单栏 App
 
-`app/mac/` 用 AppKit 创建状态栏图标和弹出面板，面板内容由 SwiftUI 绘制。`scripts/build-mac-app.sh` 用这台 Mac 已有的 Command Line Tools 把它编成 `build/.phone-station/手机工位.app`。构建目录隐藏，避免 Spotlight 把构建副本列为第二个 App；`build/` 不入库。构建时把 `connect.sh`、`disconnect.sh`、`status.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`torch.sh`、`common.sh`、`adb_mdns.py`、`torch.dex`、`torch_beat.py`、`torch-audio` 和 README 放到 App 的 Resources，脚本仍按自身位置查找 `lib/`。因此 App 复制到其他目录后，不再依赖原仓库位置。声音采集程序在构建时放进包里；源码比它新时，构建会重新编译，不在 App 运行期间往包里写文件。这个程序的部署目标是 macOS 14.2，process tap 从那里才有。构建时如果沿用 App 的 13.0，编译会失败。
+`app/mac/` 用 AppKit 创建状态栏图标和弹出面板，面板内容由 SwiftUI 绘制。`scripts/build-mac-app.sh` 用这台 Mac 已有的 Command Line Tools 把它编成 `build/.phone-station/手机工位.app`。构建目录隐藏，避免 Spotlight 把构建副本列为第二个 App；`build/` 不入库。构建时把 `connect.sh`、`disconnect.sh`、`host-state.sh`、`status.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`torch.sh`、`mcp.sh`、`pair-code.sh`、`adb-keep.sh`、`common.sh`、`adb_mdns.py`、`torch.dex`、`torch_beat.py`、`torch-audio`、编好的 `phone-app.apk` 和 README 放到 App 的 Resources，脚本仍按自身位置查找 `lib/`。因此 App 复制到其他目录后，不再依赖原仓库位置。声音采集程序在构建时放进包里；源码比它新时，构建会重新编译，不在 App 运行期间往包里写文件。这个程序的部署目标是 macOS 14.2，process tap 从那里才有。构建时如果沿用 App 的 13.0，编译会失败。
 
 构建时从 `app/mac/MakeIcon.swift` 绘制应用图标并生成 `AppIcon.icns`。图标放在 App 的 Resources，`Info.plist` 通过 `CFBundleIconFile` 引用它。
 
-App 是菜单栏辅助程序（`LSUIElement`），没有 Dock 图标。应用内用 `Process` 传递参数数组调用随包脚本，不拼接 shell 命令；启动时给脚本补入 Homebrew、系统工具和 Android SDK 常见路径。`adb`、`scrcpy`、`python3` 仍由电脑提供。连接走 `connect.sh`，投屏、截图和录屏沿用现有脚本，确保单设备、mDNS 和 VPN 路由限制仍由同一套逻辑处理。
+App 是菜单栏辅助程序（`LSUIElement`），没有 Dock 图标。应用内用 `Process` 传递参数数组调用随包脚本，不拼接 shell 命令；启动时给脚本补入 Homebrew、系统工具和 Android SDK 常见路径。`adb`、`scrcpy`、`python3` 仍由电脑提供。连接走 `connect.sh`，投屏、截图和录屏沿用现有脚本，确保单设备、mDNS 和 VPN 路由限制仍由同一套逻辑处理。面板按页拆开：连接、投屏和录屏、闪光灯、最近文件、adb 命令、登录项、MCP、配对和安装各自一份状态。`Station` 只负责把它们接上，并记住当前页。构建在编译 App 之前跑两份电脑上的测试：重连间隔，以及 adb 参数的引号拆分和电量解析。
 
 `NSApplication` 不会强持有 delegate。入口用静态属性保留 `PhoneStationApp`，否则进程可以运行而 `applicationDidFinishLaunching` 不执行，状态栏图标也不会建立。菜单栏入口不带标题。已连接时是模板符号 `iphone`，其余状态是 `iphone.slash`，都是 point size 16、字重 medium。这两个符号不要设 `size`：12×12 的框会把字形裁掉，入口看起来是空的。两个符号外框一样大，切换时菜单栏项不会左右挤。提示是「手机工位：」加上和面板相同的状态字：检查中、已连接、未验证、未连接、正在重新连接。只有在线的那台是 PGT-AN20 才用前一个符号；未验证、多台设备、等待授权和没找到 adb 都用带斜线的。App 一启动就查连接，上一次查完隔 5 秒再查 `adb devices -l`。序列号仍是上次确认过的那台 PGT-AN20 时，这次不读型号。在面板里连接或断开后，图标跟着那次结果变，不必等这 5 秒。这次定时检查不读息屏时间、电量，也不跑 `torch.sh`。
 
-没有在线设备、并且这次打开后没有成功断开过无线时，同一次检查会运行 `connect.sh`。已经有一台在线设备时不跑，避免再连出第二条。多台设备、等待授权、找不到 adb，或暂时读不出型号时也不跑。第一次马上找。没找到之后，要等过 5 秒、15 秒、30 秒，再往后每 60 秒，由下一次设备检查再找。设备检查大约每 5 秒一次。这次查找不占面板上的操作状态。点「连接手机」会立刻再找。点「断开无线连接」成功之后，直到再点「连接手机」，这次打开期间不再自动接。退出后再打开会重新开始。自动接上之后会读一次息屏、闪光灯和电量。
+没有在线设备、并且这次打开后没有成功断开过无线时，同一次检查会运行 `connect.sh`。已经有一台在线设备时不跑 `connect.sh`，避免再连出第二条；这次检查会跑 `host-state.sh mark`，把手机上的连接配置写成当前时间。手机怎么读这个值、断开后怎么复位，见 [adb-keep.md](adb-keep.md)。多台设备、等待授权、找不到 adb，或暂时读不出型号时也不跑。第一次马上找。没找到之后，要等过 5 秒、15 秒、30 秒，再往后每 60 秒，由下一次设备检查再找。设备检查大约每 5 秒一次。这次查找不占面板上的操作状态。点「连接手机」会立刻再找。点「断开无线连接」成功之后，直到再点「连接手机」，这次打开期间不再自动接。退出后再打开会重新开始。自动接上之后会读一次息屏、闪光灯和电量。
 
 面板最上行的标题是手机名称。这台 PGT-AN20 显示为「荣耀 PGT-AN20」，下一行只写「无线连接」或「USB 连接」。右侧是连接状态；已经读到电量时，状态左边是百分比和电池图标。充电中在百分比后加闪电。这台系统没有 `battery.25.bolt` 这一类不满电的符号，只有满电带闪电，所以闪电单独画。低于 20% 且没在充电时用提醒色。应用名不放在这个标题上。未连接时，下一行是原因。下面三个操作是图标在上、标题在下的方块，符号 16pt，直向留白比早先的一版短。macOS 26 的 SwiftUI `.bordered` 按钮高度是固定的，这样排时标题会被裁成一条线，所以这三个按钮自己画圆角底。分组里的可点行，悬停时加深的底铺满整行，贴住卡片左右边缘；卡片圆角靠外框裁切，行自己不要再画一块更小的圆角底，否则靠分隔线的一侧和左右会露出原来的底。投屏或录屏进行中时，对应的方块用自己的颜色标出来。面板高度跟着当前页的理想尺寸走（`NSHostingController.sizingOptions = .preferredContentSize`），不要再写死一个能装下所有页的高度。面板是 `NSPopover` 里的自定义界面，上沿那支箭头是系统给弹出面板画的锚点。系统菜单栏菜单是 `NSMenu`，贴在图标下面，没有这支箭头。这里有开关、方块和多页，放不进系统菜单。
 
@@ -28,6 +28,10 @@ macOS 26 的控制中心另外按 bundle id 记一份允许名单。它在 `~/Li
 
 跟随声音的采集进程由这个 App 拉起，系统把权限算在 `com.qx0657.phonestation` 上。`Info.plist` 里的 `NSAudioCaptureUsageDescription` 不能去掉：没有它时采集调用会成功，但音量一直是 0，权限窗口也不出现。面板在几秒后仍没有声音时，会提示到「系统录音」，并可以打开那一页。允许之后要关掉再打开一次。细节在 [torch.md](torch.md)。
 
-本机的 Command Line Tools 可以编译并临时签署这个 App；完整 Xcode 不在当前开发者目录中。此构建只供本机试用。给其他 Mac 分发时，还需要处理依赖安装、Developer ID 签名和公证。面板可以连接和断开无线，没有设备在线时自动重连，显示电量、保持亮屏、开关闪光灯、让灯跟随这台 Mac 正在播放的声音，以及运行保存的 adb 命令。第一次无线配对、会话提醒、MT 管理器仍按 README 的脚本入口操作。
+本机的 Command Line Tools 可以编译并临时签署这个 App；完整 Xcode 不在当前开发者目录中。此构建只供本机试用。给其他 Mac 分发时，还需要处理依赖安装、Developer ID 签名和公证。面板可以连接和断开无线，没有设备在线时自动重连，显示电量、保持亮屏、开关闪光灯、让灯跟随这台 Mac 正在播放的声音，以及运行保存的 adb 命令。
+
+「连接与配对」里可以做第一次的 6 位配对码。手机先打开「无线调试 → 使用配对码配对」，停在那个页面，再把 6 位数字填进来。地址仍由 `pair-code.sh` 用 mDNS 找，不要填页面上的 `172.19`。二维码配对仍用仓库里的 `pair-qr.sh`，不放进菜单栏：那个脚本会往仓库里装 npm 依赖。「更多工具与设置」里的「安装或更新手机应用」跑随包的 `adb-keep.sh`，装的是构建时放进包里的 APK，并授好权限。无线调试保持仍在手机上的「手机工位」里。会话提醒仍按 README 安装一次。
+
+主页有「MCP服务」。打开和停止走 `mcp.sh`。菜单栏开着、而且没有别的操作进行时，大约每 5 秒直接读 `settings global phonestation_mcp`：是 1 就转发到本机 `18765` 并读令牌，不是 1 就去掉转发。这次读取不跑 `connect.sh`。令牌可以复制成 `Authorization: Bearer …`。手机上的开关和这里是同一项。手机界面上的地址只在手机本机。
 
 「更多工具与设置」里的开机自启走 `SMAppService.mainApp`。`enabled` 才算已经开着；`requiresApproval` 时开关仍显示为开，并可以打开「系统设置 › 通用 › 登录项与扩展」。登录项只认 Launch Services 能看见的包：放在「应用程序」或用户目录下的 Applications 里才能登记。`build/.phone-station/` 是隐藏的构建目录，从那里打开时登记会被拒绝，面板会提示先放到「应用程序」再打开那个副本。版本号读 `CFBundleShortVersionString` 和 `CFBundleVersion`，显示在「关于」，「更多工具与设置」的关于一行上也有。

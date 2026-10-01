@@ -425,19 +425,15 @@ def shade_kind(reason: str) -> str:
     return "plain"
 
 
-def with_context(data: dict, detail: str, client: str) -> str:
-    parts = []
-    if client:
-        parts.append(client)
+def with_context(data: dict, detail: str) -> str:
+    """正文是目录名和这件事。Agent 用通知右侧的图标表示。"""
     project = project_name(data)
-    if project:
-        parts.append(project)
-    if detail:
-        parts.append(detail)
-    return " · ".join(parts)
+    if project and detail:
+        return f"{project}：{detail}"
+    return project or detail
 
 
-def shade_text(reason: str, data: dict | None = None, client: str = "") -> tuple[str, str]:
+def shade_text(reason: str, data: dict | None = None) -> tuple[str, str]:
     """下拉通知的标题和内容。同一条通知会被后一次调用盖掉。"""
     payload = data or {}
     kind = shade_kind(reason)
@@ -462,9 +458,7 @@ def shade_text(reason: str, data: dict | None = None, client: str = "") -> tuple
         detail = question_detail(payload)
     else:
         detail = ""
-    body = one_line(with_context(payload, detail, client)) or with_context(
-        payload, detail, client
-    )
+    body = one_line(with_context(payload, detail)) or with_context(payload, detail)
     if not body:
         body = "有一条提醒" if title == "手机工位" else title
     return title, body
@@ -509,7 +503,7 @@ def run(argv: list[str]) -> int:
     if dry:
         print(("ring" if ok else "skip") + " " + reason)
         if ok:
-            title, text = shade_text(reason, data, client_name(data, argv))
+            title, text = shade_text(reason, data)
             print(title)
             print(text)
         return 0
@@ -517,12 +511,12 @@ def run(argv: list[str]) -> int:
         return 0
     directory = state_dir()
     os.makedirs(directory, exist_ok=True)
-    title, text = shade_text(reason, data, client_name(data, argv))
-    spawn(
-        [notify_bin(), "--title", title, "--text", text],
-        os.path.join(directory, "last.log"),
-        reason,
-    )
+    client = client_name(data, argv)
+    title, text = shade_text(reason, data)
+    command = [notify_bin(), "--title", title, "--text", text]
+    if client:
+        command.extend(["--agent", client])
+    spawn(command, os.path.join(directory, "last.log"), reason)
     return 0
 
 

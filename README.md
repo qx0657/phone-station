@@ -1,6 +1,6 @@
 # 手机工位
 
-电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。会话提醒、闪光灯、文件和 APK、投屏都走这条通道。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
+电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。会话提醒、闪光灯、文件、投屏都走这条通道。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
 
 这条通道上现在做的事：
 
@@ -9,7 +9,7 @@
 | 从 Mac 菜单栏连接、投屏、截屏和录屏 | [手机工位 App](#mac-菜单栏-app) |
 | 一轮做完、要确认权限或停下来问时，手机响一声 | [`install-agent-notify.sh`](#会话提醒)。装一次，这台电脑上各个项目的 Codex、Claude、Grok 都走它 |
 | 闪光灯跟着电脑正在播放的声音 | [`torch.sh beat`](#闪光灯) |
-| 读改手机文件，分析或修改 APK | [`mt.sh`](#文件和-apk) |
+| 读改手机上的普通文件 | [`mcp.sh`](#文件) |
 | 判断图库里哪些截图可以删 | [图库截图](#图库里的截图) |
 | 投屏、录屏、截取当前画面、保持亮屏 | [屏幕](#屏幕) |
 | 无线调试被系统关掉后重新打开 | [`adb-keep.sh`](#无线调试保持) |
@@ -25,7 +25,7 @@ cd phone-station
 
 ## Mac 菜单栏 App
 
-在 Mac 上构建一个常驻菜单栏的「手机工位.app」。菜单栏图标会跟着连接变：连上这台已验证的手机时是一只手机，没连上时手机上有一道斜线。点击它，可以投屏、截取画面、录屏，保持亮屏，开关闪光灯，或让灯跟随这台 Mac 正在播放的声音。首页标题旁显示电量。主页的「adb 命令」可以保存几条常用命令，点一下就在这台手机上执行，也可以在终端里打开 shell。连接和断开无线在「连接与配对」。没有设备在线时会自己查找并接上；在那里断开成功之后，要再点连接，这次打开期间才会继续自动接。最近的截图与录屏在首页的「最近文件」：一行一个缩略图，鼠标停在上面会在面板旁边放出大图，点这一行把图片或文件复制到剪贴板，箭头在 Finder 里显示。开机自启在「更多工具与设置」；把 App 放进「应用程序」后，这项才会被系统记住。版本号在「关于」。录屏或灯光跟随声音时，收起面板不会结束任务。
+在 Mac 上构建一个常驻菜单栏的「手机工位.app」。菜单栏图标会跟着连接变：连上这台已验证的手机时是一只手机，没连上时手机上有一道斜线。点击它，可以投屏、截取画面、录屏，保持亮屏，开关闪光灯，或让灯跟随这台 Mac 正在播放的声音。首页标题旁显示电量。主页的「adb 命令」可以保存几条常用命令，点一下就在这台手机上执行，也可以在终端里打开 shell。连接、断开无线和 6 位配对码在「连接与配对」。没有设备在线时会自己查找并接上；在那里断开成功之后，要再点连接，这次打开期间才会继续自动接。配对时手机先停在「使用配对码配对」那一页。二维码配对仍用下面的脚本。「MCP服务」打开或停止手机上的同一项，并给出电脑上的地址和这次的令牌。最近的截图与录屏在首页的「最近文件」：一行一个缩略图，鼠标停在上面会在面板旁边放出大图，点这一行把图片或文件复制到剪贴板，箭头在 Finder 里显示。开机自启，以及安装或更新手机上的「手机工位」，在「更多工具与设置」；把 App 放进「应用程序」后，开机自启才会被系统记住。版本号在「关于」。录屏或灯光跟随声音时，收起面板不会结束任务。
 
 ```bash
 ./scripts/build-mac-app.sh
@@ -33,15 +33,15 @@ ditto "build/.phone-station/手机工位.app" "/Applications/手机工位.app"
 open "/Applications/手机工位.app"
 ```
 
-构建副本放在 `build/` 下的隐藏目录，避免被系统搜索当成第二个已安装 App。安装版自带这些操作需要的脚本，不依赖仓库检出路径；电脑仍需有 `adb`、`scrcpy` 和 `python3`。依赖状态在「更多工具与设置」。第一次无线配对仍按下文 [连接](#连接) 的步骤操作；App 目前只对已验证的 PGT-AN20 开放设备操作。构建、打包和任务结束的做法见 [docs/mac-app.md](docs/mac-app.md)。
+构建副本放在 `build/` 下的隐藏目录，避免被系统搜索当成第二个已安装 App。安装版自带这些操作需要的脚本和手机安装包，不依赖仓库检出路径；电脑仍需有 `adb`、`scrcpy` 和 `python3`。依赖状态在「更多工具与设置」。6 位配对码可以在菜单栏里做，二维码配对仍按下文 [连接](#连接)。App 目前只对已验证的 PGT-AN20 开放设备操作。构建、打包和任务结束的做法见 [docs/mac-app.md](docs/mac-app.md)。
 
 重新构建后，退出已经运行的旧版 App，再打开新生成的 App。
 
 ## 会话提醒
 
-一条命令装到这台电脑的 Codex、Claude、Grok 用户配置。手机在线时，这台电脑上各个项目里，一轮做完、需要确认权限，或中途停下来询问，都会让手机响一声，并在下拉栏里更新同一条通知。
+一条命令装到这台电脑的 Codex、Claude、Grok 用户配置。手机在线时，这台电脑上各个项目里，一轮做完、需要确认权限，或中途停下来询问，都会让手机响一声，并在屏幕上弹出同一条通知。手机上「手机工位」打开「通知」，可以改铃声，或关掉「提醒弹出」。铃声默认跟随系统通知铃声，选静音则不响、通知还在。关掉「提醒弹出」之后，这条仍会响，但只进下拉栏。
 
-下拉栏标题是这件事，内容以 Agent 名和目录名开头，例如 `Grok · phone · 这一轮的结果`。Codex 不在会话空闲退出时再次响。已经打开的会话要重开一次。换一台电脑时，在这个仓库里再运行一次。各工具的事件差异、Codex 要信任的条目，见 [docs/notify.md](docs/notify.md)。
+下拉栏标题是这件事，内容是目录名加这件事，例如 `phone：这一轮的结果`。认得出 Grok、Claude、Codex 时，通知右侧是这个 Agent 的图标。Codex 不在会话空闲退出时再次响。已经打开的会话要重开一次。换一台电脑时，在这个仓库里再运行一次。各工具的事件差异、Codex 要信任的条目，见 [docs/notify.md](docs/notify.md)。
 
 ### 装上
 
@@ -63,10 +63,12 @@ open "/Applications/手机工位.app"
 ./scripts/notify.sh
 ./scripts/notify.sh --title 标题 --text 内容
 ./scripts/notify.sh --sound /system/media/audio/notifications/Bell.ogg
+./scripts/notify.sh --agent Grok --title 标题 --text 内容
 ./scripts/notify.sh --stack --title 标题 --text 内容
+./scripts/notify.sh --shell
 ```
 
-不带参数时，播放系统设置里的通知铃声，并在下拉栏里更新同一条通知。不写标题时是「手机工位」，不写内容时是「有一条提醒」。`--sound` 改用手机上的另一个音频文件。再跑一次会改这条通知的文字，不会另起一条。`--stack` 每次另发一条，原来的留着，也不覆盖这条。手机在震动或静音时，系统会把通知音量关掉，所以铃声改走媒体音量，运行时听得到。下拉栏里的通知本身不响。转好的音频和播放程序会留在手机上，铃声文件和播放程序没变就直接播。做法见 [docs/notify.md](docs/notify.md)。
+不带参数时，播放系统设置里的通知铃声，并由手机上的「手机工位」在下拉栏里更新同一条通知。铃声也由这个应用用媒体音量播放。不写标题时是「手机工位」，不写内容时是「有一条提醒」。`--sound` 改用手机上的另一个音频文件。再跑一次会改这条通知的文字，不会另起一条。`--agent` 可以是 `Grok`、`Claude`、`Codex`，通知右侧放上这个 Agent 的图标；不写就没有，左边仍是手机工位。`--stack` 每次另发一条，原来的留着，也不覆盖这条。`--shell` 改回原来的方式，由 shell 发这条通知，应用名写成「手机工位」，右侧没有这张图，铃声转成 PCM。手机在震动或静音时，系统会把通知音量关掉，所以铃声走媒体音量，运行时听得到。下拉栏里的通知本身不响。`--shell` 转好的音频和播放程序会留在手机上，铃声文件和播放程序没变就直接播。做法见 [docs/notify.md](docs/notify.md)。
 
 ### 震一下
 
@@ -112,18 +114,18 @@ open "/Applications/手机工位.app"
 
 第一次如果系统问权限，到「系统设置 → 隐私与安全性 → 系统录音」允许。菜单栏里这次要允许的是「手机工位」。它只拿音量，不录屏幕。允许之后如果灯还是不跟，关掉再打开一次。灯为什么不能用系统设置项点亮，见 [docs/torch.md](docs/torch.md)。
 
-## 文件和 APK
+## 文件
 
-读写手机文件，以及分析、修改 APK，走手机上 MT 管理器的 MCP。官方说明在 <https://mt.cc/guide/ai/mcp.html>。`./scripts/mt.sh` 把服务开起来，并把本机地址打印出来。
+读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，把服务开起来，并给出本机地址和这次的 `Authorization` 头。手机上的 MCP 只有这个应用里的服务，以后要加的工具也做在这里。手机会记住开着，重启后还会再打开。
 
 ```bash
-./scripts/mt.sh
-./scripts/mt.sh stop
+./scripts/mcp.sh
+./scripts/mcp.sh stop
 ```
 
-这一节后面还会加手机文件上的事。按信息价值判断图库截图能不能删，是已经有的一件。
+应用里「MCP服务」是开关，和菜单栏是同一项，可以在手机上打开或关掉。开着时下面写着手机本机地址。下拉栏那条常驻通知里能看到 MCP 开没开，不另起一条。电脑上的转发地址和这次的令牌在菜单栏，或是上面打印的两行。删掉的文件不进回收站。改已经存在的文件要带上一次读到的 `targetVersion`。
 
-工具、权限和这台手机上的验证记录在 [docs/mt-mcp.md](docs/mt-mcp.md)。电脑上读 Java、脱壳、看 so、结构重打包在 [docs/apk-edit.md](docs/apk-edit.md)。
+写入、删除、移动和复制之后会请系统再扫这些路径，相册和文件列表跟着更新。`station_file_access_policy` 里有截图、相机、下载、文档、电影、录音，以及交接用的 `Download/手机工位/inbox` 和 `outbox`。这两个目录不会自动创建。`station_storage_summary` 看剩余空间和这几个目录的体积。`station_device_status` 只读电量、响铃、Wi-Fi 是否连着、调试开关和息屏。`station_stay_awake` 只做开或关，数值和 `stay-awake.sh` 相同。`station_notify` 走和 `notify.sh` 一样的提醒。`station_clipboard_set` 把一段文字放进剪贴板。`station_file_open` 用系统查看器打开一个已有文件。做法、工具和这台手机上的验证记录在 [docs/mcp.md](docs/mcp.md)。
 
 ### 图库里的截图
 
@@ -137,7 +139,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py list 游戏
 python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 ```
 
-这三条只统计和列名单，不删除。点名类别或名单之后怎么删，见 `.agents/skills/screenshot-cleanup/SKILL.md`。
+这三条只统计和列名单，不删除。点名类别或名单之后，用手机上「手机工位」的文件工具删，见 `.agents/skills/screenshot-cleanup/SKILL.md`。
 
 这是手机相册里已经存着的截图。电脑这一次抓下来的画面，见 [截取当前画面](#截取当前画面)。
 
@@ -192,12 +194,12 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 | --- | --- | --- |
 | `adb` | 全部脚本 | `~/Library/Android/sdk/platform-tools/adb`，或加入 `PATH` |
 | `scrcpy` | 投屏、录屏、截屏 | `brew install scrcpy`。脚本不会自己装 |
-| `ffmpeg` | `notify.sh` | `brew install ffmpeg` |
+| `ffmpeg` | `notify.sh --shell` | `brew install ffmpeg`。默认铃声由手机上的应用播放，用不到它 |
 | `python3` | 发现设备、配对、启动 MCP、闪光灯跟随声音 | 系统自带 |
 | `node` | `pair-qr.sh` | 第一次运行时安装到 `lib/node_modules`。这个目录不入库 |
 | `swiftc` | `torch.sh beat` | 系统自带。没有已编译的程序，或源码比它新时，会自己编译 |
 
-`android`、`jadx`、`apktool`、`radare2` 不参与上面这些脚本。装 `android` 和它能做的事见 [docs/android-cli.md](docs/android-cli.md)。在电脑上读 Java、脱壳、看 so、结构重打包见 [docs/apk-edit.md](docs/apk-edit.md)。
+`android` 不参与上面这些脚本。装它和它能做的事见 [docs/android-cli.md](docs/android-cli.md)。
 
 先在仓库根目录确认有一台在线设备：
 
@@ -214,7 +216,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 PGT-AN20 上，Wi-Fi 断开之后无线调试的开关会自己关掉。电脑当时如果没有 USB，就连不回去，也没法再把开关打开。
 
-手机里的「无线调试保持」在 Wi-Fi 连着、USB 调试还开着时，把这个开关写回打开。USB 调试关着时它不动。
+无线调试保持是手机上「手机工位」里的一项功能。Wi-Fi 连着、USB 调试还开着时，它把这个开关写回打开。USB 调试关着时它不动。桌面和通知上的名字是「手机工位」。这个应用也负责会话提醒的下拉通知，见上文「响一声」。`adb-keep.sh` 安装它；卸下和看无线调试状态也走这个脚本。包名 `dev.phonestation.adbkeep` 是无线调试保持先做出来时留下的。
 
 ```bash
 ./scripts/adb-keep.sh
@@ -222,7 +224,9 @@ PGT-AN20 上，Wi-Fi 断开之后无线调试的开关会自己关掉。电脑�
 ./scripts/adb-keep.sh --remove
 ```
 
-不带参数会编译、安装，授予写入系统设置的权限，并打开应用。桌面上的开关可以暂停。下拉栏里有一条常驻通知，不响。
+不带参数会编译、安装，授予写入系统设置的权限，并打开应用。应用里「保持无线调试」可以暂停这项功能。下拉栏里有一条常驻通知，不响。收起时是一句「已连接」或「等电脑」，有例外才在右边补几个字，例如 MCP 关着。展开后这句不变大，下面一行是无线调试和 MCP 开没开。点「清除」清不掉。划掉之后过一小会儿会自己再出现。
+
+打开之后是三张卡片。第一张是电脑有没有连上，连着写「已连接」，否则写「未连接」，下面三行是无线调试、USB 调试和 Wi-Fi。电脑连着时，`connect.sh` 会在后台让 `host-state.sh` 把手机上的一项配置写成当前时间；手机看到这个时间还新，才显示已连接。断开之后电脑写不进去：主动断开时会先写成 0，会话自己断掉则过大约 15 秒变成未连接。第二张「服务」是「保持无线调试」和「MCP服务」。第三张「设置」是「通知」「权限」「MCP说明」和「关于」。「通知」里改提醒是否弹出，和用哪段铃声。权限页列出写入、通知、所有文件访问、电池优化、精确闹钟和 Shizuku 开没开；没开的点进去按那一行的字打开。自启动仍要到启动管理里允许，点「自启动」会试着打开那一页。「MCP说明」是四段短文，工具名和参数仍在 [docs/mcp.md](docs/mcp.md)。「关于」写版本号和作者。细节见 [docs/adb-keep.md](docs/adb-keep.md)。
 
 重启后要自己起来，到荣耀的应用启动管理里允许自启动和后台活动。在系统里强行停止之后，需要再打开一次。当前网络不被系统信任时，它会拉开重试间隔，避免一直弹出允许对话框。细节见 [docs/adb-keep.md](docs/adb-keep.md)。
 
@@ -291,5 +295,5 @@ PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，�
 | 做什么 | 步骤 |
 | --- | --- |
 | 安装或卸下全局会话提醒 | `.agents/skills/agent-notify/SKILL.md` |
-| 连 MT 的 MCP，读改文件或 APK | `.agents/skills/mt-mcp/SKILL.md` |
+| 读改手机上的普通文件 | `.agents/skills/phone-mcp/SKILL.md` |
 | 判断图库截图能不能删 | `.agents/skills/screenshot-cleanup/SKILL.md` |
