@@ -1,6 +1,6 @@
-# adb-keep.sh
+# android.sh
 
-无线调试保持是手机上「手机工位」里的一项功能。Wi-Fi 连着、USB 调试还开着时，它把被系统关掉的无线调试重新打开。桌面和通知上的名字是「手机工位」。`adb-keep.sh` 安装这个应用，并授好这项功能要的写入权限。会话提醒的下拉通知也由这个应用发出，见 [notify.md](notify.md)。安装入口还放在这个脚本上。以后手机上要在 adb 断开之后还做的事，也放进同一个应用。日常用法见 [../README.md](../README.md) 的「无线调试保持」。
+无线调试保持是手机上「手机工位」里的一项功能。Wi-Fi 连着、USB 调试还开着时，它把被系统关掉的无线调试重新打开。桌面和通知上的名字是「手机工位」。`android.sh` 安装这个应用，并授好这项功能要的写入权限。会话提醒的下拉通知也由这个应用发出，见 [notify.md](notify.md)。安装入口还放在这个脚本上。以后手机上要在 adb 断开之后还做的事，也放进同一个应用。日常用法见 [../README.md](../README.md) 的「Android 应用」。
 
 包名是 `dev.phonestation.adbkeep`，是这项功能先单独做出来时留下的。换包名会卸掉重装，写入权限和荣耀的启动管理都要再来一次，所以先留着。源码在 `lib/android/`，没有 Gradle，也没有 AndroidX。
 
@@ -89,7 +89,7 @@ Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要
 
 ## 权限和启动管理
 
-`./scripts/adb-keep.sh` 会 `pm grant` 这两项：
+`./scripts/android.sh` 会 `pm grant` 这两项：
 
 - `WRITE_SECURE_SETTINGS`：写 `adb_wifi_enabled`。普通应用不能在界面里申请，只能由 adb 授。
 - `POST_NOTIFICATIONS`：常驻通知。渠道 `keep`，重要性低，无声，同一条不重复响。
@@ -100,7 +100,7 @@ Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要
 
 精确闹钟用清单里的 `USE_EXACT_ALARM`。权限页读 `canScheduleExactAlarms`。没允许时，点那一行打开「闹钟和提醒」。
 
-通知权限安装时已经 `pm grant`。这还不够让会话提醒在屏幕上弹出。这台 MagicOS 会把新建的「提醒」通道从高降到默认，要在该通道里勾上「横幅通知」才锁回去。通道没有声音时，勾选也不会抬上去。`adb-keep.sh` 会在重启应用后去勾；已经是高就不点。屏幕锁着或这一页没打开时，脚本说明要到权限页点「通知」再勾。权限页同时看通知权限和这条通道是不是还能弹出。应用里把「提醒弹出」关掉时，不把「不弹出」算成缺权限。细节在 [notify.md](notify.md)。
+通知权限安装时已经 `pm grant`。这还不够让会话提醒在屏幕上弹出。这台 MagicOS 会把新建的「提醒」通道从高降到默认，要在该通道里勾上「横幅通知」才锁回去。通道没有声音时，勾选也不会抬上去。`android.sh` 会在重启应用后去勾；已经是高就不点。屏幕锁着或这一页没打开时，脚本说明要到权限页点「通知」再勾。权限页同时看通知权限和这条通道是不是还能弹出。应用里把「提醒弹出」关掉时，不把「不弹出」算成缺权限。细节在 [notify.md](notify.md)。
 
 荣耀的应用启动管理拦自启动。shell 里没能替用户打开这项，应用也读不到开没开。重启后要自己起来，需要在应用启动管理里允许自启动和后台活动。权限页点「自启动」会打开 `com.hihonor.systemmanager` 的 `StartupAppControlActivity`；打不开再试 `StartupNormalAppListActivity`。在系统里强行停止之后，进程不会自己回来，需要再打开一次应用。开机这条路径没有在这台上重启验证过。
 
@@ -170,7 +170,7 @@ Wi-Fi 用 `ConnectivityManager.getAllNetworks()`，认 `TRANSPORT_WIFI`，不要
 
 同一天的 `versionName` 28：设置里多了一行「关于」，右边是 28。点进去标题是「关于」，一张卡片两行：版本是 28，作者是 Glow。当时首页是「已连接」，无线调试和 USB 调试是「开」，Wi-Fi 是「已连接」，「保持无线调试」开着，「MCP服务」关着，「通知」是「弹出」，「权限」是「已允许」。没有为这次验证改 `adb_wifi_enabled`。
 
-同一天的 `versionName` 29。`./scripts/adb-keep.sh` 增量安装成功，签名和手机上的旧版本一致。权限页上 Shizuku 未安装、没在跑或未授权不再算进「还有 N 项」，那一行还在；电脑上 `PermissionCopyTest` 里，所有文件访问没开、Shizuku 未安装，缺的是 1 项。签名从 `build/adb-keep.keystore` 拷到了 `~/.phonestation/adb-keep.keystore`。当时只有无线。没有改 `adb_wifi_enabled`，没有重启。无线调试被关掉之后写回 1，以及开机后服务和常驻通知自己回来，这两步仍没在这台上看到。MCP 记住开着的核对在 [mcp.md](mcp.md)。
+同一天的 `versionName` 29。`./scripts/android.sh` 增量安装成功，签名和手机上的旧版本一致。权限页上 Shizuku 未安装、没在跑或未授权不再算进「还有 N 项」，那一行还在；电脑上 `PermissionCopyTest` 里，所有文件访问没开、Shizuku 未安装，缺的是 1 项。签名从 `build/adb-keep.keystore` 拷到了 `~/.phonestation/adb-keep.keystore`。当时只有无线。没有改 `adb_wifi_enabled`，没有重启。无线调试被关掉之后写回 1，以及开机后服务和常驻通知自己回来，这两步仍没在这台上看到。MCP 记住开着的核对在 [mcp.md](mcp.md)。
 
 同一天的 `versionName` 31：展开布局里用普通 `View` 把「MCP」顶到右边。通知胀不开，系统界面日志是 `Class not allowed to be inflated android.view.View`，应用接着是 `BadForegroundServiceNotificationException`。打开就闪退，进程不留。没有改 `adb_wifi_enabled`。
 

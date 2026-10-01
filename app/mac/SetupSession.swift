@@ -43,7 +43,7 @@ final class SetupSession: ObservableObject {
         feedback.activity = "正在安装手机上的「手机工位」…"
         feedback.notice = nil
         Task.detached(priority: .userInitiated) {
-            let result = StationRunner.scriptResult("adb-keep.sh", timeout: 180)
+            let result = StationRunner.scriptResult("android.sh", timeout: 180)
             await MainActor.run {
                 self.feedback.activity = nil
                 let tail = result.output.split(separator: "\n").suffix(4).joined(separator: "\n")

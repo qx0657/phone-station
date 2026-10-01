@@ -49,7 +49,7 @@ Android 15 上，清单里没有 `exported` 的前台服务，shell 直接 `am s
 
 ## 权限
 
-`./scripts/adb-keep.sh` 在两次 `pm grant` 之后再执行：
+`./scripts/android.sh` 在两次 `pm grant` 之后再执行：
 
 ```text
 appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
@@ -154,7 +154,7 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 
 ## 在 PGT-AN20 上验证过的
 
-2026-10-01，应用版本 6。`./scripts/adb-keep.sh` 增量安装成功，随后 `./scripts/mcp.sh` 打印了地址并完成 `initialize`。
+2026-10-01，应用版本 6。`./scripts/android.sh` 增量安装成功，随后 `./scripts/mcp.sh` 打印了地址并完成 `initialize`。
 
 - `appops get` 是 `Uid mode: MANAGE_EXTERNAL_STORAGE: allow`。日志是 `StationMcp: storage true`。
 - `Download` 下列目录成功。其中一张已有的 PNG，前 8 字节是 `89504E470D0A1A0A`。
@@ -170,7 +170,7 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 
 同一天的 `versionName` 9：MCP 不再单独占一条通知。服务开着时，渠道 `keep` 那条内容是「无线调试开 · MCP服务开」；停掉之后回到「无线调试开 · MCP服务关」。记录里只有这一条。
 
-同一天的 `versionName` 20。`./scripts/adb-keep.sh` 增量安装成功，`versionName` 是 20。随后 `./scripts/mcp.sh` 完成 `initialize`，`tools/list` 里有原来的文件工具，加上 `station_storage_summary`、`station_device_status`、`station_stay_awake`、`station_notify`、`station_clipboard_set`、`station_file_open`。
+同一天的 `versionName` 20。`./scripts/android.sh` 增量安装成功，`versionName` 是 20。随后 `./scripts/mcp.sh` 完成 `initialize`，`tools/list` 里有原来的文件工具，加上 `station_storage_summary`、`station_device_status`、`station_stay_awake`、`station_notify`、`station_clipboard_set`、`station_file_open`。
 
 - `station_file_access_policy` 的六个目录是截图、相机、下载、文档、电影、录音。录音的路径是 `/storage/emulated/0/Sounds`。交接目录是 `Download/手机工位/inbox` 和 `outbox`，没有创建。
 - `station_device_status` 读到了电量、充电、响铃、Wi-Fi、两枚调试开关、息屏时间和剩余空间。当时响铃是 `vibrate`，Wi-Fi 连着，USB 调试和无线调试都开着。息屏已经是 2147483647，充电掩码已经是 7，所以 `stayAwake` 为 true。这次没有调用 `station_stay_awake`，设置没改。

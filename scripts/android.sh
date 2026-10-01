@@ -83,9 +83,9 @@ print("tap", (x1 + x2) // 2, (y1 + y2) // 2)
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
-  print -r -- "用法: adb-keep.sh"
-  print -r -- "      adb-keep.sh status"
-  print -r -- "      adb-keep.sh --remove"
+  print -r -- "用法: android.sh"
+  print -r -- "      android.sh status"
+  print -r -- "      android.sh --remove"
   print -r -- "在手机上安装「手机工位」。无线调试保持是里面的一项功能。"
   print -r -- "同时授所有文件访问，给同一应用里的 MCP服务用。"
   print -r -- "并把「提醒」通道的横幅通知打开。这台 MagicOS 不会让新装应用自己弹出。"

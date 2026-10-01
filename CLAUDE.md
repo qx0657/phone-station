@@ -39,7 +39,7 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 ## 布局
 
-- `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`adb-keep.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
+- `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`android.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
 - `lib/` 是这些脚本的内部实现，不要让用户直接运行。新脚本用 `source "$DIR/../lib/common.sh"`，`DIR` 取脚本自己的目录。无线地址发现走 `lib/adb_mdns.py`；USB 序列号直接来自 `adb devices`。
 - 脚本是 zsh，`set -euo pipefail`。不要用变量名 `path`，zsh 里它和 `PATH` 绑在一起，赋空值会把后续命令全部变成找不到。
 - 每个用户脚本支持 `-h`。需要设备时先跑 `scripts/connect.sh`，再用 `online_serial` 拿到唯一的在线设备。已经有在线设备（USB 或无线）时，`connect.sh` 只去掉重复连接。
@@ -50,7 +50,7 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 这台电脑上的 PGT-AN20 已经配对过。配对端口和连接端口不是同一个，重启无线调试后连接端口会变。已有在线设备时不要再 `adb connect` 出第二条。USB 已在线时不必再配或再连。
 
-PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB 时写不回这个设置。手机上的应用是「手机工位」，包名仍是 `dev.phonestation.adbkeep`。无线调试保持是其中一项：Wi-Fi 连着、且 `adb_enabled` 仍是 1 时，把 `adb_wifi_enabled` 写回 1。`scripts/adb-keep.sh` 安装这个应用并授写设置的权限，同时授所有文件访问。细节在 `docs/adb-keep.md` 和 `docs/mcp.md`。不要为了验证把 `adb_wifi_enabled` 写成 0：当时只走无线的话，会话会立刻断。
+PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB 时写不回这个设置。手机上的应用是「手机工位」，包名仍是 `dev.phonestation.adbkeep`。无线调试保持是其中一项：Wi-Fi 连着、且 `adb_enabled` 仍是 1 时，把 `adb_wifi_enabled` 写回 1。`scripts/android.sh` 安装这个应用并授写设置的权限，同时授所有文件访问。细节在 `docs/adb-keep.md` 和 `docs/mcp.md`。不要为了验证把 `adb_wifi_enabled` 写成 0：当时只走无线的话，会话会立刻断。
 
 ## 文件
 
@@ -70,7 +70,7 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 
 `scripts/mcp.sh` 会打开 MCP服务。下拉栏里手机工位那条常驻通知改记 MCP 开着，不另起一条。用户或当前任务要读、改手机上的普通文件，要用上面的手机侧工具，或改完 MCP服务要确认它还能用时，才跑这一个。没有这件要求时不要跑。`station_notify`、`station_stay_awake`、`station_clipboard_set` 和 `station_file_open` 会出声、改息屏、盖掉剪贴板或打开界面，没有明确要求时不要调用。
 
-`scripts/adb-keep.sh` 会在手机上安装「手机工位」、授予 `WRITE_SECURE_SETTINGS` 和所有文件访问（`MANAGE_EXTERNAL_STORAGE`），并可能把无线调试打开。没有明确要求时不要跑。改了 `lib/android/` 里的 Java 时跑 `lib/android/build.sh`：它在电脑上编 APK，并跑打开时机的测试，不碰手机。
+`scripts/android.sh` 会在手机上安装「手机工位」、授予 `WRITE_SECURE_SETTINGS` 和所有文件访问（`MANAGE_EXTERNAL_STORAGE`），并可能把无线调试打开。没有明确要求时不要跑。改了 `lib/android/` 里的 Java 时跑 `lib/android/build.sh`：它在电脑上编 APK，并跑打开时机的测试，不碰手机。
 
 shell 脚本用 `zsh -n`。改了 `lib/adb_mdns.py`、`lib/pair_qr.py`、`lib/torch_beat.py`、`lib/agent_notify_hook.py` 或 `lib/install_agent_notify.py` 时用 `python3 -m py_compile`。改了 `PlayPcm.java` 时跑 `lib/notify-sound/build.sh`。改了 `lib/torch/Torch.java` 时跑 `lib/torch/build.sh`。`lib/torch-audio/main.swift` 比已编译的程序新时，`torch.sh beat` 会自己重编。
 
