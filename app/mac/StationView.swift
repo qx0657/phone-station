@@ -12,6 +12,11 @@ struct StationView: View {
                 mainPage
             case .connection:
                 connectionPage
+            case .commands:
+                commandsPage
+            case .editCommand:
+                CommandEditor(model: model)
+                    .id(model.commandDraftToken)
             case .more:
                 morePage
             case .about:
@@ -39,7 +44,9 @@ struct StationView: View {
                 }
                 VStack(spacing: 0) {
                     navigationRow("连接与配对", symbol: "wifi") { model.page = .connection }
-                    groupDivider
+                    groupDivider.padding(.horizontal, 10)
+                    navigationRow("adb 命令", symbol: "terminal") { model.page = .commands }
+                    groupDivider.padding(.horizontal, 10)
                     navigationRow("更多工具与设置", symbol: "slider.horizontal.3") {
                         model.page = .more
                     }
@@ -76,10 +83,10 @@ struct StationView: View {
     private var controlGroup: some View {
         VStack(spacing: 0) {
             toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: model.canOperate)
-            groupDivider.padding(.leading, 28)
+            groupDivider.padding(.leading, 38).padding(.trailing, 10)
             toggleRow("手电筒", symbol: model.torchOn ? "flashlight.on.fill" : "flashlight.off.fill",
                       isOn: torchBinding, enabled: model.canOperate || model.torchBeat)
-            groupDivider.padding(.leading, 28)
+            groupDivider.padding(.leading, 38).padding(.trailing, 10)
             toggleRow("灯光跟随声音", symbol: "waveform",
                       subtitle: "跟随这台 Mac 正在播放的声音",
                       isOn: beatBinding, enabled: model.canOperate || model.torchBeat)
@@ -103,12 +110,47 @@ struct StationView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            statusChip
+            HStack(spacing: 8) {
+                if let battery = model.battery {
+                    batteryReadout(battery)
+                }
+                statusChip
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 12)
         .accessibilityElement(children: .combine)
+    }
+
+    private func batteryReadout(_ reading: BatteryReport.Reading) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: batterySymbol(reading.percent))
+                .font(.system(size: 12))
+                .accessibilityHidden(true)
+            Text("\(reading.percent)%")
+                .font(.system(size: 11, weight: .medium))
+            if reading.charging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 9))
+                    .accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(reading.percent < 20 && !reading.charging ? StationPalette.caution : Color.secondary)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(reading.charging ? "电量 \(reading.percent)%，充电中" : "电量 \(reading.percent)%")
+    }
+
+    /// Partial bolt variants such as `battery.25.bolt` are absent on this Mac. The bolt is separate.
+    private func batterySymbol(_ percent: Int) -> String {
+        switch percent {
+        case ..<13: return "battery.0"
+        case ..<38: return "battery.25"
+        case ..<63: return "battery.50"
+        case ..<88: return "battery.75"
+        default: return "battery.100"
+        }
     }
 
     private var statusChip: some View {
@@ -133,6 +175,137 @@ struct StationView: View {
         case .caution: return StationPalette.caution
         case .neutral: return Color.secondary
         }
+    }
+
+    private var commandsPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            subpageHeader("adb 命令")
+            VStack(alignment: .leading, spacing: 12) {
+                Text("点一行执行。铅笔用来修改。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !model.commands.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.commands.enumerated()), id: \.element.id) { index, command in
+                            if index > 0 {
+                                groupDivider.padding(.horizontal, 10)
+                            }
+                            commandRow(command)
+                        }
+                    }
+                    .elevatedGroup()
+                }
+                if model.activity != nil {
+                    feedbackBanner(model.activity ?? "")
+                }
+                if let output = model.commandOutput {
+                    commandOutputCard(output)
+                }
+                navigationRow("新建命令", symbol: "plus") { model.beginNewCommand() }
+                    .elevatedGroup()
+                shellRow
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func commandRow(_ command: SavedAdbCommand) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                model.runCommand(command)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(command.name)
+                        .font(.body)
+                    Text(command.arguments)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressFadeStyle())
+            .disabled(!model.canOperate)
+            .opacity(model.canOperate ? 1 : 0.4)
+            Button {
+                model.beginEditCommand(command)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressFadeStyle())
+            .padding(.trailing, 6)
+            .accessibilityLabel("编辑\(command.name)")
+            .help("编辑\(command.name)")
+        }
+        .background { HoverWash(radius: 0) }
+    }
+
+    private func commandOutputCard(_ output: CommandOutput) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(output.name)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Button("复制") { model.copyCommandOutput() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Text(output.text)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(StationPalette.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(10)
+        .elevatedGroup()
+    }
+
+    private var shellRow: some View {
+        Button {
+            model.openDeviceShell()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "terminal")
+                    .frame(width: 18)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("在终端中打开 shell")
+                    Text("在「终端」里打开，序列号已经绑上")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressFadeStyle())
+        .background { HoverWash(radius: 0) }
+        .font(.body)
+        .disabled(!model.canOperate)
+        .opacity(model.canOperate ? 1 : 0.4)
+        .elevatedGroup()
     }
 
     private var connectionPage: some View {
@@ -195,10 +368,11 @@ struct StationView: View {
                             .buttonStyle(.borderless)
                             .font(.subheadline)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 28)
+                            .padding(.leading, 38)
+                            .padding(.trailing, 10)
                             .padding(.bottom, 8)
                     }
-                    groupDivider.padding(.leading, 28)
+                    groupDivider.padding(.leading, 38).padding(.trailing, 10)
                     navigationRow("关于", symbol: "info.circle", detail: "版本 \(appVersion)") {
                         model.page = .about
                     }
@@ -215,9 +389,10 @@ struct StationView: View {
                             .padding(.horizontal, 2)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(Array(model.recentFiles.prefix(3)), id: \.path) { file in
-                                if file.path != model.recentFiles.first?.path {
-                                    groupDivider.padding(.leading, 28)
+                            let recent = Array(model.recentFiles.prefix(3))
+                            ForEach(Array(recent.enumerated()), id: \.element.path) { index, file in
+                                if index > 0 {
+                                    groupDivider.padding(.leading, 38).padding(.trailing, 10)
                                 }
                                 Button {
                                     model.reveal(file)
@@ -236,11 +411,13 @@ struct StationView: View {
                                             .foregroundStyle(.tertiary)
                                             .accessibilityHidden(true)
                                     }
-                                    .contentShape(Rectangle())
+                                    .padding(.horizontal, 10)
                                     .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(PressFadeStyle())
-                                .background { HoverWash(radius: 8) }
+                                .background { HoverWash(radius: 0) }
                                 .help("在 Finder 中显示 \(file.lastPathComponent)")
                             }
                         }
@@ -310,7 +487,7 @@ struct StationView: View {
                             .textSelection(.enabled)
                     }
                 }
-                Text("从菜单栏连接这台手机，投屏、截取画面、录屏，并控制亮屏和闪光灯。")
+                Text("从菜单栏连接这台手机，投屏、截取画面、录屏，控制亮屏和闪光灯，并运行保存的 adb 命令。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -382,11 +559,13 @@ struct StationView: View {
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
             .padding(.vertical, detail == nil ? 9 : 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressFadeStyle())
-        .background { HoverWash(radius: 8) }
+        .background { HoverWash(radius: 0) }
         .font(.body)
     }
 
@@ -417,7 +596,9 @@ struct StationView: View {
                     .padding(.leading, 28)
             }
         }
+        .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(enabled ? 1 : 0.4)
     }
 
@@ -462,6 +643,105 @@ struct StationView: View {
 
     private var loginBinding: Binding<Bool> {
         Binding(get: { model.opensAtLogin }, set: { model.setOpensAtLogin($0) })
+    }
+}
+
+private struct CommandEditor: View {
+    @ObservedObject var model: StationModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            editorHeader
+            VStack(alignment: .leading, spacing: 14) {
+                fieldBlock("名称") {
+                    TextField("例如 前台应用", text: $model.commandDraft.name)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                }
+                fieldBlock("参数") {
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $model.commandDraft.arguments)
+                            .font(.system(size: 12, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .frame(height: 68)
+                        if model.commandDraft.arguments.isEmpty {
+                            Text("shell \"dumpsys window | grep mCurrentFocus\"")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+                Text("这些参数接在 adb -s 序列号 后面，不经过本机 shell。管道放在一对引号里，在手机上执行。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let errorText = model.commandEditError {
+                    Text(errorText)
+                        .font(.subheadline)
+                        .foregroundStyle(StationPalette.recording)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button {
+                    model.saveCommand()
+                } label: {
+                    Text("保存")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                if let id = model.commandDraft.id {
+                    Button("删除这条命令") { model.deleteCommand(id: id) }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(StationPalette.recording)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var editorHeader: some View {
+        Button {
+            model.page = .commands
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.caption.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text(model.commandDraft.id == nil ? "新建命令" : "编辑命令")
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressFadeStyle())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .accessibilityLabel("返回")
+    }
+
+    private func fieldBlock<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            content()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(StationPalette.tile)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                }
+        }
     }
 }
 
@@ -533,11 +813,16 @@ private struct HoverWash: NSViewRepresentable {
         nsView.tracksHover = enabled
         if !enabled { nsView.clearWash() }
     }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: HoverWashView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height else { return nil }
+        return CGSize(width: width, height: height)
+    }
 }
 
 private final class HoverWashView: NSView {
     var radius: CGFloat = 8 {
-        didSet { layer?.cornerRadius = radius }
+        didSet { applyCorner() }
     }
     var tracksHover = true
     private var tracking: NSTrackingArea?
@@ -547,8 +832,15 @@ private final class HoverWashView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
+        applyCorner()
+    }
+
+    private func applyCorner() {
+        // Grouped rows pass radius 0. The card's clip rounds their outer corners;
+        // a radius here would also round the edge that meets the next row.
         layer?.cornerRadius = radius
-        layer?.masksToBounds = true
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = radius > 0
     }
 
     override func updateTrackingAreas() {
@@ -588,18 +880,25 @@ private final class HoverWashView: NSView {
 }
 
 private extension View {
+    /// Content is flush with the card. Row washes are rectangular; this clip
+    /// rounds the outer corners so the highlight fills the row, including the
+    /// corners, instead of leaving the original tile color around a smaller slab.
     func elevatedGroup() -> some View {
-        padding(.horizontal, 10)
-            .padding(.vertical, 2)
+        frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: StationChrome.cardRadius, style: .continuous)
                     .fill(StationPalette.tile)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                    }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: StationChrome.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: StationChrome.cardRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             }
     }
+}
+
+private enum StationChrome {
+    static let cardRadius: CGFloat = 12
 }
 
 private enum StationPalette {

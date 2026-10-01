@@ -47,6 +47,7 @@ chmod +x "$RESOURCES/lib/torch-audio/torch-audio"
 "$SWIFTC" -parse-as-library -swift-version 5 -O \
   -target "$(uname -m)-apple-macosx13.0" -sdk "$SDK" \
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
+  "$ROOT/app/mac/AdbCommandLine.swift" \
   "$ROOT/app/mac/PhoneStationApp.swift" \
   "$ROOT/app/mac/StationModel.swift" \
   "$ROOT/app/mac/StationView.swift" \

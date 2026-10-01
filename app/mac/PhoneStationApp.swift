@@ -17,6 +17,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private let station = StationModel()
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var menuBarShowsConnected: Bool?
 
     static func main() {
         let app = NSApplication.shared
@@ -38,12 +39,14 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
             NSApplication.shared.terminate(nil)
             return
         }
-        button.image = menuBarImage()
         button.imagePosition = .imageOnly
-        button.toolTip = "手机工位"
         button.target = self
         button.action = #selector(togglePopover)
         statusItem = item
+        station.onLinkChange = { [weak self] connected in
+            self?.applyMenuBar(connected: connected)
+        }
+        applyMenuBar(connected: false)
 
         let panel = NSPopover()
         panel.behavior = .transient
@@ -54,12 +57,29 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         panel.contentSize = NSSize(width: 360, height: 420)
         panel.contentViewController = host
         popover = panel
+        station.startLinkWatch()
+    }
+
+    private func applyMenuBar(connected: Bool) {
+        guard let button = statusItem?.button else { return }
+        if menuBarShowsConnected != connected {
+            menuBarShowsConnected = connected
+            button.image = menuBarImage(connected: connected)
+            logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.statusLabel, privacy: .public)")
+        }
+        let tip = "手机工位：\(station.statusLabel)"
+        if button.toolTip != tip {
+            button.toolTip = tip
+        }
     }
 
     /// Do not assign `size` on this image. A 12×12 box clips the symbol and the slot looks empty.
-    private func menuBarImage() -> NSImage {
+    /// Both symbols share a point size so the status item does not jump when the link changes.
+    private func menuBarImage(connected: Bool) -> NSImage {
+        let symbolName = connected ? "iphone" : "iphone.slash"
+        let description = connected ? "手机已连接" : "手机未连接"
         let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-        if let symbol = NSImage(systemSymbolName: "iphone", accessibilityDescription: "手机工位")?
+        if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)?
             .withSymbolConfiguration(config) {
             symbol.isTemplate = true
             return symbol
@@ -71,9 +91,17 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
                                     xRadius: 2.2, yRadius: 2.2)
             body.lineWidth = 1.6
             body.stroke()
+            if !connected {
+                let slash = NSBezierPath()
+                slash.move(to: NSPoint(x: 3, y: 16))
+                slash.line(to: NSPoint(x: 15, y: 2))
+                slash.lineWidth = 1.6
+                slash.stroke()
+            }
             return true
         }
         image.isTemplate = true
+        image.accessibilityDescription = description
         return image
     }
 

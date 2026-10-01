@@ -6,9 +6,9 @@
 
 App 是菜单栏辅助程序（`LSUIElement`），没有 Dock 图标。应用内用 `Process` 传递参数数组调用随包脚本，不拼接 shell 命令；启动时给脚本补入 Homebrew、系统工具和 Android SDK 常见路径。`adb`、`scrcpy`、`python3` 仍由电脑提供。连接走 `connect.sh`，投屏、截图和录屏沿用现有脚本，确保单设备、mDNS 和 VPN 路由限制仍由同一套逻辑处理。
 
-`NSApplication` 不会强持有 delegate。入口用静态属性保留 `PhoneStationApp`，否则进程可以运行而 `applicationDidFinishLaunching` 不执行，状态栏图标也不会建立。菜单栏入口只放模板手机符号（SF Symbol `iphone`，point size 16），不带标题。这个符号不要再设 `size`：12×12 的框会把字形裁掉，入口看起来是空的。
+`NSApplication` 不会强持有 delegate。入口用静态属性保留 `PhoneStationApp`，否则进程可以运行而 `applicationDidFinishLaunching` 不执行，状态栏图标也不会建立。菜单栏入口不带标题。已连接时是模板符号 `iphone`，其余状态是 `iphone.slash`，都是 point size 16、字重 medium。这两个符号不要设 `size`：12×12 的框会把字形裁掉，入口看起来是空的。两个符号外框一样大，切换时菜单栏项不会左右挤。提示是「手机工位：」加上和面板相同的状态字：检查中、已连接、未验证、未连接。只有在线的那台是 PGT-AN20 才用前一个符号；未验证、多台设备、等待授权和没找到 adb 都用带斜线的。App 一启动就查连接，上一次查完隔 5 秒再查 `adb devices -l`。序列号仍是上次确认过的那台 PGT-AN20 时，这次不读型号。在面板里连接或断开后，图标跟着那次结果变，不必等这 5 秒。这次定时检查不读息屏时间、电量，也不跑 `torch.sh`。
 
-面板最上行的标题是手机名称。这台 PGT-AN20 显示为「荣耀 PGT-AN20」，下一行只写「无线连接」或「USB 连接」，右侧是连接状态。应用名不放在这个标题上。未连接时，下一行是原因。下面三个操作是图标在上、标题在下的方块，符号 16pt，直向留白比早先的一版短。macOS 26 的 SwiftUI `.bordered` 按钮高度是固定的，这样排时标题会被裁成一条线，所以这三个按钮自己画圆角底。投屏或录屏进行中时，对应的方块用自己的颜色标出来。面板高度跟着当前页的理想尺寸走（`NSHostingController.sizingOptions = .preferredContentSize`），不要再写死一个能装下所有页的高度。
+面板最上行的标题是手机名称。这台 PGT-AN20 显示为「荣耀 PGT-AN20」，下一行只写「无线连接」或「USB 连接」。右侧是连接状态；已经读到电量时，状态左边是百分比和电池图标。充电中在百分比后加闪电。这台系统没有 `battery.25.bolt` 这一类不满电的符号，只有满电带闪电，所以闪电单独画。低于 20% 且没在充电时用提醒色。应用名不放在这个标题上。未连接时，下一行是原因。下面三个操作是图标在上、标题在下的方块，符号 16pt，直向留白比早先的一版短。macOS 26 的 SwiftUI `.bordered` 按钮高度是固定的，这样排时标题会被裁成一条线，所以这三个按钮自己画圆角底。分组里的可点行，悬停时加深的底铺满整行，贴住卡片左右边缘；卡片圆角靠外框裁切，行自己不要再画一块更小的圆角底，否则靠分隔线的一侧和左右会露出原来的底。投屏或录屏进行中时，对应的方块用自己的颜色标出来。面板高度跟着当前页的理想尺寸走（`NSHostingController.sizingOptions = .preferredContentSize`），不要再写死一个能装下所有页的高度。
 
 `NSStatusItem.isVisible` 不能说明屏幕上看得到。要看按钮窗口落在不在菜单栏那一截，或看辅助功能里菜单栏项的纵坐标；这台机器上看得见的项大约是 y=5。启动日志的 subsystem 是 `com.qx0657.phonestation`。zsh 里要调用 `/usr/bin/log show`，内置的 `log` 不是这条命令。
 
@@ -16,12 +16,14 @@ App 是菜单栏辅助程序（`LSUIElement`），没有 Dock 图标。应用内
 
 macOS 26 的控制中心另外按 bundle id 记一份允许名单。它在 `~/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist` 的 `trackedApplications` 里，值本身又是一份二进制 plist，由 cfprefsd 缓存。直接改这个文件会被缓存写回去。2026-09-30 这台机器上，`com.qx0657.phonestation` 自己的记录是 `isAllowed` true，但 `com.openai.codex` 的记录是 `isAllowed` false，并且它的 `menuItemLocations` 里还有 `com.qx0657.phonestation`。控制中心日志会出现 `Moving host to blocked list`，窗口停在菜单栏外面（例如 `{{0, -17}}`），进程仍在。把本 App 的 bundle id 从这份已禁用记录的 `menuItemLocations` 里去掉，经带有 `group.com.apple.controlcenter` application-group 权限的进程用 `UserDefaults` 写回，再重启控制中心，图标才出现在菜单栏上。其他 App 的 `isAllowed` 保持原样。
 
-状态读取使用 `adb devices -l`，恰好一台在线设备时再读 `ro.product.model`。只允许 `PGT-AN20` 执行设备操作。其他型号、无法识别型号、多台在线或等待 USB 授权时，面板显示原因并停用设备操作。无线连接既可能以 `IP:端口`、也可能以 `._adb-tls-connect._tcp` mDNS 名称出现在 adb 序列号里；这台 PGT-AN20 当前是后一种。打开面板时会重新读连接、息屏时间和闪光灯状态，这些读取不会改设置，也不会触发截屏、投屏、录屏或手机提醒。
+状态读取使用 `adb devices -l`，恰好一台在线设备时再读 `ro.product.model`。只允许 `PGT-AN20` 执行设备操作。其他型号、无法识别型号、多台在线或等待 USB 授权时，面板显示原因并停用设备操作，菜单栏图标保持未连接的那一个。无线连接既可能以 `IP:端口`、也可能以 `._adb-tls-connect._tcp` mDNS 名称出现在 adb 序列号里；这台 PGT-AN20 当前是后一种。打开面板时会重新读连接、息屏时间、闪光灯状态和电量，这些读取不会改设置，也不会触发截屏、投屏、录屏或手机提醒。电量来自 `dumpsys battery` 的 `level`、`scale` 和 `status`；`status` 为 2 时算充电中。菜单栏那次定时检查只决定图标，不代替打开面板时的这几项读取。
 
-投屏、录屏和「灯光跟随声音」由 App 持有，收起面板不影响它们。录屏停止时给 `scrcpy` 发 `SIGINT`，等它退出后再检查文件并显示结果；不要直接强杀，否则 MP4 可能没有完整收尾。跟随声音停止时同样发 `SIGINT`，脚本会把灯关掉。退出 App 时先结束录屏和跟随声音。截图和录屏分别保存在原脚本使用的 `~/Pictures/scrcpy/`、`~/Movies/scrcpy/`，在「更多工具与设置」里列出最近文件。
+主页在「连接与配对」和「更多工具与设置」之间有「adb 命令」。一条命令是名称，加上 `adb -s 序列号` 后面的参数。点一行就在当前这台已验证的手机上执行；铅笔进入编辑。参数在 App 里按引号拆开，交给 `adb` 的参数数组，不经过本机 shell，所以不会展开 `$` 和通配符。管道写在一对引号里才会在手机上执行，例如 `shell "dumpsys window | grep mCurrentFocus"`。参数里不要再写 `-s` 或 `--serial`。超过 15 秒会停，输出只留末尾 12 行，可以复制。列表存在本机偏好 `adbCommands.v1`。第一次使用放了「前台应用」和「唤醒」；删掉之后不会再自动加回来。电量不在这条列表里。「在终端中打开 shell」启动「终端」，用 AppleScript 的 `quoted form` 把 adb 路径和序列号放进 `adb -s <序列号> shell`。未连接或未验证时，执行和打开终端变淡并且不能点；编辑和新建仍然可以。
+
+投屏、录屏和「灯光跟随声音」由 App 持有，收起面板不影响它们。点「打开投屏」时本 App 还是活动应用，scrcpy 窗口要接着到前台。这个 App 是 `LSUIElement`，macOS 14 起 SDL 也不会默认抢前台，所以窗口会留在后面。窗口一旦出现，就 `yieldActivation` 给该进程，再 `activate(from:)`。大约每 0.25 秒看一次，最多约 30 秒；进程退出或已经在前台就停。不要设 `SDL_MAC_BACKGROUND_APP=0`：那条会先把 Dock 激活到前面。从终端跑 `mirror.sh` 不用这段逻辑。录屏停止时给 `scrcpy` 发 `SIGINT`，等它退出后再检查文件并显示结果；不要直接强杀，否则 MP4 可能没有完整收尾。跟随声音停止时同样发 `SIGINT`，脚本会把灯关掉。退出 App 时先结束录屏和跟随声音。截图和录屏分别保存在原脚本使用的 `~/Pictures/scrcpy/`、`~/Movies/scrcpy/`，在「更多工具与设置」里列出最近文件。
 
 跟随声音的采集进程由这个 App 拉起，系统把权限算在 `com.qx0657.phonestation` 上。`Info.plist` 里的 `NSAudioCaptureUsageDescription` 不能去掉：没有它时采集调用会成功，但音量一直是 0，权限窗口也不出现。面板在几秒后仍没有声音时，会提示到「系统录音」，并可以打开那一页。允许之后要关掉再打开一次。细节在 [torch.md](torch.md)。
 
-本机的 Command Line Tools 可以编译并临时签署这个 App；完整 Xcode 不在当前开发者目录中。此构建只供本机试用。给其他 Mac 分发时，还需要处理依赖安装、Developer ID 签名和公证。面板可以连接和断开无线、保持亮屏、开关闪光灯，以及让灯跟随这台 Mac 正在播放的声音。第一次无线配对、会话提醒、MT 管理器仍按 README 的脚本入口操作。
+本机的 Command Line Tools 可以编译并临时签署这个 App；完整 Xcode 不在当前开发者目录中。此构建只供本机试用。给其他 Mac 分发时，还需要处理依赖安装、Developer ID 签名和公证。面板可以连接和断开无线、显示电量、保持亮屏、开关闪光灯、让灯跟随这台 Mac 正在播放的声音，以及运行保存的 adb 命令。第一次无线配对、会话提醒、MT 管理器仍按 README 的脚本入口操作。
 
 「更多工具与设置」里的开机自启走 `SMAppService.mainApp`。`enabled` 才算已经开着；`requiresApproval` 时开关仍显示为开，并可以打开「系统设置 › 通用 › 登录项与扩展」。登录项只认 Launch Services 能看见的包：放在「应用程序」或用户目录下的 Applications 里才能登记。`build/.phone-station/` 是隐藏的构建目录，从那里打开时登记会被拒绝，面板会提示先放到「应用程序」再打开那个副本。版本号读 `CFBundleShortVersionString` 和 `CFBundleVersion`，显示在「关于」，「更多工具与设置」的关于一行上也有。
