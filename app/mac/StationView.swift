@@ -19,6 +19,8 @@ struct StationView: View {
                     .id(model.commandDraftToken)
             case .more:
                 morePage
+            case .files:
+                filesPage
             case .about:
                 aboutPage
             }
@@ -46,6 +48,10 @@ struct StationView: View {
                     navigationRow("连接与配对", symbol: "wifi") { model.page = .connection }
                     groupDivider.padding(.horizontal, 10)
                     navigationRow("adb 命令", symbol: "terminal") { model.page = .commands }
+                    groupDivider.padding(.horizontal, 10)
+                    navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail) {
+                        model.page = .files
+                    }
                     groupDivider.padding(.horizontal, 10)
                     navigationRow("更多工具与设置", symbol: "slider.horizontal.3") {
                         model.page = .more
@@ -380,52 +386,6 @@ struct StationView: View {
                 .elevatedGroup()
 
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionTitle("最近文件")
-                    if model.recentFiles.isEmpty {
-                        Text("截图和录屏完成后，会显示在这里。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 2)
-                    } else {
-                        VStack(spacing: 0) {
-                            let recent = Array(model.recentFiles.prefix(3))
-                            ForEach(Array(recent.enumerated()), id: \.element.path) { index, file in
-                                if index > 0 {
-                                    groupDivider.padding(.leading, 38).padding(.trailing, 10)
-                                }
-                                Button {
-                                    model.reveal(file)
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: file.pathExtension.lowercased() == "png" ? "photo" : "film")
-                                            .frame(width: 18)
-                                            .foregroundStyle(.secondary)
-                                            .accessibilityHidden(true)
-                                        Text(file.lastPathComponent)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                        Spacer(minLength: 8)
-                                        Image(systemName: "arrow.up.forward.square")
-                                            .font(.caption)
-                                            .foregroundStyle(.tertiary)
-                                            .accessibilityHidden(true)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(PressFadeStyle())
-                                .background { HoverWash(radius: 0) }
-                                .help("在 Finder 中显示 \(file.lastPathComponent)")
-                            }
-                        }
-                        .elevatedGroup()
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
                     sectionTitle("本机工具")
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(model.dependencyDetails, id: \.0) { item in
@@ -466,6 +426,127 @@ struct StationView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { model.refreshLoginItem() }
+    }
+
+    private var recentFilesDetail: String {
+        switch model.recentFiles.count {
+        case 0: return "截图和录屏"
+        case 1: return "1 个文件"
+        default: return "\(model.recentFiles.count) 个文件"
+        }
+    }
+
+    private var filesPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            subpageHeader("最近文件")
+            if model.recentFiles.isEmpty {
+                Text("截图和录屏完成后，会显示在这里。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.recentFiles.enumerated()), id: \.element.path) { index, file in
+                        if index > 0 {
+                            groupDivider.padding(.leading, 56).padding(.trailing, 10)
+                        }
+                        recentFileRow(file)
+                    }
+                }
+                .elevatedGroup()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+        }
+        .onAppear { model.refreshRecentFiles() }
+        .onDisappear { model.dismissRecentPreview() }
+    }
+
+    private func recentFileRow(_ file: URL) -> some View {
+        let name = file.lastPathComponent
+        let copied = model.copiedRecentPath == file.path
+        let hovered = model.hoveredRecentPath == file.path
+        return HStack(spacing: 0) {
+            Button {
+                model.copyRecentFile(file)
+            } label: {
+                HStack(spacing: 10) {
+                    recentThumb(file)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(recentMeta(file))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(copied ? "已复制" : "复制")
+                        .font(.system(size: 12))
+                        .foregroundStyle(copied ? StationPalette.connected : Color.secondary)
+                        .frame(width: 46, alignment: .trailing)
+                }
+                .padding(.leading, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressFadeStyle())
+            .accessibilityLabel(copied ? "已复制 \(name)" : "复制 \(name)")
+            .help(RecentFileStyle.kind(for: file) == "录屏" ? "把文件复制到剪贴板" : "把图片复制到剪贴板")
+            Button {
+                model.reveal(file)
+            } label: {
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 28, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressFadeStyle())
+            .padding(.trailing, 6)
+            .accessibilityLabel("在 Finder 中显示 \(name)")
+            .help("在 Finder 中显示")
+        }
+        .background {
+            HoverWash(
+                radius: 0,
+                onInside: { inside in model.setRecentHover(file, inside: inside) },
+                onFrame: hovered ? { rect, window in
+                    model.setRecentHoverAnchor(file, row: rect, host: window)
+                } : nil)
+        }
+    }
+
+    private func recentThumb(_ file: URL) -> some View {
+        let symbol = RecentFileStyle.kind(for: file) == "录屏" ? "film" : "photo"
+        return ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(StationPalette.background)
+            if let image = model.recentThumbnails[file.path] {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36, alignment: .top)
+                    .clipped()
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    private func recentMeta(_ file: URL) -> String {
+        let kind = RecentFileStyle.kind(for: file)
+        guard let date = model.recentModified[file.path] else { return kind }
+        return "\(kind) · \(RecentFileStyle.date.string(from: date))"
     }
 
     private var aboutPage: some View {
@@ -800,6 +881,8 @@ private struct PressFadeStyle: ButtonStyle {
 private struct HoverWash: NSViewRepresentable {
     var radius: CGFloat = 8
     var enabled: Bool = true
+    var onInside: ((Bool) -> Void)?
+    var onFrame: ((NSRect, NSWindow) -> Void)?
 
     func makeNSView(context: Context) -> HoverWashView {
         let view = HoverWashView()
@@ -811,7 +894,10 @@ private struct HoverWash: NSViewRepresentable {
     func updateNSView(_ nsView: HoverWashView, context: Context) {
         nsView.radius = radius
         nsView.tracksHover = enabled
+        nsView.onInside = onInside
+        nsView.onFrame = onFrame
         if !enabled { nsView.clearWash() }
+        if onFrame != nil { nsView.reportFrameIfNeeded(deferred: true) }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: HoverWashView, context: Context) -> CGSize? {
@@ -825,7 +911,10 @@ private final class HoverWashView: NSView {
         didSet { applyCorner() }
     }
     var tracksHover = true
+    var onInside: ((Bool) -> Void)?
+    var onFrame: ((NSRect, NSWindow) -> Void)?
     private var tracking: NSTrackingArea?
+    private var lastReported: NSRect?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -858,10 +947,27 @@ private final class HoverWashView: NSView {
     override func mouseEntered(with event: NSEvent) {
         guard tracksHover else { return }
         fade(to: NSColor.labelColor.withAlphaComponent(0.06).cgColor)
+        onInside?(true)
+        reportFrameIfNeeded(deferred: false)
     }
 
     override func mouseExited(with event: NSEvent) {
+        lastReported = nil
         clearWash()
+        onInside?(false)
+    }
+
+    func reportFrameIfNeeded(deferred: Bool) {
+        guard let window, let onFrame else { return }
+        let rect = window.convertToScreen(convert(bounds, to: nil))
+        guard rect.width > 1, rect.height > 1 else { return }
+        if let lastReported, lastReported.equalTo(rect) { return }
+        lastReported = rect
+        if deferred {
+            DispatchQueue.main.async { onFrame(rect, window) }
+        } else {
+            onFrame(rect, window)
+        }
     }
 
     func clearWash() {

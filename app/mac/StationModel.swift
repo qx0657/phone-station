@@ -178,6 +178,7 @@ final class StationModel: ObservableObject {
         case commands
         case editCommand
         case more
+        case files
         case about
     }
 
@@ -202,6 +203,10 @@ final class StationModel: ObservableObject {
     /// 采集进程还在，但几秒内音量一直是 0。这时系统多半没把「系统录音」给这个 App。
     @Published private(set) var beatNeedsAudioPermission = false
     @Published private(set) var recentFiles: [URL] = []
+    @Published private(set) var recentModified: [String: Date] = [:]
+    @Published private(set) var recentThumbnails: [String: NSImage] = [:]
+    @Published private(set) var hoveredRecentPath: String?
+    @Published private(set) var copiedRecentPath: String?
     @Published private(set) var opensAtLogin = false
     @Published private(set) var loginItemNeedsApproval = false
     @Published private(set) var loginItemNote: String?
@@ -237,6 +242,12 @@ final class StationModel: ObservableObject {
     private var recordFile: URL?
     private var quitAfterRecording = false
     private var quitAfterBeat = false
+    private let recentPreview = RecentPreviewPanel()
+    private var recentHoverAnchor: NSRect?
+    private weak var recentHost: NSWindow?
+    private var thumbnailLoad: Task<Void, Never>?
+    private var thumbnailToken = 0
+    private var copyFeedback: Task<Void, Never>?
     private var beatStopRequested = false
     private var beatGeneration = 0
     private var torchAfterBeat = false
@@ -879,17 +890,137 @@ final class StationModel: ObservableObject {
     func refreshRecentFiles() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let folders = [home.appendingPathComponent("Pictures/scrcpy"), home.appendingPathComponent("Movies/scrcpy")]
-        recentFiles = folders.flatMap { folder in
-            (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
+        let dated: [(URL, Date)] = folders.flatMap { folder in
+            (try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles])) ?? []
         }
         .filter { ["png", "mp4", "mkv"].contains($0.pathExtension.lowercased()) }
-        .sorted {
-            let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return left > right
+        .map { url in
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return (url, modified)
         }
-        .prefix(5)
+        .sorted { $0.1 > $1.1 }
+        .prefix(8)
         .map { $0 }
+        recentFiles = dated.map(\.0)
+        recentModified = Dictionary(uniqueKeysWithValues: dated.map { ($0.0.path, $0.1) })
+        let keep = Set(recentFiles.map(\.path))
+        recentThumbnails = recentThumbnails.filter { keep.contains($0.key) }
+        if let hoveredRecentPath, !keep.contains(hoveredRecentPath) {
+            dismissRecentPreview()
+        }
+        loadRecentThumbnails()
+    }
+
+    func setRecentHover(_ url: URL, inside: Bool) {
+        if inside {
+            hoveredRecentPath = url.path
+        } else if hoveredRecentPath == url.path {
+            dismissRecentPreview()
+        }
+    }
+
+    func setRecentHoverAnchor(_ url: URL, row: NSRect, host: NSWindow) {
+        guard hoveredRecentPath == url.path else { return }
+        let sameRow = recentHoverAnchor?.equalTo(row) ?? false
+        let sameHost = recentHost === host
+        recentHoverAnchor = row
+        recentHost = host
+        if sameRow, sameHost, recentPreview.isVisible { return }
+        layoutRecentPreview()
+    }
+
+    func dismissRecentPreview() {
+        hoveredRecentPath = nil
+        recentHoverAnchor = nil
+        recentHost = nil
+        recentPreview.hide()
+    }
+
+    func copyRecentFile(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let png = ext == "png" ? try? Data(contentsOf: url) : nil
+            let path = ext == "png" ? nil : url.path
+            let fileURL = url.absoluteString
+            let owner = self
+            await MainActor.run {
+                owner?.writeRecentCopy(url: url, png: png, path: path, fileURL: fileURL)
+            }
+        }
+    }
+
+    private func writeRecentCopy(url: URL, png: Data?, path: String?, fileURL: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        let item = NSPasteboardItem()
+        if let png {
+            item.setData(png, forType: .png)
+        }
+        if let path {
+            item.setString(path, forType: .string)
+        }
+        item.setString(fileURL, forType: .fileURL)
+        guard board.writeObjects([item]) else { return }
+        noteRecentCopied(url)
+    }
+
+    private func noteRecentCopied(_ url: URL) {
+        copiedRecentPath = url.path
+        copyFeedback?.cancel()
+        copyFeedback = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled, self.copiedRecentPath == url.path else { return }
+            self.copiedRecentPath = nil
+        }
+    }
+
+    private func loadRecentThumbnails() {
+        thumbnailLoad?.cancel()
+        thumbnailToken += 1
+        let token = thumbnailToken
+        let jobs = recentFiles.filter { recentThumbnails[$0.path] == nil }
+        guard !jobs.isEmpty else { return }
+        thumbnailLoad = Task.detached(priority: .utility) { [weak self] in
+            for url in jobs {
+                if Task.isCancelled { return }
+                let cg = RecentFileThumbnail.cgImage(for: url, maxPixel: 720)
+                let owner = self
+                await MainActor.run {
+                    owner?.storeRecentThumbnail(cg, for: url, token: token)
+                }
+            }
+        }
+    }
+
+    private func storeRecentThumbnail(_ cg: CGImage?, for url: URL, token: Int) {
+        guard thumbnailToken == token else { return }
+        guard recentFiles.contains(where: { $0.path == url.path }) else { return }
+        guard let cg else { return }
+        let scale: CGFloat = 2
+        recentThumbnails[url.path] = NSImage(
+            cgImage: cg,
+            size: NSSize(width: CGFloat(cg.width) / scale, height: CGFloat(cg.height) / scale))
+        if hoveredRecentPath == url.path {
+            layoutRecentPreview()
+        }
+    }
+
+    private func layoutRecentPreview() {
+        guard let path = hoveredRecentPath,
+              let url = recentFiles.first(where: { $0.path == path }),
+              let row = recentHoverAnchor,
+              let host = recentHost else {
+            recentPreview.hide()
+            return
+        }
+        recentPreview.present(
+            name: url.lastPathComponent,
+            image: recentThumbnails[path],
+            row: row,
+            host: host)
     }
 
     func reveal(_ url: URL) {

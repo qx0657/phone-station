@@ -18,6 +18,9 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var menuBarShowsConnected: Bool?
+    /// Clicks in other apps never reach an `LSUIElement` popover, so `.transient` stays open.
+    private var outsideClickMonitor: Any?
+    private var localDismissMonitor: Any?
 
     static func main() {
         let app = NSApplication.shared
@@ -51,6 +54,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         let panel = NSPopover()
         panel.behavior = .transient
         panel.animates = false
+        panel.delegate = self
         let host = NSHostingController(rootView: StationView(model: station))
         // Hug whichever page is showing. A fixed height leaves a gap under the shorter ones.
         host.sizingOptions = .preferredContentSize
@@ -132,11 +136,87 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button, let popover else { return }
         if popover.isShown {
             popover.performClose(nil)
-            station.page = .main
         } else {
             station.refresh()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func installDismissMonitors() {
+        removeDismissMonitors()
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            let point = NSEvent.mouseLocation
+            MainActor.assumeIsolated {
+                self?.closeFromOutsideClick(at: point)
+            }
+        }
+        localDismissMonitor = NSEvent.addLocalMonitorForEvents(matching: [clicks, .keyDown]) { [weak self] event in
+            let escape = event.type == .keyDown && event.keyCode == 53
+            let mouse = event.type == .leftMouseDown || event.type == .rightMouseDown
+            let point = NSEvent.mouseLocation
+            let swallow = MainActor.assumeIsolated { () -> Bool in
+                self?.handleLocalDismiss(escape: escape, mouse: mouse, at: point) ?? false
+            }
+            return swallow ? nil : event
+        }
+    }
+
+    private func removeDismissMonitors() {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        if let localDismissMonitor {
+            NSEvent.removeMonitor(localDismissMonitor)
+            self.localDismissMonitor = nil
+        }
+    }
+
+    /// The status item handles its own toggle. Closing here as well would reopen on the same click.
+    private func closeFromOutsideClick(at point: NSPoint) {
+        guard popover?.isShown == true else { return }
+        if clickHitsStatusItem(point) || clickHitsPopover(point) { return }
+        logger.notice("Menu bar panel closed from an outside click")
+        popover?.performClose(nil)
+    }
+
+    /// Escape is swallowed. An outside click still goes through, so the window under it is reached.
+    private func handleLocalDismiss(escape: Bool, mouse: Bool, at point: NSPoint) -> Bool {
+        guard popover?.isShown == true else { return false }
+        if escape {
+            logger.notice("Menu bar panel closed from Escape")
+            popover?.performClose(nil)
+            return true
+        }
+        if mouse, !clickHitsStatusItem(point), !clickHitsPopover(point) {
+            logger.notice("Menu bar panel closed from an outside click")
+            popover?.performClose(nil)
+        }
+        return false
+    }
+
+    private func clickHitsStatusItem(_ point: NSPoint) -> Bool {
+        guard let button = statusItem?.button, let window = button.window else { return false }
+        let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
+        return rect.contains(point)
+    }
+
+    private func clickHitsPopover(_ point: NSPoint) -> Bool {
+        guard let window = popover?.contentViewController?.view.window else { return false }
+        return window.frame.contains(point)
+    }
+}
+
+extension PhoneStationApp: NSPopoverDelegate {
+    func popoverDidShow(_ notification: Notification) {
+        installDismissMonitors()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        removeDismissMonitors()
+        station.dismissRecentPreview()
+        station.page = .main
     }
 }
