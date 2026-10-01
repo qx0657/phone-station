@@ -10,4 +10,5 @@
 | [notify.md](notify.md) | `scripts/notify.sh` | 为什么不走通知音量。下拉通知默认只更新一条，不发声；`--stack` 另发一条。播放程序的源码在 `lib/notify-sound/`，用 `build.sh` 编成 dex。全局 hook 的事件和安装位置 |
 | [torch.md](torch.md) | `scripts/torch.sh` | 为什么不能写灯节点。闪光灯要留在手机上的进程里；跟随声音采的是系统混音 |
 | [screenshot-cleanup.md](screenshot-cleanup.md) | 图库截图 | 哪些截图可以删。界面类和重复张的像素阈值。张数是 2026-09-29 这台 PGT-AN20 上的 |
+| [adb-keep.md](adb-keep.md) | `scripts/adb-keep.sh` | 为什么无线调试会自己关，以及手机上的常驻应用何时把它写回去。Shizuku 跟着会话一起退出。开机自启还要在荣耀的应用启动管理里允许 |
 | [android-cli.md](android-cli.md) | `android` | 建工程、查文档、装 APK、看布局。不参与 `scripts/` 里的手机操作，安装命令写在这里 |
