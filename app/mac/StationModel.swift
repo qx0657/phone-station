@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OSLog
 import ServiceManagement
 
 private struct CommandResult {
@@ -119,6 +120,8 @@ private struct LinkReading: Sendable {
     var transport: String = ""
     var link: Link
     var serial: String? = nil
+    /// 一台设备都没有，而且不是在等手机上点允许。这种才自动跑 connect.sh。
+    var reconnectable = false
 }
 
 struct SavedAdbCommand: Codable, Equatable, Identifiable, Sendable {
@@ -231,6 +234,13 @@ final class StationModel: ObservableObject {
     var onLinkChange: (@MainActor (Bool) -> Void)?
     private var linkWatch: Task<Void, Never>?
     private static let linkWatchInterval: UInt64 = 5_000_000_000
+    private var decision = ReconnectDecision()
+    private var connectIsManual = false
+    /// 断开进行中时又点了连接，晚到的断开结果不要把暂停写回去。
+    private var connectGeneration = 0
+    @Published private(set) var isReconnecting = false
+    @Published private var willReconnect = false
+    private let logger = Logger(subsystem: "com.qx0657.phonestation", category: "link")
     private var statusRevision = 0
     private var controlEpoch = 0
     private var mirrorProcess: Process?
@@ -257,6 +267,7 @@ final class StationModel: ObservableObject {
     var isChecking: Bool { link == .checking }
     var statusReady: Bool { link == .connected }
     var statusLabel: String {
+        if isReconnecting { return "正在重新连接" }
         switch link {
         case .checking: return "检查中"
         case .connected: return "已连接"
@@ -283,11 +294,18 @@ final class StationModel: ObservableObject {
         case .connected, .unverified:
             return transport
         case .offline:
+            if decision.holdOffline {
+                return "已断开无线。再点「连接手机」，之后才会自动重连。"
+            }
+            if willReconnect {
+                return "掉线后会自动连接。"
+            }
             return deviceDetail
         }
     }
 
     var statusTone: StatusTone {
+        if isReconnecting { return .caution }
         switch link {
         case .connected: return .ready
         case .unverified: return .caution
@@ -338,7 +356,8 @@ final class StationModel: ObservableObject {
             Self.readLink(trustedSerial: trusted)
         }.value
         acceptStatus(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
-                     link: reading.link, serial: reading.serial, readingControls: readingControls)
+                     link: reading.link, serial: reading.serial, readingControls: readingControls,
+                     reconnectable: reading.reconnectable)
     }
 
     private nonisolated static func readLink(trustedSerial: String?) -> LinkReading {
@@ -361,7 +380,8 @@ final class StationModel: ObservableObject {
         guard let only = online.first else {
             let unauthorized = lines.contains { $0.contains("unauthorized") }
             let detail = unauthorized ? "请在手机上允许 USB 调试。" : "接入 USB，或在手机上开启无线调试后再连接。"
-            return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline)
+            return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline,
+                               reconnectable: !unauthorized)
         }
         if let trustedSerial, only == trustedSerial {
             return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
@@ -384,7 +404,8 @@ final class StationModel: ObservableObject {
     }
 
     private func acceptStatus(_ revision: Int, name: String, detail: String, transport: String = "",
-                              link newLink: Link, serial newSerial: String? = nil, readingControls: Bool) {
+                              link newLink: Link, serial newSerial: String? = nil, readingControls: Bool,
+                              reconnectable: Bool = false) {
         guard revision == statusRevision else { return }
         if deviceName != name { deviceName = name }
         if deviceDetail != detail { deviceDetail = detail }
@@ -409,6 +430,85 @@ final class StationModel: ObservableObject {
             if beatProcess == nil, torchOn { torchOn = false }
         }
         onLinkChange?(newLink == .connected)
+        considerReconnect(reconnectable: reconnectable)
+    }
+
+    /// 自动连接不写 activity，面板上的录屏和跟随声音仍能停。
+    private func considerReconnect(reconnectable: Bool) {
+        let reading: ReconnectDecision.Reading
+        switch link {
+        case .connected, .unverified:
+            reading = .online
+        case .offline where reconnectable:
+            reading = .reconnectable
+        case .checking, .offline:
+            reading = .idle
+        }
+        let start = decision.consider(reading, now: Date())
+        let waiting = link == .offline && reconnectable && !decision.holdOffline
+        if willReconnect != waiting { willReconnect = waiting }
+        guard start else { return }
+        connectIsManual = false
+        setReconnecting(true)
+        logger.notice("Automatic connect started")
+        launchConnect()
+    }
+
+    private func setReconnecting(_ value: Bool) {
+        guard isReconnecting != value else { return }
+        isReconnecting = value
+        onLinkChange?(link == .connected)
+    }
+
+    private func launchConnect() {
+        Task.detached(priority: .userInitiated) {
+            let result = StationRunner.scriptResult("connect.sh", timeout: 30)
+            await MainActor.run {
+                self.finishConnect(result)
+            }
+        }
+    }
+
+    private func finishConnect(_ result: CommandResult) {
+        let manual = connectIsManual
+        connectIsManual = false
+        if manual { activity = nil }
+        setReconnecting(false)
+        let held = decision.holdOffline
+        decision.finish(success: result.succeeded, cancelled: held, now: Date())
+        logger.notice("Connect finished, ok: \(result.succeeded, privacy: .public), manual: \(manual, privacy: .public), held: \(held, privacy: .public)")
+        if held {
+            if result.succeeded, activity == nil {
+                quietDisconnect()
+            }
+            return
+        }
+        if result.succeeded {
+            notice = nil
+        } else if manual {
+            notice = result.timedOut ? "连接超时。请检查手机的无线调试和 Wi-Fi。" : Self.reason(result.output, fallback: "连接失败。请检查无线调试或 USB 授权。")
+        }
+        if manual {
+            refresh()
+        } else {
+            Task { await self.probeLink(readingControls: result.succeeded) }
+        }
+    }
+
+    /// 用户已经要求保持断开，但迟到的 connect.sh 又连上了。先核对这一次还算不算数，再拆掉。
+    private func quietDisconnect() {
+        let generation = connectGeneration
+        Task { @MainActor in
+            guard generation == self.connectGeneration, self.decision.holdOffline else { return }
+            await Task.detached(priority: .utility) {
+                _ = StationRunner.scriptResult("disconnect.sh", timeout: 20)
+            }.value
+            guard generation == self.connectGeneration, self.decision.holdOffline else {
+                await self.probeLink(readingControls: false)
+                return
+            }
+            await self.probeLink(readingControls: false)
+        }
     }
 
     private func refreshDeviceControls(serial: String) {
@@ -460,29 +560,39 @@ final class StationModel: ObservableObject {
 
     func connect() {
         guard activity == nil else { return }
-        activity = "正在连接手机…"
+        connectGeneration += 1
         notice = nil
-        Task.detached(priority: .userInitiated) {
-            let result = StationRunner.scriptResult("connect.sh", timeout: 30)
-            await MainActor.run {
-                self.activity = nil
-                if !result.succeeded {
-                    self.notice = result.timedOut ? "连接超时。请检查手机的无线调试和 Wi-Fi。" : Self.reason(result.output, fallback: "连接失败。请检查无线调试或 USB 授权。")
-                }
-                self.refresh()
-            }
+        connectIsManual = true
+        setReconnecting(false)
+        if decision.beginManual() {
+            activity = "正在连接手机…"
+            launchConnect()
+        } else {
+            activity = "正在连接手机…"
         }
     }
 
     func disconnect() {
         guard activity == nil else { return }
+        decision.hold()
+        connectGeneration += 1
+        let generation = connectGeneration
         activity = "正在断开无线连接…"
         notice = nil
         Task.detached(priority: .userInitiated) {
             let result = StationRunner.scriptResult("disconnect.sh", timeout: 20)
             await MainActor.run {
+                guard generation == self.connectGeneration else {
+                    if self.activity == "正在断开无线连接…" { self.activity = nil }
+                    return
+                }
                 self.activity = nil
-                self.notice = result.succeeded ? "无线连接已断开。" : Self.reason(result.output, fallback: "断开无线连接失败。")
+                if result.succeeded {
+                    self.notice = "无线连接已断开。"
+                } else {
+                    self.decision.release()
+                    self.notice = Self.reason(result.output, fallback: "断开无线连接失败。")
+                }
                 self.refresh()
             }
         }

@@ -17,6 +17,14 @@ fi
 
 SWIFTC=$(xcrun --find swiftc)
 SDK=$(xcrun --show-sdk-path)
+mkdir -p "$ROOT/build/.phone-station"
+POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
+"$SWIFTC" -parse-as-library -swift-version 5 \
+  -target "$(uname -m)-apple-macosx13.0" -sdk "$SDK" \
+  "$ROOT/app/mac/Reconnect.swift" \
+  "$ROOT/app/mac/ReconnectPolicyTest.swift" \
+  -o "$POLICY_TEST"
+"$POLICY_TEST"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"
 CONTENTS="$STAGING/Contents"
@@ -49,6 +57,7 @@ chmod +x "$RESOURCES/lib/torch-audio/torch-audio"
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
   -framework AVFoundation -framework ImageIO \
   "$ROOT/app/mac/AdbCommandLine.swift" \
+  "$ROOT/app/mac/Reconnect.swift" \
   "$ROOT/app/mac/PhoneStationApp.swift" \
   "$ROOT/app/mac/RecentFiles.swift" \
   "$ROOT/app/mac/StationModel.swift" \

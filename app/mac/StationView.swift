@@ -328,7 +328,7 @@ struct StationView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Text("无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。第一次配对仍按项目说明操作。手机页面上的 172.19.0.1 是 VPN 地址，配对要用局域网地址。")
+                Text("无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。第一次配对仍按项目说明操作。手机页面上的 172.19.0.1 是 VPN 地址，配对要用局域网地址。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -336,7 +336,8 @@ struct StationView: View {
                     Button {
                         model.connect()
                     } label: {
-                        Label("连接手机", systemImage: "wifi")
+                        Label(model.isReconnecting || model.activity == "正在连接手机…" ? "正在连接…" : "连接手机",
+                              systemImage: "wifi")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -568,7 +569,7 @@ struct StationView: View {
                             .textSelection(.enabled)
                     }
                 }
-                Text("从菜单栏连接这台手机，投屏、截取画面、录屏，控制亮屏和闪光灯，并运行保存的 adb 命令。")
+                Text("从菜单栏连接这台手机，掉线后自动重连，投屏、截取画面、录屏，控制亮屏和闪光灯，并运行保存的 adb 命令。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
