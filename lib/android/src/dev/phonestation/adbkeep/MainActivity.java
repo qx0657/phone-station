@@ -30,13 +30,16 @@ public final class MainActivity extends Activity {
     private StationChrome.Fact usbFact;
     private StationChrome.Fact wifiFact;
     private StationChrome.Control mcp;
+    private StationChrome.Control remote;
     private TextView mcpAddress;
+    private TextView remoteValue;
     private TextView notificationValue;
     private TextView permissionValue;
     private String shownConnection;
     private int connectionFade;
     private boolean updatingSwitch;
     private boolean updatingMcp;
+    private boolean updatingRemote;
     private Boolean mcpHeld;
     private long mcpHeldAt;
     private boolean active;
@@ -114,6 +117,7 @@ public final class MainActivity extends Activity {
             if (checked) {
                 FileMcpService.start(this);
             } else {
+                RemoteStore.setEnabled(this, false);
                 FileMcpService.stop(this);
             }
             handler.postDelayed(() -> {
@@ -123,6 +127,31 @@ public final class MainActivity extends Activity {
             }, 400L);
         });
         mcpAddress = ui.address(services);
+        ui.hairline(services, 62);
+        remote = ui.switchRow(services, R.drawable.ic_status_wireless, "远程通道");
+        remote.toggle.setOnCheckedChangeListener((button, checked) -> {
+            if (updatingRemote) {
+                return;
+            }
+            if (checked && !RemoteStore.configured(this)) {
+                updatingRemote = true;
+                remote.toggle.setChecked(false);
+                updatingRemote = false;
+                android.widget.Toast.makeText(this, "先用电脑通过 adb 配对远程通道。", android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+            RemoteStore.setEnabled(this, checked);
+            if (checked) {
+                KeeperStore.setMcpEnabled(this, true);
+            }
+            if (KeeperStore.mcpEnabled(this) || RemoteStore.enabled(this)) {
+                FileMcpService.start(this);
+            } else {
+                FileMcpService.stop(this);
+            }
+            render();
+        });
+        remoteValue = ui.address(services);
 
         LinearLayout settings = ui.card();
         ui.groupTitle(settings, "设置");
@@ -153,7 +182,7 @@ public final class MainActivity extends Activity {
         if (KeeperStore.isEnabled(this)) {
             KeeperService.start(this);
         }
-        if (KeeperStore.mcpEnabled(this)) {
+        if (KeeperStore.mcpEnabled(this) || RemoteStore.enabled(this)) {
             FileMcpService.start(this);
         }
         render();
@@ -167,7 +196,7 @@ public final class MainActivity extends Activity {
         if (KeeperStore.isEnabled(this)) {
             KeeperService.start(this);
         }
-        if (KeeperStore.mcpEnabled(this)) {
+        if (KeeperStore.mcpEnabled(this) || RemoteStore.enabled(this)) {
             FileMcpService.start(this);
         }
         StationNotifications.restore(this);
@@ -195,6 +224,7 @@ public final class MainActivity extends Activity {
         paintFact(usbFact, copy.usb, copy, KeeperCopy.Emphasis.USB);
         paintFact(wifiFact, copy.wifi, copy, KeeperCopy.Emphasis.WIFI);
         paintMcp();
+        paintRemote();
         paintNotification();
         paintPermissions();
     }
@@ -297,6 +327,19 @@ public final class MainActivity extends Activity {
         } else {
             mcpAddress.setVisibility(View.GONE);
         }
+    }
+
+    private void paintRemote() {
+        boolean enabled = RemoteStore.enabled(this);
+        updatingRemote = true;
+        remote.toggle.setChecked(enabled);
+        updatingRemote = false;
+        ui.paintOn(remote.mark, enabled);
+        String value = !RemoteStore.configured(this)
+                ? "未配对"
+                : (PhoneRelayClient.connected() ? "已连接" : (enabled ? "连接中" : "已关闭"));
+        remoteValue.setText(value);
+        remoteValue.setVisibility(View.VISIBLE);
     }
 
     private void paintFact(

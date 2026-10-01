@@ -3,6 +3,7 @@
 # 无线调试页面上的 172.19.0.1 经常是 VPN 地址，
 # 本机 Clash Verge 的 utun 会把这个网段吃掉，adb pair / adb connect 会 protocol fault。
 # 可用的无线地址是 mDNS 解析到、并且路由不走 utun 的局域网地址。
+PHONE_STATION_LIB_DIR=${${(%):-%x}:A:h}
 
 adb_bin() {
   local found sdk
@@ -35,21 +36,7 @@ scrcpy_bin() {
   return 1
 }
 
-# 只接受恰好一台 state=device 的设备，避免投屏接到重复连接上。
+# 只接受唯一一台物理设备。同一手机自动重现的 mDNS 别名按 ro.serialno 归并。
 online_serial() {
-  local adb="$1" line count=0 serial=""
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    count=$((count + 1))
-    serial="$line"
-  done < <("$adb" devices | awk 'NR>1 && $2=="device" {print $1}')
-  if (( count == 0 )); then
-    print -u2 -- "没有在线设备。USB 接上并允许调试，或打开无线调试后运行 scripts/connect.sh。"
-    return 1
-  fi
-  if (( count > 1 )); then
-    print -u2 -- "有多台在线设备。只留一台：多余的无线连接用 scripts/disconnect.sh 断开，多余的 USB 拔掉。"
-    return 1
-  fi
-  print -r -- "$serial"
+  python3 "$PHONE_STATION_LIB_DIR/adb_mdns.py" --adb "$1" serial
 }

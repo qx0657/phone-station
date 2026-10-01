@@ -238,7 +238,7 @@ def emit(services: list[Service]) -> int:
 
 
 def adb_output(adb: str, *args: str) -> str:
-    result = subprocess.run([adb, *args], capture_output=True, text=True)
+    result = subprocess.run([adb, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True)
     return (result.stdout or "") + (result.stderr or "")
 
 
@@ -248,14 +248,6 @@ class Device:
         self.state = state
         self.meta = meta
 
-    def key(self) -> tuple[str, str, str]:
-        product = self.meta.get("product", "")
-        model = self.meta.get("model", "")
-        device = self.meta.get("device", "")
-        if product or model or device:
-            return product, model, device
-        return self.serial, "", ""
-
     def wireless(self) -> bool:
         serial = self.serial
         return ":" in serial or "_adb-tls-" in serial or serial.endswith("._tcp")
@@ -264,17 +256,18 @@ class Device:
 def parse_devices(text: str) -> list[Device]:
     devices: list[Device] = []
     for raw in text.splitlines():
-        parts = raw.split()
-        if len(parts) < 2 or parts[0] == "List":
+        match = re.fullmatch(
+            r"(.+?)\s+(device|offline|unauthorized|authorizing)(?:\s+(.*))?", raw
+        )
+        if not match:
             continue
-        if parts[1] not in {"device", "offline", "unauthorized", "authorizing"}:
-            continue
+        serial, state, details = match.groups()
         meta: dict[str, str] = {}
-        for item in parts[2:]:
+        for item in (details or "").split():
             if ":" in item:
                 key, value = item.split(":", 1)
                 meta[key] = value
-        devices.append(Device(parts[0], parts[1], meta))
+        devices.append(Device(serial, state, meta))
     return devices
 
 
@@ -283,7 +276,7 @@ def list_devices(adb: str) -> list[Device]:
 
 
 def disconnect(adb: str, serial: str) -> None:
-    result = subprocess.run([adb, "disconnect", serial], capture_output=True, text=True)
+    result = subprocess.run([adb, "disconnect", serial], stdin=subprocess.DEVNULL, capture_output=True, text=True)
     message = ((result.stdout or "") + (result.stderr or "")).strip()
     if message:
         print(message)
@@ -291,9 +284,47 @@ def disconnect(adb: str, serial: str) -> None:
 
 def prefer(group: list[Device]) -> Device:
     for device in group:
+        if "_adb-tls-connect._tcp" in device.serial and not any(
+            char.isspace() for char in device.serial
+        ):
+            return device
+    for device in group:
         if "_adb-tls-connect._tcp" in device.serial:
             return device
     return group[0]
+
+
+def online_groups(adb: str) -> list[list[Device]]:
+    online = [device for device in list_devices(adb) if device.state == "device"]
+    if len(online) <= 1:
+        return [online] if online else []
+    groups: dict[tuple[str, str], list[Device]] = {}
+    for device in online:
+        identity = ("transport", device.serial)
+        try:
+            result = subprocess.run(
+                [adb, "-s", device.serial, "shell", "getprop", "ro.serialno"],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3,
+            )
+            physical_serial = result.stdout.strip()
+            if result.returncode == 0 and physical_serial and physical_serial != "unknown":
+                identity = ("device", physical_serial)
+        except subprocess.TimeoutExpired:
+            pass
+        groups.setdefault(identity, []).append(device)
+    return list(groups.values())
+
+
+def unique_serial(adb: str) -> int:
+    groups = online_groups(adb)
+    if not groups:
+        print("没有在线设备。USB 接上并允许调试，或打开无线调试后运行 scripts/connect.sh。", file=sys.stderr)
+        return 1
+    if len(groups) != 1:
+        print("有多台在线设备。只留一台：多余的无线连接用 scripts/disconnect.sh 断开，多余的 USB 拔掉。", file=sys.stderr)
+        return 1
+    print(prefer(groups[0]).serial)
+    return 0
 
 
 def collapse(adb: str) -> int:
@@ -302,13 +333,7 @@ def collapse(adb: str) -> int:
             print(f"断开离线连接 {device.serial}")
             disconnect(adb, device.serial)
 
-    groups: dict[tuple[str, str, str], list[Device]] = {}
-    for device in list_devices(adb):
-        if device.state != "device":
-            continue
-        groups.setdefault(device.key(), []).append(device)
-
-    for group in groups.values():
+    for group in online_groups(adb):
         if len(group) < 2:
             continue
         keep = prefer(group)
@@ -349,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("has-device")
     sub.add_parser("collapse")
+    sub.add_parser("serial")
     sub.add_parser("self-check")
     return parser
 
@@ -374,6 +400,8 @@ def main(argv: list[str]) -> int:
         return 0 if has_online(args.adb) else 1
     if args.cmd == "collapse":
         return collapse(args.adb)
+    if args.cmd == "serial":
+        return unique_serial(args.adb)
     if args.cmd == "list":
         return emit(discover(service_type(args.kind), args.timeout))
     if args.cmd == "wait":

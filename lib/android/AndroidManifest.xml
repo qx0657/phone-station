@@ -73,7 +73,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="电脑经 adb 转发使用本机 MCP" />
+                android:value="电脑经 adb 或远程中继使用本机 MCP" />
         </service>
 
         <service
@@ -128,6 +128,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="dev.phonestation.adbkeep.MCP" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".PhoneRelayControlReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.phonestation.adbkeep.PHONE_RELAY" />
             </intent-filter>
         </receiver>
     </application>

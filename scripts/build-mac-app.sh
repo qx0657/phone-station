@@ -19,6 +19,16 @@ SWIFTC=$(xcrun --find swiftc)
 SDK=$(xcrun --show-sdk-path)
 TARGET="$(uname -m)-apple-macosx13.0"
 mkdir -p "$ROOT/build/.phone-station"
+GO=$(command -v go || true)
+if [[ -z $GO ]]; then
+  print -u2 -- "找不到 Go。先安装 Go 1.23 或更新版本，再构建 Mac App。"
+  exit 1
+fi
+"$GO" -C "$ROOT/lib/remote-gateway" build -trimpath \
+  -o "$ROOT/build/.phone-station/phone-relay-gateway" .
+"$SWIFTC" -O -target "$TARGET" -sdk "$SDK" -framework Security \
+  -o "$ROOT/build/.phone-station/phone-relay-keychain" \
+  "$ROOT/lib/remote-gateway/keychain/main.swift"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 \
   -target "$TARGET" -sdk "$SDK" \
@@ -48,6 +58,9 @@ for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh
 done
 cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"
 cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/lib/torch_beat.py" "$RESOURCES/lib/"
+cp "$ROOT/build/.phone-station/phone-relay-gateway" "$RESOURCES/lib/phone-relay-gateway"
+cp "$ROOT/build/.phone-station/phone-relay-keychain" "$RESOURCES/lib/phone-relay-keychain"
+chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain"
 mkdir -p "$RESOURCES/lib/torch-audio"
 cp "$ROOT/lib/torch-audio/main.swift" "$RESOURCES/lib/torch-audio/"
 audio_src="$ROOT/lib/torch-audio/main.swift"

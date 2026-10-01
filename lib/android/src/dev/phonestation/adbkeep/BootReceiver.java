@@ -14,7 +14,7 @@ public final class BootReceiver extends BroadcastReceiver {
             }
             KeeperService.start(context);
         }
-        if (KeeperStore.mcpEnabled(context)) {
+        if (KeeperStore.mcpEnabled(context) || RemoteStore.enabled(context)) {
             FileMcpService.start(context);
         }
     }

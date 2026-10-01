@@ -35,12 +35,13 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 只解释原因、或只给某条命令补一个已经有文档的坑，更新那篇文档，不新建 skill。跟这台手机无关的个人 Skill 不放进本仓库。
 
-写入的是这次验证过的结论。会变的端口和地址写怎么查，不写当天的数。某台机器上的差异写明机型。原有说法不对就改原句。手机界面上的地址是本机 `http://127.0.0.1:8765/mcp`。电脑上的转发地址和 `Authorization` 在菜单栏「MCP服务」，也以 `./scripts/mcp.sh` 当次打印为准。令牌随进程重起更换，不写进仓库，也不写进手机界面。
+写入的是这次验证过的结论。会变的端口和地址写怎么查，不写当天的数。某台机器上的差异写明机型。原有说法不对就改原句。手机界面上的地址是本机 `http://127.0.0.1:8765/mcp`。电脑固定访问本机网关 `http://127.0.0.1:18765/mcp`；adb 转发用 `18766`，深圳远程中继只切换 MCP 请求，不替代无线 adb。菜单栏「MCP服务」和 `./scripts/mcp.sh` 显示网关令牌与当前通道。网关令牌及临时手机本地令牌保存在用户配置目录，权限为 `0600`；手机服务自己的令牌随进程重起更换，仅通过 adb 读取。远程中继令牌在 Mac 钥匙串和 Android Keystore。任何令牌都不写进仓库或手机界面。
 
 ## 布局
 
 - `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`android.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
 - `lib/` 是这些脚本的内部实现，不要让用户直接运行。新脚本用 `source "$DIR/../lib/common.sh"`，`DIR` 取脚本自己的目录。无线地址发现走 `lib/adb_mdns.py`；USB 序列号直接来自 `adb devices`。
+- `lib/remote-gateway/` 是 Mac 本机 MCP 网关源码，构建时打包网关和钥匙串助手。它优先走本地 adb；中继仅承接手机工位现有 MCP 工具，完整 adb、投屏、录屏与安装仍要求本机 adb。
 - 脚本是 zsh，`set -euo pipefail`。不要用变量名 `path`，zsh 里它和 `PATH` 绑在一起，赋空值会把后续命令全部变成找不到。
 - 每个用户脚本支持 `-h`。需要设备时先跑 `scripts/connect.sh`，再用 `online_serial` 拿到唯一的在线设备。已经有在线设备（USB 或无线）时，`connect.sh` 只去掉重复连接。
 
@@ -54,7 +55,7 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 
 ## 文件
 
-内部存储里的普通文件走手机上「手机工位」的 MCP，工具名是 `station_file_*`。同一服务里还有只读的 `station_device_status` 和 `station_storage_summary`，以及 `station_file_open`、`station_stay_awake`、`station_notify`、`station_clipboard_set`。长说明在 `docs/mcp.md`，步骤在 `.agents/skills/phone-mcp/SKILL.md`。`scripts/mcp.sh` 打开服务并打印本机地址和 `Authorization` 头。服务只听手机的 `127.0.0.1`。没有明确要求时只用读取类工具。打开文件、保持亮屏、发提醒、写剪贴板和改文件都要有明确要求。`Android/data`、`Android/obb` 和别的应用的私有目录不在这个服务里。删除不进回收站。
+内部存储里的普通文件走手机上「手机工位」的 MCP，工具名是 `station_file_*`。同一服务里还有只读的 `station_device_status` 和 `station_storage_summary`，以及 `station_file_open`、`station_stay_awake`、`station_notify`、`station_clipboard_set`。长说明在 `docs/mcp.md`，步骤在 `.agents/skills/phone-mcp/SKILL.md`。`scripts/mcp.sh` 打开服务并打印统一网关地址、`Authorization` 头和当前通道。手机服务只听 `127.0.0.1`；深圳中继仅承载同一批 MCP 工具。没有明确要求时只用读取类工具。打开文件、保持亮屏、发提醒、写剪贴板和改文件都要有明确要求。`Android/data`、`Android/obb` 和别的应用的私有目录不在这个服务里。删除不进回收站。
 
 ## 已验证设备上的命令差异
 
@@ -68,7 +69,7 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 
 `scripts/status.sh` 只读，可以随时跑。`scripts/notify.sh`、`scripts/agent-notify-hook.sh`、`scripts/vibrate.sh`、`scripts/screenshot.sh`、`scripts/mirror.sh`、`scripts/record.sh`、`scripts/stay-awake.sh`、`scripts/torch.sh` 会让手机出声、震动、截屏、投屏、改息屏设置或开关闪光灯。用户或当前任务明确要求其中一件时，直接跑对应的那一个。没有这件要求时不要跑，包括不要为了看看环境而跑。改完某个脚本、要确认它还能用时，可以跑那一个。
 
-`scripts/mcp.sh` 会打开 MCP服务。下拉栏里手机工位那条常驻通知改记 MCP 开着，不另起一条。用户或当前任务要读、改手机上的普通文件，要用上面的手机侧工具，或改完 MCP服务要确认它还能用时，才跑这一个。没有这件要求时不要跑。`station_notify`、`station_stay_awake`、`station_clipboard_set` 和 `station_file_open` 会出声、改息屏、盖掉剪贴板或打开界面，没有明确要求时不要调用。
+`scripts/mcp.sh` 默认会打开手机 MCP 与本机网关；`status` 不打开服务，但会读取开关、刷新 adb 转发并更新用户配置里的本地令牌。`pair` 和 `unpair` 通过 adb 修改手机与 Mac 的远程配对资料。需要用户要求读取/修改手机文件、使用 MCP 工具、配对远程通道或验证 MCP 服务时才运行相应命令。`stop` 需要 adb 在线，会关闭手机 MCP 与远程客户端但保留配对。`station_notify`、`station_stay_awake`、`station_clipboard_set` 和 `station_file_open` 会出声、改息屏、盖掉剪贴板或打开界面，没有明确要求时不要调用。
 
 `scripts/android.sh` 会在手机上安装「手机工位」、授予 `WRITE_SECURE_SETTINGS` 和所有文件访问（`MANAGE_EXTERNAL_STORAGE`），并可能把无线调试打开。没有明确要求时不要跑。改了 `lib/android/` 里的 Java 时跑 `lib/android/build.sh`：它在电脑上编 APK，并跑打开时机的测试，不碰手机。
 

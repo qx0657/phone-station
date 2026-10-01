@@ -6,17 +6,20 @@ final class McpSession: ObservableObject {
     @Published private(set) var listening = false
     @Published private(set) var endpoint = ""
     @Published private(set) var token = ""
+    @Published private(set) var channel = ""
     @Published private(set) var copied = false
 
     private let feedback: StationFeedback
-    private var serial: String?
     private var generation = 0
+    private var statusInFlight = false
+    private var statusTimer: Timer?
     private var copyFeedback: Task<Void, Never>?
-    nonisolated private static let localPort = "18765"
-    nonisolated private static let remotePort = "8765"
 
     init(feedback: StationFeedback) {
         self.feedback = feedback
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshStatus() }
+        }
     }
 
     var summary: String {
@@ -24,16 +27,7 @@ final class McpSession: ObservableObject {
     }
 
     func noteSerial(_ serial: String?) {
-        self.serial = serial
-        guard let serial else {
-            generation += 1
-            listening = false
-            endpoint = ""
-            token = ""
-            return
-        }
-        guard feedback.activity == nil else { return }
-        sync(serial)
+        refreshStatus()
     }
 
     func start() {
@@ -70,12 +64,15 @@ final class McpSession: ObservableObject {
             await MainActor.run {
                 guard ticket == self.generation else { return }
                 self.feedback.activity = nil
-                self.listening = false
-                self.endpoint = ""
-                self.token = ""
-                self.feedback.notice = result.succeeded
-                    ? "MCP服务已停止。"
-                    : StationText.reason(result.output, fallback: "无法停止 MCP服务。")
+                if result.succeeded {
+                    self.listening = false
+                    self.endpoint = ""
+                    self.token = ""
+                    self.channel = ""
+                    self.feedback.notice = "MCP服务已停止。"
+                } else {
+                    self.feedback.notice = StationText.reason(result.output, fallback: "无法停止 MCP服务。")
+                }
             }
         }
     }
@@ -94,16 +91,25 @@ final class McpSession: ObservableObject {
         }
     }
 
-    private func sync(_ serial: String) {
+    private func refreshStatus() {
+        guard feedback.activity == nil, !statusInFlight else { return }
+        statusInFlight = true
         generation += 1
         let ticket = generation
         Task.detached(priority: .utility) {
-            let reading = Self.read(serial)
+            let result = StationRunner.scriptResult("mcp.sh", ["status"], timeout: 20)
             await MainActor.run {
-                guard ticket == self.generation, self.serial == serial, self.feedback.activity == nil else { return }
-                self.listening = reading.listening
-                self.endpoint = reading.endpoint
-                if reading.token != self.token { self.token = reading.token }
+                self.statusInFlight = false
+                guard ticket == self.generation else { return }
+                guard self.feedback.activity == nil else { return }
+                if result.succeeded {
+                    self.applyStatus(result.output)
+                } else {
+                    self.listening = false
+                    self.endpoint = ""
+                    self.token = ""
+                    self.channel = ""
+                }
             }
         }
     }
@@ -113,34 +119,25 @@ final class McpSession: ObservableObject {
         endpoint = lines.first { $0.hasPrefix("http://") } ?? ""
         token = lines.first { $0.hasPrefix("Authorization: Bearer ") }
             .map { String($0.dropFirst("Authorization: Bearer ".count)) } ?? ""
+        channel = lines.first { $0.hasPrefix("channel=") }
+            .map { String($0.dropFirst("channel=".count).split(separator: " ").first ?? "") } ?? ""
         listening = !endpoint.isEmpty
     }
 
-    private nonisolated static func read(_ serial: String) -> (listening: Bool, endpoint: String, token: String) {
-        guard let adb = StationRunner.executable("adb") else {
-            return (false, "", "")
+    private func applyStatus(_ output: String) {
+        let lines = output.split(separator: "\n").map(String.init)
+        guard lines.first?.hasPrefix("http://") == true else {
+            listening = false
+            endpoint = ""
+            token = ""
+            channel = ""
+            return
         }
-        let flag = StationRunner.capture(
-            adb,
-            ["-s", serial, "shell", "settings", "get", "global", "phonestation_mcp"],
-            timeout: 8)
-        let value = flag.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard flag.succeeded, value == "1" else {
-            _ = StationRunner.capture(adb, ["-s", serial, "forward", "--remove", "tcp:\(localPort)"], timeout: 8)
-            return (false, "", "")
-        }
-        _ = StationRunner.capture(
-            adb,
-            ["-s", serial, "forward", "tcp:\(localPort)", "tcp:\(remotePort)"],
-            timeout: 8)
-        let log = StationRunner.capture(
-            adb,
-            ["-s", serial, "shell", "logcat", "-d", "-t", "80", "-s", "StationMcp:I"],
-            timeout: 8)
-        let token = log.output.split(separator: "\n").compactMap { line -> String? in
-            guard let range = line.range(of: "mcp token ") else { return nil }
-            return String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-        }.last ?? ""
-        return (true, "http://127.0.0.1:\(localPort)/mcp", token)
+        endpoint = lines[0]
+        token = lines.first { $0.hasPrefix("Authorization: Bearer ") }
+            .map { String($0.dropFirst("Authorization: Bearer ".count)) } ?? ""
+        channel = lines.first { $0.hasPrefix("channel=") }
+            .map { String($0.dropFirst("channel=".count).split(separator: " ").first ?? "") } ?? ""
+        listening = true
     }
 }

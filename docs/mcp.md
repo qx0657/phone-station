@@ -2,20 +2,36 @@
 
 手机上「手机工位」自己的 MCP服务。现在这一项是内部存储里的普通文件。以后要加的工具做在这个应用里。日常用法见 [../README.md](../README.md) 的「文件」。
 
-2026-10-01 在这台 Mac 和荣耀 PGT-AN20（MagicOS 9 / Android 15）上验证。文件读写当时的应用 `versionName` 是 6，界面上的「MCP服务」是 7。服务自报「手机工位」，协议 `2025-03-26`。只有 tools，没有 resources，也没有 prompts。
+既有本地 MCP 在 2026-10-01 于这台 Mac 和荣耀 PGT-AN20（MagicOS 9 / Android 15）上验证。2026-10-02 已在深圳阿里云部署中继，更新 Mac 和手机应用并完成配对；经公网中继完成 `initialize`、列出 25 个工具和只读手机状态调用。
 
 ## 启动
 
-在仓库根目录运行 `./scripts/mcp.sh`。它先走 `connect.sh`，把手机的 `8765` 转到本机 `18765`，再让「手机工位」把服务打开。打开走显式广播 `dev.phonestation.adbkeep/.McpControlReceiver`，动作 `dev.phonestation.adbkeep.MCP`，extra `on` 为 true；这条广播没送到时再 `am start-foreground-service`。服务应答之后打印两行：
+在仓库根目录运行 `./scripts/mcp.sh`。它启动本机统一网关 `127.0.0.1:18765`，保留手机 MCP 的 `127.0.0.1:8765`，并把 adb 转发放在本机 `18766`。有 adb 时，脚本用 `connect.sh` 整理现有连接、启用手机 MCP、读取本地 Bearer 并完成 `initialize`；adb 不可用时，已有远程客户端在线也能返回网关地址。输出包含：
 
 ```text
 http://127.0.0.1:18765/mcp
-Authorization: Bearer <这次的令牌>
+channel=local local=<毫秒>ms remote=<毫秒>ms
+Authorization: Bearer <本机网关令牌>
 ```
 
-这两个端口写在 `scripts/mcp.sh` 和 `FileMcpService` 里。令牌每次进程起来换一次，以当次打印或菜单栏里看到的为准，不写进仓库。`./scripts/mcp.sh stop` 用同一条广播把 `on` 写成 false，没送到时再 `am stopservice`，然后去掉这次转发。`./scripts/mcp.sh status` 不把它打开：`settings global phonestation_mcp` 不是 1 就去掉转发并打印 `off`；是 1 就转发，读得到令牌就打印上面两行，还没有令牌就只打印 `on`。
+`18765` 是调用方固定访问的统一入口；`18766` 只供 adb 转发。Mac 网关令牌随机生成，保存在用户配置目录的权限为 `0600` 的配置文件中，随 `mcp.sh` 输出以便调用方访问；它不是手机服务令牌。手机本地 MCP 令牌仍会随服务进程重启而变化，只由 adb 从受系统 DUMP 权限保护的服务诊断入口读取，并交给本机网关。远程中继凭据保存在 macOS 钥匙串。
 
-手机把「要开着」记在应用自己的偏好里，默认关。明确关掉才写成关。进程没了，或者直接 `am stopservice`，这项偏好还在；再打开应用，或开机广播，会再把服务拉起来。听着的时候 `settings global phonestation_mcp` 是 1，停掉或没听成是 0。菜单栏开着时大约每 5 秒读这一项：是 1 就做转发并读令牌，不是 1 就去掉转发。这次读取不跑 `connect.sh`。关掉应用里的「保持无线调试」不会停 MCP服务。下拉栏不另起一条：和无线调试保持共用渠道 `keep` 那条，里面写 MCP服务开还是关，不写地址。会话提醒仍占用 id 2 和 3。合并前单独那条的 id 4 会在升级时清掉。
+网关每 5 秒用无副作用的 `ping` 探测两条通道。只有一条可用时立即使用该通道。两条都可用时优先 adb；本地延迟连续三次高于 500 毫秒且远程延迟至少低 40% 时改走远程。远程期间，本地延迟连续六次低于 150 毫秒且已过 60 秒冷却后切回 adb。无线 adb 保持原状；远程通道只承接本应用 MCP 工具，不提供 shell、安装、截屏、投屏或录屏。正在执行的请求不会因为切换而自动重放；若连接中断，需根据工具结果核实操作是否完成。
+
+`./scripts/mcp.sh stop` 需要 adb 在线，通过 `McpControlReceiver` 关闭手机 MCP 与远程开关，再移除转发；配对资料会保留。`./scripts/mcp.sh status` 不启动服务，也不跑 `connect.sh`，只刷新已有 adb 转发信息并报告网关探测到的通道。菜单栏每约 5 秒读一次它，因此无线断开时仍能显示远程通道。
+
+远程中继由深圳服务器提供。首次配对或更换凭据时，必须在 adb 在线时完成：
+
+```sh
+./scripts/mcp.sh pair https://47.112.20.43:24443 <SPKI-SHA256>
+./scripts/mcp.sh unpair
+```
+
+`pair` 隐藏提示输入服务器分别为手机和电脑生成的两枚不同 64 位十六进制令牌。电脑端令牌存进 macOS 钥匙串，手机端令牌经显式广播 `PhoneRelayControlReceiver` 写入 Android Keystore 加密的偏好；两端还会保存 HTTPS 地址和服务器公钥 SPKI SHA-256 pin。令牌不会进入仓库或应用日志。手机远程开关与 MCP 服务同时打开。`unpair` 需要 adb 在线，会删除手机端配对凭据、电脑端钥匙串令牌和网关中的地址与 pin，不停掉仍开启的本地 MCP。
+
+应用设置里的「远程通道」开关保留远程客户端；打开时也会打开 MCP服务。远程客户端用 HTTPS 长轮询深圳中继，再在手机进程内调用同一个 `McpProtocol`，所以文件权限与本地 MCP 相同。远程访问依赖中继已部署、Mac 网关已连接；任一尚未就绪时仍走原 adb 通道。中继可在内存中看到请求和结果，不保存业务文件。
+
+手机把 MCP 与远程通道的开关记在应用偏好里。MCP 服务本地监听失败时，只要远程配对已开启，前台服务仍会启动手机长轮询。进程退出或重启后，开机广播会按偏好恢复服务。菜单栏检查走本机网关状态，不会触发 `connect.sh`。关掉应用里的「保持无线调试」不会停 MCP 服务。下拉栏不另起一条：和无线调试保持共用渠道 `keep` 那条，里面写 MCP 服务开还是关，不写地址。会话提醒仍占用 id 2 和 3。合并前单独那条的 id 4 会在升级时清掉。
 
 传输是 Streamable HTTP，只接受 `POST /mcp`。请求头：
 
@@ -25,27 +41,36 @@ Accept: application/json, text/event-stream
 Authorization: Bearer <mcp.sh 打印的令牌>
 ```
 
-`initialize` 成功之后就可以 `tools/list` 和 `tools/call`。没有 `Mcp-Session-Id`。没有 `id` 或 `id` 为 null 的通知回 HTTP 202。一次只处理一个连接。请求体上限 8 MiB，要带 `Content-Length`。别的路径或方法回 405，正文是「只接受 POST /mcp」。
+`initialize` 成功之后就可以 `tools/list` 和 `tools/call`。没有 `Mcp-Session-Id`。没有 `id` 或 `id` 为 null 的通知回 HTTP 202。手机服务请求体上限 8 MiB；中继与桌面网关上限 18 MiB。别的路径或方法回 405，正文是「只接受 POST /mcp」。
 
 工具失败写在结果里，`isError` 为真，正文是 `{"error":"…"}`。JSON 解析失败才是协议错误，例如 `-32700`。
 
-本会话用 `curl` 完成握手。不要把这项登记进 Grok：令牌会换，adb 转发也跟着这次连接消失。
+调用方始终使用 `mcp.sh` 打印的统一网关地址和令牌。adb 转发消失时，已配对且在线的远程通道仍可继续提供 MCP。手机本地令牌重启后会换，本机网关令牌则保存在用户配置中。
 
 ## 界面
 
-手机上的「MCP服务」和菜单栏里的「MCP服务」是同一个开关，都写那项偏好。打开就在手机上把服务拉起来，关掉就停掉，并记住关掉。开着时手机上下面一行是手机本机地址 `http://127.0.0.1:8765/mcp`。关着时不写地址。这条地址只在手机上听。电脑经 adb 转到本机 `18765`，那一行和令牌在菜单栏这一页，或由 `./scripts/mcp.sh` 打印。令牌不出现在手机界面上：屏幕和辅助功能都能读到界面，日志只有 shell 能读。菜单栏没开着、也没再跑 `status` 或 `stop` 时，电脑上已经做好的转发会留到下一次。
+手机上的「MCP服务」由菜单栏「MCP服务」页或本机脚本协调启停。手机上关闭它会同时关闭远程开关；「远程通道」可以单独开关，且打开时会确保 MCP 服务开着。MCP 本地监听时，手机下面一行显示 `http://127.0.0.1:8765/mcp`，这条地址只在手机上听。电脑固定访问统一网关 `http://127.0.0.1:18765/mcp`；菜单栏页或 `./scripts/mcp.sh` 会显示当前通道和本机网关令牌。令牌不出现在手机界面上：屏幕和辅助功能都能读到界面，日志只有 shell 能读。菜单栏没开着、也没再跑 `status` 或 `stop` 时，已经建立的 adb 转发会留到下一次。
 
 设置里的「MCP说明」是给站在手机前的人看的短页，四段：怎么连上、能做的、做不到的、交接。工具名、参数和下面的验证记录不写在那一页。`versionName` 21 在这台上点开过，画面记在 [adb-keep.md](adb-keep.md)。
 
 ## 监听和令牌
 
-服务只绑定手机上的 `127.0.0.1`。电脑经 adb 转发进来，不听局域网。
+服务只绑定手机上的 `127.0.0.1`，不听局域网。Mac 本机网关也只绑定 `127.0.0.1:18765`。
 
-同一台手机上别的应用也能访问 `127.0.0.1`，所以每个请求都要带 Bearer。令牌是进程里的 16 字节随机数，打成 32 位大写十六进制，写进 logcat 标签 `StationMcp`，一行 `mcp token …`。`mcp.sh` 每次启动都会再打一次，方便脚本重读。shell 能读这条日志。普通应用读不到别的应用的日志。
+同一台手机上别的应用也能访问 `127.0.0.1`，所以手机本地 MCP 每个请求仍要带 Bearer。令牌是进程里的 16 字节随机数，打成 32 位大写十六进制。启动时仍写进 logcat 标签 `StationMcp`，但系统可能很快淘汰旧日志；脚本改用 `dumpsys activity service dev.phonestation.adbkeep/.FileMcpService` 刷新令牌。这条服务诊断入口受系统 DUMP 权限保护，普通应用不能调用，不要把完整输出贴进聊天或仓库。本机网关只从 adb 读取这个令牌；远程手机客户端另用进程内的随机令牌调用现有 MCP 分发器，不把本地令牌送到中继。
 
 令牌不放进 `Settings.Secure`。那项设置任何应用都能读，和本机监听放在一起就会被拿走。
 
 Android 15 上，清单里没有 `exported` 的前台服务，shell 直接 `am start-foreground-service` 会被拒绝：`not exported from uid`。所以 `FileMcpService` 是 exported，类型是 `specialUse`。别的应用能把服务拉起来，读不到令牌。返回值是 `START_NOT_STICKY`。
+
+## 配对和重连的兼容处理
+
+2026-10-02 在 PGT-AN20 和本机 Mac 上遇到并修正：
+
+- Android Keystore 开启随机加密要求时，AES-GCM 的 IV 必须由 `cipher.init(ENCRYPT_MODE, key)` 生成，再用 `getIV()` 保存；手工提供 IV 会使配对失败。
+- 没有访问组 entitlement 的临时签名 Mac 命令行助手不能使用 Data Protection Keychain（错误 `-34018`），现用用户的登录钥匙串。助手固定放在已安装 App 中，查询和存储都通过 Security API。
+- `mcp.sh status` 从受 DUMP 权限保护的服务诊断读取当前本地令牌，重启或日志淘汰后仍可恢复 adb 转发。
+- 网关把远程调用串行交给中继，业务调用期间跳过竞争的健康探测。中继收到取消时，未派发请求直接过期，已派发 `ping` 标为未知并释放；已派发的其他操作保留原 ID 和结果状态，不能自动重做。
 
 ## 权限
 
@@ -55,7 +80,7 @@ Android 15 上，清单里没有 `exported` 的前台服务，shell 直接 `am s
 appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
 ```
 
-`pm grant` 授不上「所有文件访问」。授上之后 `appops get` 打印 `Uid mode: MANAGE_EXTERNAL_STORAGE: allow`。清单里的 `INTERNET` 用来在本机监听，安装时就有。
+`pm grant` 授不上「所有文件访问」。授上之后 `appops get` 打印 `Uid mode: MANAGE_EXTERNAL_STORAGE: allow`。清单里的 `INTERNET` 用来在本机监听和连接深圳中继，安装时就有。
 
 短信、通讯录、位置、相机、麦克风这些运行时权限没有授。它们到不了更多文件。
 
@@ -153,6 +178,14 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 `station_file_open` 用内容地址把文件交给系统查看器。没有应用能打开这种类型时失败。系统不允许从后台直接打开时，下拉栏留一条「打开文件」，点一下再开；这条用安静通道，不响，id 是 5，标记是 `open`。返回里 `opened` 表示已经打开，`notified` 表示改留下了那一条。
 
 ## 在 PGT-AN20 上验证过的
+
+2026-10-02，`versionName` 32、已安装的 Mac 菜单栏 App 与深圳阿里云中继一起验证：
+
+- 公网中继完成 `initialize`、`tools/list`（25 个工具）及 `station_device_status`，状态调用约 160–325 毫秒。
+- 仅移除本机 adb MCP 转发，保留手机无线调试；网关约 2 秒改走远程，只读状态调用成功。恢复转发后，约 64 秒切回本地。
+- 在本机转发前临时加入 800 毫秒延迟，本地实测约 850–900 毫秒，远程约 180–240 毫秒；两条通道始终在线，连续三次慢探测后约 16 秒改走远程，状态调用成功。
+- 移除延迟后，经稳定探测和冷却约 70 秒切回本地，状态调用成功。临时代理与测试转发已移除，正常转发恢复；全过程无线调试仍为开启。
+- Android 原有测试、Mac 原有测试和中继 `go test -race ./...` 通过。没有切换手机 Wi-Fi/蜂窝网络，也没有重启手机验证开机恢复；以上断线测试针对 adb 转发失效。
 
 2026-10-01，应用版本 6。`./scripts/android.sh` 增量安装成功，随后 `./scripts/mcp.sh` 打印了地址并完成 `initialize`。
 

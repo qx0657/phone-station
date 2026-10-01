@@ -25,6 +25,7 @@ public final class McpControlReceiver extends BroadcastReceiver {
         if (on) {
             FileMcpService.start(context);
         } else {
+            RemoteStore.setEnabled(context, false);
             FileMcpService.stop(context);
         }
     }

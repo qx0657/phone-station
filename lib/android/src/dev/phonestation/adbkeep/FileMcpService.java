@@ -11,6 +11,8 @@ import android.provider.Settings;
 import android.util.Log;
 
 import java.io.IOException;
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.security.SecureRandom;
 
@@ -27,6 +29,7 @@ public final class FileMcpService extends Service {
 
     private McpHttp server;
     private String token;
+    private PhoneRelayClient remoteClient;
 
     static boolean listening() {
         return listening;
@@ -53,7 +56,7 @@ public final class FileMcpService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         StationNotifications.attachMcp(this);
         StationNotifications.enter(this);
-        if (server == null) {
+        if (server == null && KeeperStore.mcpEnabled(this)) {
             token = newToken();
             try {
                 FileOps files = FileOps.device();
@@ -63,16 +66,33 @@ public final class FileMcpService extends Service {
                 Log.e(TAG, "mcp listen failed", error);
                 listening = false;
                 publishListening(false);
-                stopSelf();
-                return START_NOT_STICKY;
+                if (!RemoteStore.enabled(this) || !RemoteStore.configured(this)) {
+                    stopSelf();
+                    return START_NOT_STICKY;
+                }
             }
-            listening = true;
-            KeeperStore.setMcpEnabled(this, true);
-            publishListening(true);
-            logStorage();
+            if (server != null) {
+                listening = true;
+                KeeperStore.setMcpEnabled(this, true);
+                publishListening(true);
+                logStorage();
+            }
         }
-        Log.i(TAG, "mcp token " + token);
-        return START_NOT_STICKY;
+        if (server != null) {
+            Log.i(TAG, "mcp token " + token);
+        }
+        if (RemoteStore.enabled(this) && RemoteStore.configured(this) && remoteClient == null) {
+            remoteClient = new PhoneRelayClient(this, versionName());
+            remoteClient.start();
+        } else if (!RemoteStore.enabled(this) && remoteClient != null) {
+            remoteClient.stop();
+            remoteClient = null;
+        }
+        if (server == null && remoteClient == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        return RemoteStore.enabled(this) ? START_STICKY : START_NOT_STICKY;
     }
 
     @Override
@@ -85,6 +105,11 @@ public final class FileMcpService extends Service {
         if (running != null) {
             running.close();
         }
+        PhoneRelayClient remote = remoteClient;
+        remoteClient = null;
+        if (remote != null) {
+            remote.stop();
+        }
         StationNotifications.detachMcp(this);
         super.onDestroy();
     }
@@ -92,6 +117,14 @@ public final class FileMcpService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    /** ActivityManager 的 dumpsys service 入口受系统 DUMP 权限保护，供 adb 刷新本地凭据。 */
+    @Override
+    protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+        if (server != null && token != null) {
+            writer.println("mcp token " + token);
+        }
     }
 
     private String versionName() {
