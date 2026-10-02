@@ -14,7 +14,7 @@
 
 `notify.sh` 每次播放前都发一条通知。`--title` 和 `--text` 改标题和内容。不写时标题是「手机工位」，内容是「有一条提醒」。全局 hook 的标题是这件事，内容见下面的「全局 hook」。
 
-默认把标题、内容和铃声交给手机上的「手机工位」。入口是显式广播 `dev.phonestation.adbkeep/.AlertReceiver`，动作 `dev.phonestation.adbkeep.ALERT`，extra 是 `title`、`text`、`mode`、`agent`，写了 `--sound` 时再加 `sound`。没写 `sound` 时，应用先看「通知」里选的铃声；没选过就读 `Settings.System.NOTIFICATION_SOUND`。选了静音则通知照发、不播，广播结果是 4，脚本打出「铃声已静音。」，不以失败退出。应用用自己的包名和图标发出来，头上就是「手机工位」，不用再改调用包名。点通知打开应用。广播带 `FLAG_RECEIVER_FOREGROUND`，播完才结束，所以脚本会等到声音停。
+默认把标题、内容和铃声交给手机上的「手机工位」。`notify.sh` 先通过 `lib/notify_mcp.py` 读取 `mcp.sh status`，网关在线就调用 `station_notify`，本地 adb 与用户配置的远程中继都可发送。网关不可用且还未提交通知时才回退 adb。业务请求已提交后，失败或结果未确认不会再走 adb 重发。adb 路径的入口是显式广播 `dev.phonestation.adbkeep/.AlertReceiver`，动作 `dev.phonestation.adbkeep.ALERT`，extra 是 `title`、`text`、`mode`、`agent`，写了 `--sound` 时再加 `sound`。没写 `sound` 时，应用先看「通知」里选的铃声；没选过就读 `Settings.System.NOTIFICATION_SOUND`。选了静音则通知照发、不播，广播结果是 4，脚本打出「铃声已静音。」，不以失败退出。应用用自己的包名和图标发出来，头上就是「手机工位」，不用再改调用包名。点通知打开应用。广播带 `FLAG_RECEIVER_FOREGROUND`，播完才结束，所以脚本会等到声音停。
 
 Android 14 及以上，这条和 MCP 的开关只收两类来源。`am broadcast` 不公开发送方 uid，`getSentFromUid()` 是 -1，但 shell 的广播带着隐藏标志 `Intent.FLAG_RECEIVER_FROM_SHELL`（`0x00400000`）。系统会把其他应用加上的这一位去掉，所以看得到这一位就是 shell 或 root。应用自己的 `station_notify` 用 `BroadcastOptions.setShareIdentityEnabled(true)` 公开自己的 uid。对不上的广播结果是 0，日志是 `alert rejected` 或 `mcp rejected`，不发通知，也不动 MCP。判断在 `AlertSender`，打包前在电脑上跑。2026-10-01，`versionName` 29，PGT-AN20：shell 发来的一条提醒没有被拒绝，结果是 3，日志是 `alert sound missing`。这次故意给了一个打不开的铃声路径，所以没有发出通知，也没有响。同一条来源检查放行了 MCP 的打开和关掉。
 
@@ -38,6 +38,8 @@ Android 14 及以上，这条和 MCP 的开关只收两类来源。`am broadcast
 
 2026-10-01 在 PGT-AN20 上，应用是 `versionCode=5`。先用 `am broadcast` 叫接收器，结果是 `Broadcast completed: result=1`。记录里包名是 `dev.phonestation.adbkeep`，用户 0，标记 `alert`，id 是 2，重要程度 3，标志只有只提示一次，`mSound=null`，`isNoisy=false`。通道重要程度也是 3，声音是 null，震动关着，没有角标。图标来自这个应用自己。接着 `./scripts/notify.sh --title 手机工位 --text 脚本已交给应用`，标准错误是 `通知已更新`，铃声是 `/system/media/audio/notifications/Pixies.ogg`，最后一行是 `played`。这条的内容改成了「脚本已交给应用」。常驻那条还在：通道重要程度 2，内容是「无线调试开着」，标志是常驻、只提示一次、不可划掉、前台服务，`mSound=null`。日志是 `AdbKeep: alert replace`。无线会话没有断。`--stack` 和强行停止之后的广播这次没有再跑。
 
+2026-10-02，PGT-AN20 的 `versionName` 33：退出 Mac 菜单栏 App 后，只断开电脑端无线 adb，手机无线调试开关保持开启。网关切到 `channel=remote`；通过已安装 App 随包的 `notify.sh` 发出「远程通知验证」，返回「通知已更新」和 `played`。恢复 adb 后在系统通知记录中找到对应标题和正文。单元测试覆盖没有 adb 时发送、提交前回退、提交后连接中断不重发，以及 Agent、stack 和指定铃声参数。
+
 ### `--shell`
 
 `--shell` 不走应用，改回原来的 `Notify`。同一条的标记是 `phone-station`，id 是 1，包名是 `com.android.shell`。通道 id 也是 `phone-station`，名字是「手机工位」，重要程度是默认（3），声音和震动都关掉。2026-09-30 在 PGT-AN20 上看到：记录里 `mSound=null`、`isNoisy=false`、`mHidden=false`。下拉栏里能看到标题和内容，连续两条不同的文字只留最后一条。
@@ -52,11 +54,11 @@ Android 14 及以上，这条和 MCP 的开关只收两类来源。`am broadcast
 
 ## 运行时做了什么
 
-默认一次广播交给「手机工位」：通知和铃声都在应用里完成。`--shell` 仍走下面的 PCM。
+默认经 MCP 或 adb 把请求交给「手机工位」：通知和铃声都在应用里完成。全局 hook 调用同一个 `notify.sh`，脚本更新后无需重新安装 hook。`--shell` 仍走下面的 PCM。
 
 ### 默认
 
-`notify.sh` 不查媒体库，也不把铃声拉到电脑。`am broadcast` 叫 `AlertReceiver`。应用先确认铃声打得开：`--sound` 是手机上的文件；没写时用「通知」里选的那首，没选过就读系统通知铃声。选了静音则直接发通知，结果是 4。`content://` 打不开时，再试媒体库记录里的 `_data` 文件。打不开就不发通知。
+`notify.sh` 不查媒体库，也不把铃声拉到电脑。MCP 的 `station_notify` 或 adb 的 `am broadcast` 叫 `AlertReceiver`。应用先确认铃声打得开：`--sound` 是手机上的文件；没写时用「通知」里选的那首，没选过就读系统通知铃声。选了静音则直接发通知，结果是 4。`content://` 打不开时，再试媒体库记录里的 `_data` 文件。打不开就不发通知。
 
 打得开才发下拉通知，再用 `MediaPlayer` 播放。属性是 `USAGE_MEDIA` 和 `CONTENT_TYPE_SONIFICATION`，不申请音频焦点，避免把正在放的声音停掉。播放放在广播的 `goAsync()` 里，播完才 `finish()`。结果是 1 时，标准错误打出 `通知已更新`；`--stack` 时是 `通知已发出`。标准输出最后一行是 `played`。
 
@@ -89,6 +91,7 @@ Android 14 及以上，这条和 MCP 的开关只收两类来源。`am broadcast
 
 | 路径 | 作用 |
 | --- | --- |
+| `lib/notify_mcp.py` | 默认通知的 MCP 路由、结果解析与提交前回退判断 |
 | `lib/android/.../AlertSound.java` | 默认路径：在「手机工位」里用媒体音量播放 |
 | `lib/android/.../AlertSoundPlan.java` | 铃声地址怎么选。没有 Android 依赖，构建时在电脑上跑 |
 | `lib/notify-sound/PlayPcm.java` | `--shell` 时在手机上播放 PCM 的类 |

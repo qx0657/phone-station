@@ -1,6 +1,9 @@
 package dev.phonestation.adbkeep;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
@@ -21,37 +24,64 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-/** Long-polls the Shenzhen relay and runs requests through the existing MCP dispatcher. */
+/** Long-polls the configured relay and runs requests through the existing MCP dispatcher. */
 final class PhoneRelayClient implements Runnable {
     private static final String TAG = "StationRelay";
     private static final int BODY_LIMIT = 18 * 1024 * 1024;
     private static final long RESULT_WINDOW_MS = 180_000L;
-    private static volatile boolean connected;
+    private static volatile PhoneRelayClient activeClient;
+    private volatile boolean connected;
 
     private final Context context;
     private final String version;
+    private final String endpoint;
+    private final String pin;
+    private final String encryptedToken;
     private final AtomicBoolean stopped = new AtomicBoolean(false);
     private final String internalToken = newToken();
     private final Thread thread;
+    private final RelayRetry retry = new RelayRetry();
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private Network defaultNetwork;
+    private int networkKind = -1;
     private volatile HttpsURLConnection inFlight;
 
     static boolean connected() {
-        return connected;
+        PhoneRelayClient client = activeClient;
+        return client != null && !client.stopped.get() && client.connected;
     }
 
     PhoneRelayClient(Context context, String version) {
         this.context = context.getApplicationContext();
         this.version = version;
+        endpoint = RemoteStore.endpoint(context);
+        pin = RemoteStore.pin(context);
+        encryptedToken = RemoteStore.encryptedToken(context);
         thread = new Thread(this, "phone-station-relay");
         thread.setDaemon(true);
     }
 
+    boolean matchesProfile() {
+        return endpoint.equals(RemoteStore.endpoint(context))
+                && pin.equals(RemoteStore.pin(context))
+                && encryptedToken.equals(RemoteStore.encryptedToken(context));
+    }
+
     void start() {
+        activeClient = this;
+        watchNetwork();
         thread.start();
     }
 
     void stop() {
         stopped.set(true);
+        retry.changed();
+        if (networkCallback != null) {
+            connectivity.unregisterNetworkCallback(networkCallback);
+            networkCallback = null;
+        }
+        setConnected(false);
         HttpsURLConnection connection = inFlight;
         if (connection != null) {
             connection.disconnect();
@@ -63,25 +93,96 @@ final class PhoneRelayClient implements Runnable {
     public void run() {
         long backoff = 1_000L;
         while (!stopped.get()) {
+            long revision = retry.revision();
             try {
-                Json next = post("/v1/phone/poll", "{}", 35_000);
-                connected = true;
+                // A short negotiated idle reply also bounds handover when the
+                // old cellular network stays alive and disconnect cannot wake a read.
+                Json next = post("/v1/phone/poll", "{\"waitMs\":2000}", 5_000);
+                synchronized (retry) {
+                    if (revision == retry.revision()) { setConnected(true); }
+                }
                 backoff = 1_000L;
                 Json operation = next.get("operationId");
                 if (operation == null || operation.isNull()) {
                     continue;
                 }
+                if (stopped.get()) { break; }
                 deliver(operation.string(), next.get("payload").emit());
             } catch (Exception error) {
-                connected = false;
+                setConnected(false);
                 if (!stopped.get()) {
                     Log.w(TAG, "relay connection failed: " + error.getClass().getSimpleName());
-                    pause(backoff);
-                    backoff = Math.min(backoff * 2L, 30_000L);
+                    retry.pause(backoff, revision);
+                    backoff = revision == retry.revision() ? Math.min(backoff * 2L, 30_000L) : 1_000L;
                 }
             }
         }
-        connected = false;
+        setConnected(false);
+    }
+
+    private void watchNetwork() {
+        connectivity = context.getSystemService(ConnectivityManager.class);
+        if (connectivity == null) { return; }
+        defaultNetwork = connectivity.getActiveNetwork();
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                if (!network.equals(defaultNetwork)) {
+                    defaultNetwork = network;
+                    networkKind = -1;
+                    networkChanged();
+                }
+            }
+
+            @Override
+            public void onLost(Network network) {
+                // An old Wi-Fi loss must not invalidate an already available new default.
+                if (network.equals(defaultNetwork)) {
+                    defaultNetwork = null;
+                    networkKind = -1;
+                    networkChanged();
+                }
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                if (!network.equals(defaultNetwork)) { return; }
+                // A VPN can keep the same Network while its underlying Wi-Fi becomes cellular.
+                int kind = (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ? 1 : 0)
+                        | (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? 2 : 0)
+                        | (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 4 : 0);
+                boolean changed = networkKind != -1 && networkKind != kind;
+                networkKind = kind;
+                if (changed) { networkChanged(); }
+            }
+        };
+        connectivity.registerDefaultNetworkCallback(networkCallback);
+    }
+
+    private void networkChanged() {
+        if (stopped.get()) { return; }
+        synchronized (retry) {
+            retry.changed();
+            setConnected(false);
+        }
+        StationNotifications.connectionChanged();
+        HttpsURLConnection connection = inFlight;
+        if (connection != null) {
+            // Never block ConnectivityManager's callback thread on socket cleanup.
+            Thread cancel = new Thread(connection::disconnect, "phone-relay-handover");
+            cancel.setDaemon(true);
+            cancel.start();
+        }
+    }
+
+    private void setConnected(boolean value) {
+        boolean next = value && !stopped.get();
+        if (connected == next) {
+            return;
+        }
+        connected = next;
+        // 旧客户端退出时不能清掉新客户端的状态。通知始终重读当前客户端。
+        StationNotifications.connectionChanged();
     }
 
     private void deliver(String operationID, String payload) throws Exception {
@@ -104,6 +205,7 @@ final class PhoneRelayClient implements Runnable {
         boolean attempted = false;
         while ((!stopped.get() || !attempted) && System.currentTimeMillis() < deadline) {
             attempted = true;
+            long revision = retry.revision();
             try {
                 post("/v1/phone/result", result, 15_000);
                 return;
@@ -115,24 +217,25 @@ final class PhoneRelayClient implements Runnable {
                 if (stopped.get()) {
                     return;
                 }
-                pause(backoff);
-                backoff = Math.min(backoff * 2L, 30_000L);
+                setConnected(false);
+                retry.pause(backoff, revision);
+                backoff = revision == retry.revision() ? Math.min(backoff * 2L, 30_000L) : 1_000L;
             } catch (IOException unavailable) {
                 if (stopped.get()) {
                     return;
                 }
-                pause(backoff);
-                backoff = Math.min(backoff * 2L, 30_000L);
+                setConnected(false);
+                retry.pause(backoff, revision);
+                backoff = revision == retry.revision() ? Math.min(backoff * 2L, 30_000L) : 1_000L;
             }
         }
     }
 
     private Json post(String path, String request, int readTimeoutMs) throws IOException {
-        String endpoint = RemoteStore.endpoint(context);
-        String pin = RemoteStore.pin(context);
+        long revision = retry.revision();
         final String token;
         try {
-            token = RemoteStore.token(context);
+            token = RemoteStore.decryptToken(encryptedToken);
         } catch (Exception error) {
             throw new IOException("remote credential unavailable", error);
         }
@@ -140,13 +243,15 @@ final class PhoneRelayClient implements Runnable {
         try {
             connection = (HttpsURLConnection) new URL(endpoint + path).openConnection();
             inFlight = connection;
+            if (revision != retry.revision()) { throw new IOException("network changed before request"); }
             connection.setSSLSocketFactory(pinnedContext(pin).getSocketFactory());
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(10_000);
+            connection.setConnectTimeout(5_000);
             connection.setReadTimeout(readTimeoutMs);
             connection.setDoOutput(true);
             connection.setRequestProperty("Authorization", "Bearer " + token);
             connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Connection", "close");
             byte[] bytes = request.getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(bytes.length);
             try (OutputStream output = connection.getOutputStream()) {
@@ -230,14 +335,6 @@ final class PhoneRelayClient implements Runnable {
                 out.write(buffer, 0, n);
             }
             return out.toByteArray();
-        }
-    }
-
-    private static void pause(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
         }
     }
 

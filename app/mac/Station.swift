@@ -11,6 +11,8 @@ enum StationPage {
     case files
     case about
     case mcp
+    case remoteRelay
+    case clipboard
 }
 
 @MainActor
@@ -31,6 +33,7 @@ final class Station: ObservableObject {
     let login: LoginSession
     let mcp: McpSession
     let setup: SetupSession
+    let clipboard: ClipboardSession
     @Published var page: StationPage = .main
     private var subscriptions = Set<AnyCancellable>()
 
@@ -45,6 +48,7 @@ final class Station: ObservableObject {
         login = LoginSession()
         mcp = McpSession(feedback: feedback)
         setup = SetupSession(feedback: feedback)
+        clipboard = ClipboardSession()
         wire()
         watch(feedback)
         watch(link)
@@ -55,6 +59,7 @@ final class Station: ObservableObject {
         watch(login)
         watch(mcp)
         watch(setup)
+        watch(clipboard)
     }
 
     private func watch<Object: ObservableObject>(_ object: Object) {
@@ -100,6 +105,10 @@ final class Station: ObservableObject {
     }
 
     private func wire() {
+        clipboard.route = { [weak self] in
+            guard let self, self.mcp.listening else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
         link.allow = { [weak self] in self?.canOperate ?? false }
         screen.allow = { [weak self] in self?.canOperate ?? false }
         screen.allowStart = { [weak self] in self?.canStartScreen ?? false }
@@ -113,6 +122,13 @@ final class Station: ObservableObject {
             self?.torch.noteSerial(serial)
             self?.commands.noteSerial(serial)
             self?.mcp.noteSerial(serial)
+        }
+        mcp.onRemoteConnection = { [weak self] connected in
+            self?.link.noteRemoteConnection(connected)
+        }
+        mcp.allowRemotePair = { [weak self] in self?.canOperate ?? false }
+        mcp.onLocalRouteUnavailable = { [weak self] in
+            self?.link.noteLocalRouteUnavailable()
         }
         torch.onQuit = {
             NSApplication.shared.terminate(nil)

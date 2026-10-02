@@ -1,0 +1,204 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+const pingReply = `{"jsonrpc":"2.0","id":"local-probe","result":{}}`
+
+func testGateway(address string, remote func(context.Context, config, []byte) (relayResponse, error)) *gateway {
+	return &gateway{
+		state:    health{mode: "local", localOnline: true, remoteOnline: true},
+		localURL: address,
+		readConfig: func() (config, error) {
+			return config{GatewayToken: "test", LocalToken: "local", RemoteURL: "https://test", RemotePin: "pin"}, nil
+		},
+		callRemote: remote,
+	}
+}
+
+func callGateway(g *gateway, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	r.Header.Set("Authorization", "Bearer test")
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, r)
+	return w
+}
+
+func TestDeadForwardSwitchesBeforeMutationDispatch(t *testing.T) {
+	var localCalls, remoteCalls atomic.Int32
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		localCalls.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done() // TCP accepts but adb never delivers the ping.
+	}))
+	defer local.Close()
+	body := `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"station_file_append_text"}}`
+	g := testGateway(local.URL, func(ctx context.Context, c config, payload []byte) (relayResponse, error) {
+		remoteCalls.Add(1)
+		if string(payload) != body {
+			t.Errorf("changed operation: %s", payload)
+		}
+		return relayResponse{Status: 200, Body: json.RawMessage(`{"jsonrpc":"2.0","id":9,"result":{}}`)}, nil
+	})
+	started := time.Now()
+	w := callGateway(g, body)
+	if w.Code != 200 || g.mode() != "remote" || localCalls.Load() != 1 || remoteCalls.Load() != 1 {
+		t.Fatalf("status=%d mode=%s local=%d remote=%d", w.Code, g.mode(), localCalls.Load(), remoteCalls.Load())
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatal("dead forward blocked failover")
+	}
+}
+
+func TestInflightFailoverReplaysOnlyReadOperations(t *testing.T) {
+	for _, tool := range []string{"station_device_status", "station_file_append_text", "station_notify", "station_clipboard_set", "station_shell_exec", "unknown_tool"} {
+		t.Run(tool, func(t *testing.T) {
+			dispatched := make(chan struct{})
+			var broken atomic.Bool
+			var remoteCalls atomic.Int32
+			local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Method string `json:"method"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				if req.Method == "ping" && !broken.Load() {
+					_, _ = w.Write([]byte(pingReply))
+					return
+				}
+				if req.Method != "ping" {
+					close(dispatched)
+				}
+				<-r.Context().Done()
+			}))
+			defer local.Close()
+			g := testGateway(local.URL, func(ctx context.Context, c config, payload []byte) (relayResponse, error) {
+				remoteCalls.Add(1)
+				return relayResponse{Status: 200, Body: []byte(pingReply)}, nil
+			})
+			finished := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				finished <- callGateway(g, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+tool+`"}}`)
+			}()
+			select {
+			case <-dispatched:
+			case <-time.After(2 * time.Second):
+				t.Fatal("operation not dispatched")
+			}
+			broken.Store(true)
+			started := time.Now()
+			g.checkLocal("local", true)
+			select {
+			case w := <-finished:
+				if tool == "station_device_status" {
+					if w.Code != 200 || remoteCalls.Load() != 1 {
+						t.Fatal("read did not transparently recover")
+					}
+				} else if w.Code != 502 || remoteCalls.Load() != 0 {
+					t.Fatal("mutation or unknown operation replayed")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("in-flight request was left hanging")
+			}
+			if time.Since(started) > 2*time.Second {
+				t.Fatal("failover exceeded detection budget")
+			}
+		})
+	}
+}
+
+func TestBusyRelayCannotDelayLocalFailureOrOverwriteHealth(t *testing.T) {
+	g := testGateway("", nil)
+	g.remoteMu.Lock()
+	defer g.remoteMu.Unlock()
+	if _, sampled := g.probeRemote(config{}); sampled {
+		t.Fatal("busy relay produced stale health sample")
+	}
+	g.checkLocal("", true)
+	if g.mode() != "remote" {
+		t.Fatal("local failure waited for busy relay")
+	}
+	r := httptest.NewRequest(http.MethodGet, "/__status", nil)
+	r.Header.Set("Authorization", "Bearer test")
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, r)
+	var reply statusReply
+	_ = json.Unmarshal(w.Body.Bytes(), &reply)
+	if reply.Mode != "remote" || reply.LocalOnline || !reply.RemoteOnline {
+		t.Fatal("status did not publish failover")
+	}
+}
+
+func TestRecoveryRequiresConsecutiveSamples(t *testing.T) {
+	s := health{mode: "remote", remoteForFailure: true, localOnline: true, remoteOnline: true,
+		localRTT: 20 * time.Millisecond, remoteRTT: 100 * time.Millisecond, lastModeChange: time.Now().Add(-4 * time.Second)}
+	s.selectMode(true)
+	s.selectMode(true)
+	if s.mode != "remote" {
+		t.Fatal("recovered before stable samples")
+	}
+	s.localOnline = false
+	s.localGoodSamples = 0
+	s.selectMode(true)
+	s.localOnline = true
+	s.selectMode(true)
+	s.selectMode(true)
+	if s.mode != "remote" {
+		t.Fatal("failure did not reset recovery samples")
+	}
+	s.selectMode(true)
+	if s.mode != "local" {
+		t.Fatal("healthy local route did not recover")
+	}
+	s.mode, s.remoteForFailure, s.localGoodSamples = "remote", false, 0
+	s.lastModeChange = time.Now().Add(-4 * time.Second)
+	for i := 0; i < 6; i++ {
+		s.selectMode(true)
+	}
+	if s.mode != "remote" {
+		t.Fatal("latency selection lost its cooldown")
+	}
+}
+
+func TestUnsafeMethodsNeverReplay(t *testing.T) {
+	for _, body := range []string{`bad json`, `{"method":"tools/call"}`, `{"method":"notifications/initialized"}`, `{"method":"tools/call","params":{"name":"station_file_delete"}}`, `{"method":"tools/call","params":{"name":"station_shell_exec","arguments":{"command":"id"}}}`} {
+		if safeToReplay([]byte(body)) {
+			t.Fatalf("unsafe replay: %s", body)
+		}
+	}
+}
+
+func TestShellStatusCanReplay(t *testing.T) {
+	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_shell_status"}}`)) {
+		t.Fatal("read-only Shizuku status should be safe to replay")
+	}
+}
+
+func TestLateLocalProbeCannotReviveDisconnectedRoute(t *testing.T) {
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		_, _ = w.Write([]byte(pingReply))
+	}))
+	defer local.Close()
+	g := testGateway(local.URL, nil)
+	go func() { g.checkLocal("local", true); close(finished) }()
+	<-entered
+	g.state.mu.Lock()
+	g.noteLocalLocked(probeResult{}, false)
+	g.state.mu.Unlock()
+	close(release)
+	<-finished
+	if g.mode() != "remote" || g.state.localOnline {
+		t.Fatal("late success revived a failed route")
+	}
+}

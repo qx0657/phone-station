@@ -32,8 +32,12 @@ trap 'rm -rf "$work"' EXIT
 print -r -- "检查打开时机…"
 javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/KeeperPolicy.java" \
+  "$here/src/dev/phonestation/adbkeep/WirelessControl.java" \
+  "$here/src/dev/phonestation/adbkeep/InstallRecovery.java" \
   "$here/src/dev/phonestation/adbkeep/KeeperCopy.java" \
   "$here/src/dev/phonestation/adbkeep/HostLink.java" \
+  "$here/src/dev/phonestation/adbkeep/RelayRetry.java" \
+  "$here/src/dev/phonestation/adbkeep/RelayProfile.java" \
   "$here/src/dev/phonestation/adbkeep/AlertNote.java" \
   "$here/src/dev/phonestation/adbkeep/AlertSoundPlan.java" \
   "$here/src/dev/phonestation/adbkeep/AlertSender.java" \
@@ -47,12 +51,20 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/StayAwake.java" \
   "$here/src/dev/phonestation/adbkeep/FileTypes.java" \
   "$here/src/dev/phonestation/adbkeep/StationHost.java" \
+  "$here/src/dev/phonestation/adbkeep/ClipboardState.java" \
+  "$here/src/dev/phonestation/adbkeep/ClipboardMethods.java" \
+  "$here/src/dev/phonestation/adbkeep/ShellRequest.java" \
+  "$here/src/dev/phonestation/adbkeep/ShellRunner.java" \
   "$here/src/dev/phonestation/adbkeep/FileOps.java" \
   "$here/src/dev/phonestation/adbkeep/McpProtocol.java" \
   "$here/src/dev/phonestation/adbkeep/McpHttp.java" \
   "$here/test/KeeperPolicyTest.java" \
+  "$here/test/WirelessControlTest.java" \
+  "$here/test/InstallRecoveryTest.java" \
   "$here/test/KeeperCopyTest.java" \
   "$here/test/HostLinkTest.java" \
+  "$here/test/RelayRetryTest.java" \
+  "$here/test/RelayProfileTest.java" \
   "$here/test/AlertNoteTest.java" \
   "$here/test/AlertSoundPlanTest.java" \
   "$here/test/AlertSenderTest.java" \
@@ -64,10 +76,16 @@ javac --release 17 -d "$work/policy" \
   "$here/test/FilePolicyTest.java" \
   "$here/test/FileOpsTest.java" \
   "$here/test/StayAwakeTest.java" \
-  "$here/test/McpLoopbackTest.java"
+  "$here/test/McpLoopbackTest.java" \
+  "$here/test/ShellRunnerTest.java" \
+  "$here/test/ClipboardStateTest.java"
 java -cp "$work/policy" dev.phonestation.adbkeep.KeeperPolicyTest
+java -cp "$work/policy" dev.phonestation.adbkeep.WirelessControlTest
+java -cp "$work/policy" dev.phonestation.adbkeep.InstallRecoveryTest
 java -cp "$work/policy" dev.phonestation.adbkeep.KeeperCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.HostLinkTest
+java -cp "$work/policy" dev.phonestation.adbkeep.RelayRetryTest
+java -cp "$work/policy" dev.phonestation.adbkeep.RelayProfileTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertNoteTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertSoundPlanTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertSenderTest
@@ -80,6 +98,8 @@ java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.StayAwakeTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpLoopbackTest
+java -cp "$work/policy" dev.phonestation.adbkeep.ShellRunnerTest
+java -cp "$work/policy" dev.phonestation.adbkeep.ClipboardStateTest
 
 print -r -- "打包资源…"
 "$bt/aapt2" compile --dir "$here/res" -o "$work/compiled.zip"

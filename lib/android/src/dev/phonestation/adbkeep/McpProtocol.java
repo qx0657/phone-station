@@ -48,7 +48,10 @@ final class McpProtocol {
                 return rpc(id, Json.obj().put("tools", tools()));
             }
             if ("tools/call".equals(method)) {
-                return rpc(id, call(params, files, host));
+                // 文件请求仍按顺序执行；长 shell 调用期间 ping 独立响应，避免网关误判断线。
+                synchronized (files) {
+                    return rpc(id, call(params, files, host));
+                }
             }
             if ("ping".equals(method)) {
                 return rpc(id, Json.obj());
@@ -196,6 +199,14 @@ final class McpProtocol {
         if ("station_device_status".equals(name)) {
             return host(host).status();
         }
+        if ("station_shell_status".equals(name)) {
+            return host(host).shellStatus();
+        }
+        if ("station_shell_exec".equals(name)) {
+            return host(host).shellExecute(new ShellRequest(required(args, "command"),
+                    optionalInt(args, "timeoutMs", ShellRequest.DEFAULT_TIMEOUT_MS),
+                    optionalInt(args, "maxOutputBytes", ShellRequest.DEFAULT_OUTPUT_BYTES)));
+        }
         if ("station_stay_awake".equals(name)) {
             return host(host).stayAwake(requiredBool(args, "on"));
         }
@@ -219,7 +230,7 @@ final class McpProtocol {
             if (note == null) {
                 throw new IllegalArgumentException("标题和内容不能是空的");
             }
-            return host(host).notify(note.title, note.text, note.stack, note.agent);
+            return host(host).notify(note.title, note.text, note.stack, note.agent, optional(args, "sound"));
         }
         if ("station_clipboard_set".equals(name)) {
             String text = required(args, "text");
@@ -231,6 +242,10 @@ final class McpProtocol {
             }
             return host(host).clipboard(text);
         }
+        if ("station_clipboard_get".equals(name)) { return host(host).clipboardGet(); }
+        if ("station_clipboard_state".equals(name)) { return host(host).clipboardState(); }
+        if ("station_clipboard_configure".equals(name)) { return host(host).clipboardConfigure(args); }
+        if ("station_clipboard_exchange".equals(name)) { return host(host).clipboardExchange(args); }
         if ("station_file_open".equals(name)) {
             return host(host).open(required(args, "path"));
         }
@@ -419,7 +434,7 @@ final class McpProtocol {
                 schema(new String[0], Json.obj())));
         tools.add(tool(
                 "station_device_status",
-                "只读：电量、是否在充电、响铃模式、Wi-Fi 是否连着、USB 调试和无线调试开关、息屏时间和充电时常亮，以及剩余空间。不读 Wi-Fi 名字。",
+                "只读：连接类型、电量、是否在充电、响铃模式、Wi-Fi 是否连着、USB 调试和无线调试开关、息屏时间和充电时常亮，以及剩余空间。不读 Wi-Fi 名字。",
                 true,
                 false,
                 schema(new String[0], Json.obj())));
@@ -430,6 +445,26 @@ final class McpProtocol {
                 false,
                 schema(new String[] {"on"}, Json.obj().put("on", bool("true 打开，false 恢复。")))));
         tools.add(tool(
+                "station_shell_status",
+                "只读：Shizuku 是否安装、运行及授权，shell/root 身份和不可用时的处理方法。不启动服务，不弹授权框。",
+                true,
+                false,
+                schema(new String[0], Json.obj())));
+        tools.add(tool(
+                "station_shell_exec",
+                "通过已授权的 Shizuku 13+ 执行手机 shell 命令，本地和远程均可用。"
+                        + "可修改系统或删除文件；只执行用户要求的操作。"
+                        + "返回 stdout、stderr、exitCode、timedOut、outputTruncated、uid 和 identity。"
+                        + "默认 10 秒，最多 60 秒；输出按 UTF-8 返回，总共最多保留 65536 字节。"
+                        + "无交互输入；结束或超时会清理同一进程组，不保留后台任务。"
+                        + "超时或连接中断时操作可能已生效，不要自动重做。",
+                false,
+                true,
+                schema(new String[] {"command"}, Json.obj()
+                        .put("command", text("交给 /system/bin/sh -c 的命令，最多 16384 字。"))
+                        .put("timeoutMs", integer("超时毫秒数；默认 10000。", 100, 60000))
+                        .put("maxOutputBytes", integer("stdout 和 stderr 合计保留的字节数；默认 32768。", 1, 65536)))));
+        tools.add(tool(
                 "station_notify",
                 "发一条会话提醒。下拉通知和铃声与 notify.sh 相同：通知本身不发声，铃声走媒体音量。mode 省略时是 replace，原地更新同一条。stack 另发一条。agent 只认 Grok、Claude、Codex。",
                 false,
@@ -438,13 +473,28 @@ final class McpProtocol {
                         .put("title", text("标题。不能是空的，最多 200 字。"))
                         .put("text", text("内容。不能是空的，最多 4000 字。"))
                         .put("mode", text("replace 或 stack。省略时是 replace。"))
-                        .put("agent", text("Grok、Claude 或 Codex。省略或认不出就没有右侧图标。")))));
+                        .put("agent", text("Grok、Claude 或 Codex。省略或认不出就没有右侧图标。"))
+                        .put("sound", text("可选的手机铃声文件路径或 content URI；省略时沿用应用里的铃声选择。")))));
         tools.add(tool(
                 "station_clipboard_set",
                 "把一段文字放进手机剪贴板，盖掉原来的内容。最多 100000 字。",
                 false,
                 true,
                 schema(new String[] {"text"}, Json.obj().put("text", text("要放进去的文字。")))));
+        tools.add(tool("station_clipboard_get", "读取手机当前文字剪贴板。后台读取需要已启动并授权的 Shizuku；敏感内容与锁屏时不返回文字。",
+                true, false, schema(new String[] {}, Json.obj())));
+        tools.add(tool("station_clipboard_state", "读取剪贴板共享与自动同步设置、内存中的两端预览和 Mac 在线状态。",
+                true, false, schema(new String[] {}, Json.obj())));
+        tools.add(tool("station_clipboard_configure", "开启或关闭剪贴板共享及自动双向同步。关闭共享会清除内存预览并停止后台剪贴板服务。",
+                false, false, schema(new String[] {}, Json.obj().put("shared", bool("是否共享。"))
+                        .put("automatic", bool("是否自动双向同步。")))));
+        tools.add(tool("station_clipboard_exchange", "手机工位 Mac 客户端的剪贴板交换：共享关闭时不读；自动同步开启且版本一致时可写手机剪贴板。首次连接只建立基线。",
+                false, true, schema(new String[] {}, Json.obj()
+                        .put("clientId", text("Mac 本次运行的客户端标识。"))
+                        .put("macVersion", text("Mac 剪贴板变化标识。"))
+                        .put("macKind", text("text、empty、unsupported、sensitive、oversize。"))
+                        .put("macText", text("macKind 为 text 时的文字，最多 100000 字。"))
+                        .put("phoneVersion", text("上次收到的手机版本，首次连接或重连时省略。")))));
         tools.add(tool(
                 "station_file_open",
                 "用系统查看器打开一个已有的普通文件。打不开时在下拉栏留一条，点一下打开。不改文件。",

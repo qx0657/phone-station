@@ -31,7 +31,7 @@ struct MorePage: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("安装或更新手机应用")
-                                Text("装上「手机工位」，并授好权限")
+                                Text("已有远程通道时直接更新，首次安装走 adb")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

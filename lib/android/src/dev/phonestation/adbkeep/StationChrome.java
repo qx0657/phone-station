@@ -14,18 +14,25 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.WindowInsetsController;
+import android.view.WindowInsets;
+import android.graphics.Insets;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.EditText;
+import android.widget.Button;
+import android.text.InputType;
+import android.view.inputmethod.EditorInfo;
 
 /** 首页和子页共用的页面、卡片和行。 */
 final class StationChrome {
     final Activity activity;
     final boolean night;
     final LinearLayout column;
+    final ScrollView scroll;
     private final Typeface medium = Typeface.create("sans-serif-medium", Typeface.NORMAL);
 
     StationChrome(Activity activity) {
@@ -34,10 +41,21 @@ final class StationChrome {
                 == Configuration.UI_MODE_NIGHT_YES;
         applySystemBars();
 
-        ScrollView scroll = new ScrollView(activity);
+        scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
-        scroll.setFitsSystemWindows(true);
-        scroll.setClipToPadding(false);
+        scroll.setFitsSystemWindows(false);
+        scroll.setClipToPadding(true);
+        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                Insets keyboard = insets.getInsets(WindowInsets.Type.ime());
+                view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, keyboard.bottom));
+            } else {
+                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
         scroll.setBackgroundColor(color(R.color.page));
 
         column = new LinearLayout(activity);
@@ -50,6 +68,7 @@ final class StationChrome {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         activity.setContentView(scroll);
+        scroll.requestApplyInsets();
     }
 
     LinearLayout card() {
@@ -86,15 +105,15 @@ final class StationChrome {
         bar.setMinimumHeight(dp(48));
         bar.setPadding(0, dp(2), 0, dp(2));
         FrameLayout hit = new FrameLayout(activity);
-        hit.setMinimumWidth(dp(40));
-        hit.setMinimumHeight(dp(40));
+        hit.setMinimumWidth(dp(48));
+        hit.setMinimumHeight(dp(48));
         ImageView mark = glyph(R.drawable.ic_back, 22, ink());
         hit.addView(mark, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
         hit.setContentDescription("返回");
         hit.setClickable(true);
         hit.setOnClickListener(view -> activity.finish());
         ripple(hit);
-        bar.addView(hit, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        bar.addView(hit, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = text(22);
         title.setText(label);
         title.setTypeface(medium);
@@ -167,25 +186,28 @@ final class StationChrome {
         TextView name = text(16);
         name.setText(label);
         name.setIncludeFontPadding(false);
-        name.setMaxLines(1);
-        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setMaxLines(2);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nameParams.setMarginStart(dp(12));
         line.addView(name, nameParams);
         Switch toggle = new Switch(activity);
         toggle.setId(View.generateViewId());
+        toggle.setContentDescription(label);
+        toggle.setMinimumWidth(dp(48));
+        toggle.setMinimumHeight(dp(48));
         toggle.setSplitTrack(false);
         tintSwitch(toggle);
         name.setLabelFor(toggle.getId());
+        name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         line.addView(toggle, wrap());
         line.setClickable(true);
-        line.setOnClickListener(view -> toggle.toggle());
+        line.setOnClickListener(view -> { if (toggle.isEnabled()) { toggle.toggle(); } });
         line.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         ripple(line);
         card.addView(line, matchWrap());
         paintOff(mark);
-        return new Control(toggle, mark);
+        return new Control(toggle, mark, line);
     }
 
     TextView linkRow(LinearLayout card, int iconRes, String label, View.OnClickListener click) {
@@ -199,7 +221,7 @@ final class StationChrome {
         TextView name = text(16);
         name.setText(label);
         name.setIncludeFontPadding(false);
-        name.setMaxLines(1);
+        name.setMaxLines(2);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nameParams.setMarginStart(dp(12));
@@ -208,6 +230,7 @@ final class StationChrome {
         value.setIncludeFontPadding(false);
         value.setGravity(Gravity.END);
         value.setMaxLines(1);
+        value.setMaxWidth(dp(100));
         value.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams valueParams = wrap();
         valueParams.setMarginStart(dp(8));
@@ -240,6 +263,67 @@ final class StationChrome {
         params.bottomMargin = dp(8);
         card.addView(view, params);
         return view;
+    }
+
+    TextView paragraph(LinearLayout parent, String value) {
+        TextView view = text(14);
+        view.setText(value);
+        view.setTextColor(muted());
+        view.setLineSpacing(0, 1.2f);
+        view.setPadding(dp(16), dp(8), dp(16), dp(12));
+        parent.addView(view, matchWrap());
+        return view;
+    }
+
+    EditText field(LinearLayout parent, String label, String hint, boolean secret) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(dp(16), dp(10), dp(16), dp(8));
+        TextView title = text(14);
+        title.setText(label);
+        title.setTypeface(medium);
+        group.addView(title, matchWrap());
+        EditText input = new EditText(activity);
+        input.setId(View.generateViewId());
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setTextColor(ink());
+        input.setHintTextColor(muted());
+        input.setHint(hint);
+        input.setSingleLine(true);
+        input.setMinimumHeight(dp(48));
+        input.setInputType(secret ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+                : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setImeOptions(EditorInfo.IME_ACTION_NEXT | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        input.setSaveEnabled(!secret);
+        title.setLabelFor(input.getId());
+        group.addView(input, matchWrap());
+        parent.addView(group, matchWrap());
+        return input;
+    }
+
+    Button action(LinearLayout parent, String label, boolean primary, View.OnClickListener listener) {
+        Button button = new Button(activity);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        button.setMinHeight(dp(48));
+        if (primary) {
+            button.setBackgroundTintList(new ColorStateList(new int[][] {
+                    new int[] {-android.R.attr.state_enabled}, new int[] {}},
+                    new int[] {color(R.color.well), held()}));
+            button.setTextColor(new ColorStateList(new int[][] {
+                    new int[] {-android.R.attr.state_enabled}, new int[] {}},
+                    new int[] {muted(), color(R.color.on_held)}));
+        }
+        button.setOnClickListener(listener);
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMarginStart(dp(16));
+        params.setMarginEnd(dp(16));
+        params.topMargin = dp(8);
+        params.bottomMargin = dp(8);
+        parent.addView(button, params);
+        return button;
     }
 
     Notice notice(LinearLayout card) {
@@ -465,10 +549,18 @@ final class StationChrome {
     static final class Control {
         final Switch toggle;
         final Mark mark;
+        final View row;
 
-        Control(Switch toggle, Mark mark) {
+        Control(Switch toggle, Mark mark, View row) {
             this.toggle = toggle;
             this.mark = mark;
+            this.row = row;
+        }
+
+        void setEnabled(boolean enabled) {
+            toggle.setEnabled(enabled);
+            row.setEnabled(enabled);
+            row.setAlpha(enabled ? 1f : 0.5f);
         }
     }
 

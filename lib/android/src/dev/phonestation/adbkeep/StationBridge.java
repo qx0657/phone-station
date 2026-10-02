@@ -40,6 +40,16 @@ final class StationBridge implements StationHost {
     }
 
     @Override
+    public Json shellStatus() {
+        return ShizukuShell.status(context);
+    }
+
+    @Override
+    public Json shellExecute(ShellRequest request) {
+        return ShizukuShell.execute(context, request);
+    }
+
+    @Override
     public Json status() {
         BatteryManager battery = context.getSystemService(BatteryManager.class);
         AudioManager audio = context.getSystemService(AudioManager.class);
@@ -49,7 +59,11 @@ final class StationBridge implements StationHost {
         Json volume = files.volume();
         int timeout = systemInt(Settings.System.SCREEN_OFF_TIMEOUT);
         int plugged = globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN);
+        HostProbe host = HostProbe.current(context);
         return Json.obj()
+                .put("connected", host.linked)
+                .put("connectionType", host.connectionType)
+                .put("remoteConnected", host.remoteConnected)
                 .put("batteryPercent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
                 .put("charging", battery.isCharging())
                 .put("ringer", ringer(audio.getRingerMode()))
@@ -88,12 +102,16 @@ final class StationBridge implements StationHost {
     }
 
     @Override
-    public Json notify(String title, String text, boolean stack, String agent) {
+    public Json notify(String title, String text, boolean stack, String agent, String sound) {
         Intent intent = new Intent(AlertNote.ACTION);
-        intent.setPackage(context.getPackageName());
+        intent.setClass(context, AlertReceiver.class);
+        intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
         intent.putExtra("title", title);
         intent.putExtra("text", text);
         intent.putExtra("mode", stack ? "stack" : "replace");
+        if (sound != null && !sound.isEmpty()) {
+            intent.putExtra("sound", sound);
+        }
         if (agent != null && !agent.isEmpty()) {
             intent.putExtra("agent", agent);
         }
@@ -155,6 +173,11 @@ final class StationBridge implements StationHost {
         clips.setPrimaryClip(ClipData.newPlainText("手机工位", text));
         return Json.obj().put("copied", true).put("characters", text.length());
     }
+
+    @Override public Json clipboardGet() { return SharedClipboard.readPhone(context); }
+    @Override public Json clipboardState() { return SharedClipboard.status(context); }
+    @Override public Json clipboardConfigure(Json args) { return SharedClipboard.configure(context, args); }
+    @Override public Json clipboardExchange(Json args) { return SharedClipboard.exchange(context, args); }
 
     @Override
     public Json open(String input) {

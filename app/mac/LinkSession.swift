@@ -27,6 +27,7 @@ final class LinkSession: ObservableObject {
     @Published private(set) var battery: BatteryReport.Reading?
     @Published private(set) var stayAwake = false
     @Published private(set) var isReconnecting = false
+    @Published private(set) var remoteConnected = false
     @Published private var willReconnect = false
 
     var onMenuIcon: (@MainActor (Bool) -> Void)?
@@ -39,7 +40,8 @@ final class LinkSession: ObservableObject {
     /// 已经确认是 PGT-AN20 的序列号。菜单栏复查时序列号没变就不再读型号。
     private var trustedSerial: String?
     private var linkWatch: Task<Void, Never>?
-    private static let linkWatchInterval: UInt64 = 5_000_000_000
+    private static let linkWatchInterval: UInt64 = 2_000_000_000
+    private var pairedDeviceName = ""
     private var decision = ReconnectDecision()
     private var connectIsManual = false
     /// 断开进行中时又点了连接，晚到的断开结果不要把暂停写回去。
@@ -52,9 +54,11 @@ final class LinkSession: ObservableObject {
         self.feedback = feedback
     }
 
-    var isChecking: Bool { link == .checking }
+    var isConnected: Bool { link == .connected || remoteConnected }
+    var isChecking: Bool { link == .checking && !remoteConnected }
     var isUnverified: Bool { link == .unverified }
     var statusLabel: String {
+        if isConnected { return "已连接" }
         if isReconnecting { return "正在重新连接" }
         switch link {
         case .checking: return "检查中"
@@ -64,6 +68,9 @@ final class LinkSession: ObservableObject {
         }
     }
     var headline: String {
+        if remoteConnected && link != .connected {
+            return pairedDeviceName.isEmpty ? "已配对手机" : pairedDeviceName
+        }
         switch link {
         case .checking:
             return "正在检查设备…"
@@ -74,6 +81,7 @@ final class LinkSession: ObservableObject {
         }
     }
     var connectionLine: String {
+        if remoteConnected && link != .connected { return "远程连接" }
         switch link {
         case .checking:
             return ""
@@ -90,6 +98,7 @@ final class LinkSession: ObservableObject {
         }
     }
     var statusTone: StationTone {
+        if isConnected { return .ready }
         if isReconnecting { return .caution }
         switch link {
         case .connected: return .ready
@@ -98,7 +107,23 @@ final class LinkSession: ObservableObject {
         }
     }
 
-    /// 面板关着时菜单栏图标也要跟着变。上一次查完隔 5 秒再查。
+    /// 只合并显示状态；adb 操作仍须持有已验证的序列号。
+    func noteRemoteConnection(_ connected: Bool) {
+        guard remoteConnected != connected else { return }
+        remoteConnected = connected
+        onMenuIcon?(isConnected)
+    }
+
+    /// A dead wireless MCP route must not leave adb-only actions enabled while
+    /// adb devices still reports the old TCP session as online.
+    func noteLocalRouteUnavailable() {
+        guard let serial, Self.transportLabel(serial) == "无线连接" else { return }
+        statusRevision += 1
+        accept(statusRevision, name: "手机未连接", detail: "", link: .offline,
+               readingControls: false, reconnectable: true)
+    }
+
+    /// 面板关着时菜单栏图标也要跟着变。上一次查完隔 2 秒再查。
     /// 这次检查不读息屏、闪光灯和电量，那几项仍在打开面板时读。
     func startWatch() {
         guard linkWatch == nil else { return }
@@ -191,7 +216,7 @@ final class LinkSession: ObservableObject {
         guard let adb = StationRunner.executable("adb") else {
             return LinkReading(name: "未找到 adb", detail: "请安装 Android platform-tools。", link: .offline)
         }
-        let devices = StationRunner.capture(adb, ["devices", "-l"], timeout: 10)
+        let devices = StationRunner.capture(adb, ["devices", "-l"], timeout: 2)
         if !devices.succeeded {
             let detail = devices.timedOut ? "adb 检查超时，请重试。" : StationText.reason(devices.output, fallback: "无法读取 adb 设备列表。")
             return LinkReading(name: "设备检查失败", detail: detail, link: .offline)
@@ -211,9 +236,16 @@ final class LinkSession: ObservableObject {
                                reconnectable: !unauthorized)
         }
         if let trustedSerial, only == trustedSerial {
+            if transportLabel(only) == "无线连接" {
+                let alive = StationRunner.capture(adb, ["-s", only, "shell", "true"], timeout: 2)
+                if !alive.succeeded {
+                    return LinkReading(name: "手机未连接", detail: "无线连接已中断。", link: .offline,
+                                       reconnectable: true)
+                }
+            }
             return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
         }
-        let model = StationRunner.capture(adb, ["-s", only, "shell", "getprop", "ro.product.model"], timeout: 8)
+        let model = StationRunner.capture(adb, ["-s", only, "shell", "getprop", "ro.product.model"], timeout: 2)
         let rawName = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard model.succeeded, !rawName.isEmpty else {
             return LinkReading(name: "无法识别手机型号", detail: "请检查连接，然后重新打开面板。", link: .offline)
@@ -245,6 +277,7 @@ final class LinkSession: ObservableObject {
         }
         if newLink == .connected, let newSerial {
             trustedSerial = newSerial
+            pairedDeviceName = name == "PGT-AN20" ? "荣耀 PGT-AN20" : name
         } else {
             trustedSerial = nil
         }
@@ -259,7 +292,7 @@ final class LinkSession: ObservableObject {
         } else if stayAwake {
             stayAwake = false
         }
-        onMenuIcon?(newLink == .connected)
+        onMenuIcon?(isConnected)
         onSerial(newSerial)
         considerReconnect(reconnectable: reconnectable)
     }
@@ -321,7 +354,7 @@ final class LinkSession: ObservableObject {
     private func setReconnecting(_ value: Bool) {
         guard isReconnecting != value else { return }
         isReconnecting = value
-        onMenuIcon?(link == .connected)
+        onMenuIcon?(isConnected)
     }
 
     private func launchConnect() {

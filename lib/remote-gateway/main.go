@@ -14,10 +14,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,14 +32,17 @@ const (
 	localAddress  = "http://127.0.0.1:18766/mcp"
 	publicAddress = "http://127.0.0.1:18765/mcp"
 	maxBody       = 18 << 20
-	probeEvery    = 5 * time.Second
+	probeEvery    = time.Second
+	remoteEvery   = 2 * time.Second
+	localTimeout  = time.Second
 )
 
 type config struct {
-	GatewayToken string `json:"gatewayToken"`
-	LocalToken   string `json:"localToken"`
-	RemoteURL    string `json:"remoteUrl"`
-	RemotePin    string `json:"remotePin"`
+	GatewayToken   string `json:"gatewayToken"`
+	LocalToken     string `json:"localToken"`
+	RemoteURL      string `json:"remoteUrl"`
+	RemotePin      string `json:"remotePin"`
+	RemoteRevision string `json:"remoteRevision,omitempty"`
 }
 
 type health struct {
@@ -49,11 +55,20 @@ type health struct {
 	localSlowSamples int
 	localGoodSamples int
 	lastModeChange   time.Time
+	remoteForFailure bool
+	remoteProfile    string
+	localRevision    uint64
+	localRequests    map[uint64]context.CancelFunc
+	nextRequest      uint64
 }
 
 type gateway struct {
 	state    health
 	remoteMu sync.Mutex
+	// Overrides let transport tests use isolated servers without real credentials.
+	localURL   string
+	readConfig func() (config, error)
+	callRemote func(context.Context, config, []byte) (relayResponse, error)
 }
 
 func main() {
@@ -65,6 +80,18 @@ func main() {
 	switch os.Args[1] {
 	case "configure":
 		err = configureRemote()
+	case "profile":
+		err = printRemoteProfile()
+	case "validate-endpoint":
+		if len(os.Args) != 3 {
+			err = errors.New("validate-endpoint requires an HTTPS address")
+		} else {
+			var endpoint string
+			endpoint, err = normalizeRemoteEndpoint(os.Args[2])
+			if err == nil {
+				fmt.Println(endpoint)
+			}
+		}
 	case "local-token":
 		err = updateLocalToken()
 	case "clear-local":
@@ -77,8 +104,16 @@ func main() {
 		err = serve()
 	case "status":
 		err = printStatus()
+	case "status-json":
+		err = printJSONStatus()
 	case "credentials":
 		err = printCredentials()
+	case "remote-call":
+		var value config
+		value, err = loadConfig()
+		if err == nil {
+			err = runRemoteCLI(value, os.Stdin, os.Stdout, remoteCall)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -90,7 +125,41 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "phone-relay-gateway configure|local-token|clear-local|unpair|start|serve|status|credentials")
+	fmt.Fprintln(os.Stderr, "phone-relay-gateway configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|credentials|remote-call")
+}
+
+// Uses the pinned relay directly, without opening an adb route or printing credentials.
+// The transport retains one operation ID across its own retries. The CLI never
+// submits a second logical operation after an unknown outcome.
+func runRemoteCLI(value config, input io.Reader, output io.Writer,
+	call func(context.Context, config, []byte) (relayResponse, error)) error {
+	if value.RemoteURL == "" || value.RemotePin == "" {
+		return errors.New("尚未配置远程中继")
+	}
+	body, err := readBody(input, maxBody)
+	if err != nil {
+		return errors.New("无法读取远程请求或请求过大")
+	}
+	var request struct {
+		JSONRPC string          `json:"jsonrpc"`
+		Method  string          `json:"method"`
+		ID      json.RawMessage `json:"id"`
+	}
+	if json.Unmarshal(body, &request) != nil || request.JSONRPC != "2.0" ||
+		request.Method == "" || len(request.ID) == 0 || string(request.ID) == "null" {
+		return errors.New("需要带 id 的 JSON-RPC 2.0 请求")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	response, err := call(ctx, value, body)
+	if err != nil {
+		return fmt.Errorf("远程请求未确认；请核实结果，不要自动重做 (%v)", err)
+	}
+	if response.Status != http.StatusOK || !json.Valid(response.Body) {
+		return errors.New("手机返回无效的远程响应；请核实结果")
+	}
+	_, err = output.Write(append(response.Body, '\n'))
+	return err
 }
 
 func configPath() (string, error) {
@@ -160,6 +229,97 @@ func saveConfig(value config) error {
 	return os.Rename(tempName, path)
 }
 
+// Pairing and the background adb-token refresh run in different processes.
+// Serialize their read/modify/write transactions so neither loses the other.
+func updateConfig(update func(*config) error) error {
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	value, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	previous := value
+	if err := update(&value); err != nil {
+		return err
+	}
+	if value == previous {
+		return nil
+	}
+	return saveConfig(value)
+}
+
+// Restrict profiles to HTTPS hosts and optional base paths. This also keeps an
+// endpoint safe to pass as a single argument to the Android pairing broadcast.
+var remoteEndpointPattern = regexp.MustCompile(`^https://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/-]*)?$`)
+
+func normalizeRemoteEndpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	invalid := errors.New("中继地址必须是 HTTPS 主机和可选端口、路径；不能包含账号、查询参数或片段。")
+	if !remoteEndpointPattern.MatchString(endpoint) {
+		return "", invalid
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Hostname() == "" {
+		return "", invalid
+	}
+	if strings.HasPrefix(parsed.Host, "[") && net.ParseIP(parsed.Hostname()) == nil {
+		return "", invalid
+	}
+	if !strings.HasPrefix(parsed.Host, "[") {
+		for _, label := range strings.Split(parsed.Hostname(), ".") {
+			if len(label) == 0 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+				return "", invalid
+			}
+		}
+	}
+	if port := parsed.Port(); port != "" {
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return "", invalid
+		}
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if segment == "." || segment == ".." {
+			return "", invalid
+		}
+	}
+	return strings.TrimRight(endpoint, "/"), nil
+}
+
+type remoteProfile struct {
+	Endpoint   string `json:"endpoint"`
+	Pin        string `json:"pin"`
+	Configured bool   `json:"configured"`
+}
+
+func publicRemoteProfile(value config) remoteProfile {
+	return remoteProfile{Endpoint: value.RemoteURL, Pin: value.RemotePin,
+		Configured: value.RemoteURL != "" && value.RemotePin != ""}
+}
+
+// Reading a profile never starts the gateway or reads keychain credentials.
+func printRemoteProfile() error {
+	value, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(publicRemoteProfile(value))
+}
+
 func configureRemote() error {
 	var input struct {
 		Endpoint string `json:"endpoint"`
@@ -169,23 +329,35 @@ func configureRemote() error {
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 4096)).Decode(&input); err != nil {
 		return errors.New("invalid remote profile")
 	}
-	if !strings.HasPrefix(input.Endpoint, "https://") || len(input.Pin) != 64 || !isHex(input.Pin) ||
-		len(input.Token) != 64 || !isHex(input.Token) {
-		return errors.New("remote profile values are invalid")
-	}
-	value, err := loadConfig()
+	endpoint, err := normalizeRemoteEndpoint(input.Endpoint)
 	if err != nil {
 		return err
 	}
-	if value.GatewayToken == "" {
-		value.GatewayToken = randomHex(32)
+	if len(input.Pin) != 64 || !isHex(input.Pin) ||
+		len(input.Token) != 64 || !isHex(input.Token) {
+		return errors.New("remote profile values are invalid")
 	}
-	if _, err := runKeychain("set", []byte(strings.ToLower(input.Token))); err != nil {
+	revision := randomHex(8)
+	var previousRevision string
+	err = updateConfig(func(value *config) error {
+		previousRevision = value.RemoteRevision
+		if _, err := runKeychain("set", []byte(strings.ToLower(input.Token)), revision); err != nil {
+			return err
+		}
+		if value.GatewayToken == "" {
+			value.GatewayToken = randomHex(32)
+		}
+		value.RemoteURL, value.RemotePin, value.RemoteRevision = endpoint, strings.ToLower(input.Pin), revision
+		return nil
+	})
+	if err != nil {
+		_, _ = runKeychain("delete", nil, revision)
 		return err
 	}
-	value.RemoteURL = strings.TrimRight(input.Endpoint, "/")
-	value.RemotePin = strings.ToLower(input.Pin)
-	return saveConfig(value)
+	// Requests already holding the previous token can finish. A stale request
+	// that has not loaded it yet fails rather than using the new server's token.
+	_, _ = runKeychain("delete", nil, previousRevision)
+	return nil
 }
 
 func updateLocalToken() error {
@@ -200,31 +372,24 @@ func updateLocalTokenValue(token string) error {
 	if token != "" && (len(token) != 32 || !isHex(token)) {
 		return errors.New("local MCP token must be 32 hexadecimal characters")
 	}
-	value, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	if value.GatewayToken != "" && value.LocalToken == token {
+	return updateConfig(func(value *config) error {
+		if value.GatewayToken == "" {
+			value.GatewayToken = randomHex(32)
+		}
+		value.LocalToken = token
 		return nil
-	}
-	if value.GatewayToken == "" {
-		value.GatewayToken = randomHex(32)
-	}
-	value.LocalToken = token
-	return saveConfig(value)
+	})
 }
 
 func clearRemote() error {
-	value, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	value.RemoteURL = ""
-	value.RemotePin = ""
-	if _, err := runKeychain("delete", nil); err != nil {
-		return err
-	}
-	return saveConfig(value)
+	return updateConfig(func(value *config) error {
+		if _, err := runKeychain("delete", nil, value.RemoteRevision); err != nil {
+			return err
+		}
+		value.RemoteURL, value.RemotePin = "", ""
+		value.RemoteRevision = randomHex(8)
+		return nil
+	})
 }
 
 func startDaemon() error {
@@ -305,21 +470,20 @@ func serve() error {
 }
 
 func ensureConfig() (config, error) {
-	value, err := loadConfig()
+	err := updateConfig(func(value *config) error {
+		if value.GatewayToken == "" {
+			value.GatewayToken = randomHex(32)
+		}
+		return nil
+	})
 	if err != nil {
 		return config{}, err
 	}
-	if value.GatewayToken == "" {
-		value.GatewayToken = randomHex(32)
-		if err := saveConfig(value); err != nil {
-			return config{}, err
-		}
-	}
-	return value, nil
+	return loadConfig()
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	value, err := loadConfig()
+	value, err := g.config()
 	if err != nil {
 		writeMCPError(w, nil, http.StatusInternalServerError, "网关配置不可用")
 		return
@@ -355,69 +519,152 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMCPError(w, nil, http.StatusRequestEntityTooLarge, "请求过大或无法读取")
 		return
 	}
-	g.state.mu.RLock()
-	mode := g.state.mode
-	g.state.mu.RUnlock()
+	mode := g.mode()
+	// Check the local route before dispatch: a dead adb TCP forward can still
+	// accept a socket. The actual operation has not run and can safely go remote.
+	if mode == "local" {
+		g.checkLocal(value.LocalToken, false)
+		mode = g.mode()
+	}
 	switch mode {
 	case "local":
-		g.proxyLocal(w, body, value.LocalToken)
+		g.proxyLocal(r.Context(), w, body, value)
 	case "remote":
-		g.proxyRemote(w, body, value)
+		g.proxyRemote(r.Context(), w, body, value)
 	default:
 		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "手机暂时没有可用通道")
 	}
 }
 
 func (g *gateway) monitor() {
-	g.probe()
+	// A stalled relay probe must never delay noticing a failed local route.
+	go func() {
+		ticker := time.NewTicker(remoteEvery)
+		defer ticker.Stop()
+		for {
+			if value, err := g.config(); err == nil {
+				g.probeRemote(value)
+			}
+			<-ticker.C
+		}
+	}()
 	ticker := time.NewTicker(probeEvery)
 	defer ticker.Stop()
-	for range ticker.C {
-		g.probe()
+	for {
+		if value, err := g.config(); err == nil {
+			g.checkLocal(value.LocalToken, true)
+		}
+		<-ticker.C
 	}
 }
 
-func (g *gateway) probe() {
-	value, err := loadConfig()
-	if err != nil {
+func (g *gateway) config() (config, error) {
+	var value config
+	var err error
+	if g.readConfig != nil {
+		value, err = g.readConfig()
+	} else {
+		value, err = loadConfig()
+	}
+	if err == nil {
+		key := value.remoteProfileKey()
+		g.state.mu.Lock()
+		if g.state.remoteProfile != "" && g.state.remoteProfile != key {
+			g.state.remoteOnline, g.state.remoteRTT = false, 0
+			g.state.localSlowSamples, g.state.localGoodSamples = 0, 0
+			g.state.selectMode(false)
+		}
+		g.state.remoteProfile = key
+		g.state.mu.Unlock()
+	}
+	return value, err
+}
+
+func (value config) remoteProfileKey() string {
+	return value.RemoteURL + "\n" + value.RemotePin + "\n" + value.RemoteRevision
+}
+
+func (g *gateway) mode() string {
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+	return g.state.mode
+}
+
+func (g *gateway) checkLocal(token string, sample bool) {
+	g.state.mu.RLock()
+	revision := g.state.localRevision
+	g.state.mu.RUnlock()
+	result := g.probeLocal(token)
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+	if revision != g.state.localRevision {
 		return
 	}
-	localDone := make(chan probeResult, 1)
-	remoteDone := make(chan probeResult, 1)
-	go func() { localDone <- g.probeLocal(value.LocalToken) }()
-	go func() { remoteDone <- g.probeRemote(value) }()
-	local := <-localDone
-	remote := <-remoteDone
+	g.noteLocalLocked(result, sample)
+}
+
+func (g *gateway) noteLocalLocked(result probeResult, sample bool) {
 	state := &g.state
-	state.mu.Lock()
-	state.localOnline, state.remoteOnline = local.ok, remote.ok
-	state.localRTT, state.remoteRTT = local.rtt, remote.rtt
+	state.localOnline, state.localRTT = result.ok, result.rtt
+	if !result.ok {
+		state.localRevision++
+		state.localSlowSamples, state.localGoodSamples = 0, 0
+		for _, cancel := range state.localRequests {
+			cancel()
+		}
+	}
+	state.selectMode(sample)
+}
+
+func (g *gateway) noteRemote(value config, result probeResult) {
+	current, err := g.config()
+	if err != nil || current.remoteProfileKey() != value.remoteProfileKey() {
+		return
+	}
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+	if g.state.remoteProfile != value.remoteProfileKey() {
+		return
+	}
+	g.state.remoteOnline, g.state.remoteRTT = result.ok, result.rtt
+	g.state.selectMode(false)
+}
+
+// Called with the state lock held. Recovery from a broken route is faster than
+// switching back after choosing the relay for sustained local latency.
+func (state *health) selectMode(localSample bool) {
 	previous := state.mode
-	if local.ok && !remote.ok {
+	if state.localOnline && !state.remoteOnline {
 		state.mode = "local"
-	} else if remote.ok && !local.ok {
+	} else if state.remoteOnline && !state.localOnline {
 		state.mode = "remote"
-	} else if local.ok && remote.ok {
+		state.remoteForFailure = true
+	} else if state.localOnline && state.remoteOnline {
 		if state.mode == "" || state.mode == "offline" {
 			state.mode = "local"
 		}
-		if state.mode == "local" {
-			if local.rtt > 500*time.Millisecond && remote.rtt*10 < local.rtt*6 {
+		if state.mode == "local" && localSample {
+			if state.localRTT > 500*time.Millisecond && state.remoteRTT*10 < state.localRTT*6 {
 				state.localSlowSamples++
 			} else {
 				state.localSlowSamples = 0
 			}
 			if state.localSlowSamples >= 3 {
 				state.mode = "remote"
+				state.remoteForFailure = false
 				state.localGoodSamples = 0
 			}
-		} else {
-			if local.rtt < 150*time.Millisecond {
+		} else if state.mode == "remote" && localSample {
+			if state.localRTT < 150*time.Millisecond {
 				state.localGoodSamples++
 			} else {
 				state.localGoodSamples = 0
 			}
-			if state.localGoodSamples >= 6 && time.Since(state.lastModeChange) >= time.Minute {
+			needed, cooldown := 6, time.Minute
+			if state.remoteForFailure {
+				needed, cooldown = 3, 3*time.Second
+			}
+			if state.localGoodSamples >= needed && time.Since(state.lastModeChange) >= cooldown {
 				state.mode = "local"
 				state.localSlowSamples = 0
 			}
@@ -427,8 +674,8 @@ func (g *gateway) probe() {
 	}
 	if state.mode != previous {
 		state.lastModeChange = time.Now()
+		state.localSlowSamples, state.localGoodSamples = 0, 0
 	}
-	state.mu.Unlock()
 }
 
 type probeResult struct {
@@ -441,9 +688,13 @@ func (g *gateway) probeLocal(token string) probeResult {
 		return probeResult{}
 	}
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, localAddress, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"local-probe","method":"ping"}`))
+	address := g.localURL
+	if address == "" {
+		address = localAddress
+	}
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"local-probe","method":"ping"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := (&http.Client{Timeout: time.Second}).Do(request)
@@ -458,34 +709,63 @@ func (g *gateway) probeLocal(token string) probeResult {
 	return probeResult{ok: true, rtt: time.Since(start)}
 }
 
-func (g *gateway) probeRemote(value config) probeResult {
+func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 	// The relay dispatches one operation at a time. A health probe must not
 	// compete with an MCP call or mark a busy, working channel as offline.
 	if !g.remoteMu.TryLock() {
-		g.state.mu.RLock()
-		defer g.state.mu.RUnlock()
-		return probeResult{ok: g.state.remoteOnline, rtt: g.state.remoteRTT}
+		return probeResult{}, false
 	}
 	defer g.remoteMu.Unlock()
+	// Publish before releasing the relay lock, so a late probe cannot overwrite
+	// the health of a business call that has already completed successfully.
+	defer func() {
+		if sampled {
+			g.noteRemote(value, result)
+		}
+	}()
 	if value.RemoteURL == "" || value.RemotePin == "" {
-		return probeResult{}
+		return probeResult{}, true
 	}
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	response, err := remoteCall(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`))
+	response, err := g.remoteCall(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`))
 	if err != nil || response.Status != http.StatusOK || !validMCPReply(response.Body) {
-		return probeResult{}
+		return probeResult{}, true
 	}
-	return probeResult{ok: true, rtt: time.Since(start)}
+	return probeResult{ok: true, rtt: time.Since(start)}, true
 }
 
-func (g *gateway) proxyLocal(w http.ResponseWriter, body []byte, token string) {
+func (g *gateway) proxyLocal(parent context.Context, w http.ResponseWriter, body []byte, value config) {
+	token := value.LocalToken
 	if token == "" {
 		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "adb 通道还没就绪")
 		return
 	}
-	request, err := http.NewRequest(http.MethodPost, localAddress, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
+	defer cancel()
+	g.state.mu.Lock()
+	g.state.nextRequest++
+	id := g.state.nextRequest
+	revision := g.state.localRevision
+	if g.state.localRequests == nil {
+		g.state.localRequests = make(map[uint64]context.CancelFunc)
+	}
+	g.state.localRequests[id] = cancel
+	if !g.state.localOnline {
+		cancel()
+	}
+	g.state.mu.Unlock()
+	defer func() {
+		g.state.mu.Lock()
+		delete(g.state.localRequests, id)
+		g.state.mu.Unlock()
+	}()
+	address := g.localURL
+	if address == "" {
+		address = localAddress
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
 		writeMCPError(w, requestID(body), http.StatusBadGateway, "无法连接手机")
 		return
@@ -495,13 +775,13 @@ func (g *gateway) proxyLocal(w http.ResponseWriter, body []byte, token string) {
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	response, err := (&http.Client{Timeout: 4 * time.Minute}).Do(request)
 	if err != nil {
-		writeMCPError(w, requestID(body), http.StatusBadGateway, "本次请求中断；结果可能需要核实")
+		g.localRequestFailed(parent, w, body, value, revision)
 		return
 	}
 	defer response.Body.Close()
 	result, err := readBody(response.Body, maxBody)
 	if err != nil {
-		writeMCPError(w, requestID(body), http.StatusBadGateway, "手机响应无法读取；结果可能需要核实")
+		g.localRequestFailed(parent, w, body, value, revision)
 		return
 	}
 	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
@@ -510,20 +790,73 @@ func (g *gateway) proxyLocal(w http.ResponseWriter, body []byte, token string) {
 	_, _ = w.Write(result)
 }
 
-func (g *gateway) proxyRemote(w http.ResponseWriter, body []byte, value config) {
+func (g *gateway) localRequestFailed(parent context.Context, w http.ResponseWriter, body []byte, value config, revision uint64) {
+	if parent.Err() != nil {
+		return
+	}
+	g.state.mu.Lock()
+	if revision == g.state.localRevision {
+		g.noteLocalLocked(probeResult{}, false)
+	}
+	remoteOnline := g.state.remoteOnline
+	g.state.mu.Unlock()
+	if remoteOnline && safeToReplay(body) {
+		g.proxyRemote(parent, w, body, value)
+	} else {
+		writeMCPError(w, requestID(body), http.StatusBadGateway, "本次请求中断；结果可能需要核实")
+	}
+}
+
+func safeToReplay(body []byte) bool {
+	var request struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(body, &request) != nil {
+		return false
+	}
+	switch request.Method {
+	case "ping", "initialize", "tools/list":
+		return true
+	case "tools/call":
+		switch request.Params.Name {
+		case "station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status",
+			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
+			"station_file_search", "station_file_search_text":
+			return true
+		}
+	}
+	return false
+}
+
+func (g *gateway) proxyRemote(parent context.Context, w http.ResponseWriter, body []byte, value config) {
 	g.remoteMu.Lock()
 	defer g.remoteMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
 	defer cancel()
-	response, err := remoteCall(ctx, value, body)
+	start := time.Now()
+	response, err := g.remoteCall(ctx, value, body)
 	if err != nil {
+		if parent.Err() == nil {
+			g.noteRemote(value, probeResult{})
+		}
 		writeMCPError(w, requestID(body), http.StatusBadGateway, "远程请求中断；请用相同操作核实结果")
 		return
 	}
+	g.noteRemote(value, probeResult{ok: true, rtt: time.Since(start)})
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(response.Status)
 	_, _ = w.Write(response.Body)
+}
+
+func (g *gateway) remoteCall(ctx context.Context, value config, payload []byte) (relayResponse, error) {
+	if g.callRemote != nil {
+		return g.callRemote(ctx, value, payload)
+	}
+	return remoteCall(ctx, value, payload)
 }
 
 func remoteCall(ctx context.Context, value config, payload []byte) (relayResponse, error) {
@@ -535,34 +868,14 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 	if err != nil {
 		return relayResponse{}, err
 	}
-	token, err := loadRemoteToken()
+	token, err := loadRemoteToken(value)
 	if err != nil {
 		return relayResponse{}, err
 	}
 	client := &http.Client{Timeout: 4 * time.Minute, Transport: pinnedTransport(value.RemotePin)}
-	var response *http.Response
-	for attempt := 0; attempt < 3; attempt++ {
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(value.RemoteURL, "/")+"/v1/desktop/call", bytes.NewReader(requestBody))
-		if requestErr != nil {
-			return relayResponse{}, requestErr
-		}
-		request.Header.Set("Authorization", "Bearer "+token)
-		request.Header.Set("Content-Type", "application/json")
-		response, err = client.Do(request)
-		if err == nil {
-			break
-		}
-		if attempt == 2 || ctx.Err() != nil {
-			return relayResponse{}, err
-		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 250 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return relayResponse{}, ctx.Err()
-		case <-timer.C:
-		}
+	response, err := postRelayCall(ctx, client, strings.TrimRight(value.RemoteURL, "/")+"/v1/desktop/call", token, requestBody)
+	if err != nil {
+		return relayResponse{}, err
 	}
 	defer response.Body.Close()
 	result, err := readBody(response.Body, maxBody)
@@ -580,6 +893,39 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 		return relayResponse{}, errors.New("relay response body is empty")
 	}
 	return wrapped, nil
+}
+
+func postRelayCall(ctx context.Context, client *http.Client, endpoint, token string, requestBody []byte) (*http.Response, error) {
+	networkFailures := 0
+	for attempt := 0; ; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := client.Do(request)
+		if err == nil && response.StatusCode != http.StatusTooManyRequests {
+			return response, nil
+		}
+		if err != nil {
+			networkFailures++
+			if networkFailures >= 3 || ctx.Err() != nil {
+				return nil, err
+			}
+		} else {
+			// A busy relay rejects before queuing. Retain this exact operation ID.
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			_ = response.Body.Close()
+		}
+		timer := time.NewTimer(time.Duration(min(attempt+1, 8)) * 250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func pinnedTransport(pin string) *http.Transport {
@@ -607,6 +953,21 @@ type statusReply struct {
 	RemoteOnline bool   `json:"remoteOnline"`
 	LocalRTTMs   int64  `json:"localRttMs"`
 	RemoteRTTMs  int64  `json:"remoteRttMs"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	Token        string `json:"token,omitempty"`
+}
+
+func printJSONStatus() error {
+	status, err := getStatus()
+	if err != nil {
+		return json.NewEncoder(os.Stdout).Encode(statusReply{})
+	}
+	value, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	status.Endpoint, status.Token = publicAddress, value.GatewayToken
+	return json.NewEncoder(os.Stdout).Encode(status)
 }
 
 type relayResponse struct {
@@ -668,8 +1029,8 @@ func printCredentials() error {
 	return nil
 }
 
-func loadRemoteToken() (string, error) {
-	output, err := runKeychain("get", nil)
+func loadRemoteToken(value config) (string, error) {
+	output, err := runKeychain("get", nil, value.RemoteRevision)
 	if err != nil {
 		return "", err
 	}
@@ -680,13 +1041,17 @@ func loadRemoteToken() (string, error) {
 	return token, nil
 }
 
-func runKeychain(action string, input []byte) ([]byte, error) {
+func runKeychain(action string, input []byte, revision string) ([]byte, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 	helper := filepath.Join(filepath.Dir(executable), "phone-relay-keychain")
-	cmd := exec.Command(helper, action)
+	arguments := []string{action}
+	if revision != "" {
+		arguments = append(arguments, revision)
+	}
+	cmd := exec.Command(helper, arguments...)
 	cmd.Stdin = bytes.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -15,7 +15,7 @@ enum StationPalette {
         light: NSColor.white))
     static let connected = Color(nsColor: dynamic(
         dark: NSColor(srgbRed: 0.463, green: 0.694, blue: 0.537, alpha: 1),
-        light: NSColor(srgbRed: 0.18, green: 0.52, blue: 0.32, alpha: 1)))
+        light: NSColor(srgbRed: 33 / 255, green: 107 / 255, blue: 64 / 255, alpha: 1)))
     static let caution = Color(nsColor: dynamic(
         dark: NSColor(srgbRed: 0.93, green: 0.66, blue: 0.36, alpha: 1),
         light: NSColor(srgbRed: 0.70, green: 0.42, blue: 0.12, alpha: 1)))

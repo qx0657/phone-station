@@ -17,7 +17,9 @@ struct ConnectionPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Text("无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
+                Text(station.link.remoteConnected && station.link.serial == nil
+                     ? "远程连接已可用，文件等 MCP 功能可以继续使用。投屏和 adb 操作需要接入 USB，或回到同一 Wi-Fi。"
+                     : "无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -59,6 +61,9 @@ struct ConnectionPage: View {
                 }
                 Button("打开项目说明") { station.login.openGuide() }
                     .buttonStyle(.bordered)
+                StationRows.navigationRow("远程 MCP 连接", symbol: "network", detail: "在不同网络下使用手机工具") {
+                    station.page = .mcp
+                }.elevatedGroup()
                 if let text = station.feedbackText {
                     StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
                 }

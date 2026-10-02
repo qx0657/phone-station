@@ -21,6 +21,11 @@ public final class PhoneRelayControlReceiver extends BroadcastReceiver {
             return;
         }
         String action = intent.getStringExtra("action");
+        if ("capabilities".equals(action)) {
+            // No preferences or services change until a supported pair follows.
+            setResultCode(2);
+            return;
+        }
         if ("forget".equals(action)) {
             RemoteStore.forget(context);
             FileMcpService.start(context);
@@ -41,5 +46,6 @@ public final class PhoneRelayControlReceiver extends BroadcastReceiver {
         RemoteStore.setEnabled(context, true);
         KeeperStore.setMcpEnabled(context, true);
         FileMcpService.start(context);
+        setResultCode(1);
     }
 }

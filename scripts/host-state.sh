@@ -6,6 +6,7 @@ DIR=${0:A:h}
 source "$DIR/../lib/common.sh"
 
 KEY=phonestation_host_ms
+TRANSPORT_KEY=phonestation_host_transport
 PIDFILE=/tmp/phonestation-host-state.pid
 INTERVAL=5
 
@@ -13,9 +14,9 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "用法: host-state.sh mark"
   print -r -- "      host-state.sh watch"
   print -r -- "      host-state.sh clear"
-  print -r -- "mark   有且只有一台在线设备时，把 settings global ${KEY} 写成手机当前时间。"
+  print -r -- "mark   有且只有一台在线设备时，写入手机当前时间与 USB / 无线连接类型。"
   print -r -- "watch  每 ${INTERVAL} 秒写一次，直到没有在线设备。已经有一个在写就直接退出。"
-  print -r -- "clear  写成 0。手机看到 0 或超过 15 秒没更新，就显示未连接。"
+  print -r -- "clear  写成 0。手机看到 0 或超过 15 秒没更新，就不再算 adb 在线；远程连接单独判断。"
   exit 0
 fi
 if [[ ${1:-mark} != mark && ${1:-} != watch && ${1:-} != clear ]]; then
@@ -42,9 +43,13 @@ one_serial() {
 }
 
 write_mark() {
-  local adb="$1" serial="$2" now
+  local adb="$1" serial="$2" now transport=usb
+  if [[ "$serial" == *:* || "$serial" == *._adb-tls-connect._tcp* ]]; then
+    transport=wireless
+  fi
   now=$("$adb" -s "$serial" shell date +%s | tr -d '[:space:]')
   [[ "$now" == <-> ]] || return 1
+  "$adb" -s "$serial" shell settings put global "$TRANSPORT_KEY" "$transport" >/dev/null
   "$adb" -s "$serial" shell settings put global "$KEY" "${now}000" >/dev/null
 }
 

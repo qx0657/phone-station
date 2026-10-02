@@ -8,6 +8,11 @@ struct MainPage: View {
             header
             VStack(alignment: .leading, spacing: 12) {
                 actionRow
+                if station.link.serial == nil && station.link.remoteConnected {
+                    Text("远程 MCP 已连接。投屏、截屏和录屏需通过 USB 或同一 Wi-Fi 连接 adb。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 controlGroup
                 if let text = station.feedbackText {
                     StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
@@ -19,10 +24,14 @@ struct MainPage: View {
                 VStack(spacing: 0) {
                     StationRows.navigationRow("连接与配对", symbol: "wifi") { station.page = .connection }
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("MCP服务", symbol: "point.3.connected.trianglepath.dotted",
+                    StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted",
                                               detail: station.mcp.summary) { station.page = .mcp }
                     StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("adb 命令", symbol: "terminal") { station.page = .commands }
+                    StationRows.groupDivider.padding(.horizontal, 10)
+                    StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.clipboard.summary) {
+                        station.page = .clipboard
+                    }
                     StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail) {
                         station.page = .files

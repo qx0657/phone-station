@@ -2,6 +2,7 @@
 # 说明见仓库根目录 README.md，编译见 docs/notify.md
 # 播放手机当前的通知铃声，并在下拉栏里更新同一条通知。
 # 震动/静音模式下系统会把通知音量关掉，所以默认由「手机工位」用媒体音量播放。
+# 默认先走已在线的 MCP 网关，本地 adb 和远程中继都可以；网关不可用时再走 adb。
 # 下拉通知也由这个应用发出，不发声、不震动。连续调用改同一条的标题和内容。
 # --shell 改回原来的方式：shell 发通知，并把铃声转成 PCM。转好的文件没变就直接播。
 # --stack 每次另发一条，原来的留着，也不覆盖上面那一条。
@@ -28,6 +29,7 @@ while (( $# )); do
       print -r -- "再跑一次不带 --agent，会把右侧那张图去掉。"
       print -r -- "--stack 每次另发一条，原来的留着，也不覆盖上面那一条。"
       print -r -- "下拉通知和铃声默认都由手机上的「手机工位」完成。铃声走媒体音量。"
+      print -r -- "默认优先走已在线的 MCP 网关，只有远程通道也能发送；网关不可用时再连接 adb。"
       print -r -- "--shell 改回原来的方式：用 shell 发一条，应用名写成「手机工位」，铃声转成 PCM。这条没有右侧图标。"
       exit 0
       ;;
@@ -103,6 +105,17 @@ done
 if [[ -z $title || -z $text ]]; then
   print -u2 -- "标题和内容不能是空的。"
   exit 2
+fi
+
+if [[ "$poster" == app ]]; then
+  set +e
+  python3 "$DIR/../lib/notify_mcp.py" "$title" "$text" "$mode" "$agent" "$sound"
+  mcp_rc=$?
+  set -e
+  # 75 表示还没提交通知就没有可用网关。其他失败可能已经发出，不能重复发送。
+  if (( mcp_rc != 75 )); then
+    exit "$mcp_rc"
+  fi
 fi
 
 dex="$DIR/../lib/notify-sound.dex"

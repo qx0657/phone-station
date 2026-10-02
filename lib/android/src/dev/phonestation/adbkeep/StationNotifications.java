@@ -8,7 +8,15 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.content.res.Configuration;
 import android.database.ContentObserver;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -52,6 +60,8 @@ final class StationNotifications {
     private static long postedAtElapsed;
     private static boolean seenInShade;
     private static ContentObserver settingObserver;
+    private static ConnectivityManager.NetworkCallback wifiCallback;
+    private static final Runnable expireHost = StationNotifications::connectionChanged;
     private static Handler mainHandler;
     private static int returnGeneration;
     private static int returnBurst;
@@ -67,6 +77,17 @@ final class StationNotifications {
     static void attachMcp(FileMcpService service) {
         mcpInstance = service;
         watch(service);
+    }
+
+    /** 远程线程的状态变化转回主线程，只有 MCP 服务运行时也能刷新通知。 */
+    static void connectionChanged() {
+        StationConnectionEvents.changed();
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Service service = live();
+            if (service != null) {
+                update(service);
+            }
+        });
     }
 
     /** 服务刚被拉起，必须进前台。已经在前台时只按状态决定要不要改通知。 */
@@ -100,7 +121,7 @@ final class StationNotifications {
             publish(service, note, true);
             return;
         }
-        if (note.fullKey().equals(visibleFullKey)) {
+        if (appearanceKey(service, note).equals(visibleFullKey)) {
             return;
         }
         publish(service, note, false);
@@ -277,7 +298,7 @@ final class StationNotifications {
         }
         retireLegacy(manager);
         visibleWakeKey = note.wakeKey();
-        visibleFullKey = note.fullKey();
+        visibleFullKey = appearanceKey(context, note);
         seenInShade = false;
         postedAtElapsed = SystemClock.elapsedRealtime();
         Log.i(KeeperEngine.TAG, "note " + (rotate ? "again " : "") + note.title + " / " + note.text);
@@ -292,6 +313,12 @@ final class StationNotifications {
             manager.cancel(StationNote.LEGACY_MCP_ID);
         }
         manager.deleteNotificationChannel("mcp");
+    }
+
+    private static String appearanceKey(Context context, StationNote note) {
+        Configuration config = context.getResources().getConfiguration();
+        return note.fullKey() + "\n" + (config.uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                + "\n" + config.fontScale + "\n" + config.densityDpi;
     }
 
     private static Notification build(Context context, StationNote note, int postedToken) {
@@ -316,52 +343,50 @@ final class StationNotifications {
     }
 
     private static void bindCollapsed(Context context, RemoteViews views, StationNote note) {
-        paint(context, views, note);
+        views.setTextViewText(R.id.title, note.title);
+        views.setTextColor(R.id.title, context.getColor(R.color.note_text));
+        views.setTextViewText(R.id.detail, note.text);
+        views.setTextColor(R.id.detail, context.getColor(R.color.note_muted));
     }
 
     private static void bindExpanded(Context context, RemoteViews views, StationNote note) {
         views.setTextViewText(R.id.title, note.title);
-        views.setTextColor(R.id.title, toneColor(context, note));
-        int ink = context.getColor(R.color.note_text);
-        int quiet = context.getColor(R.color.note_muted);
-        int held = context.getColor(R.color.held);
-        views.setTextColor(R.id.wireless_label, ink);
-        views.setTextColor(R.id.mcp_label, ink);
-        views.setTextViewText(R.id.wireless_state, note.wirelessState);
-        views.setTextColor(R.id.wireless_state, "开".equals(note.wirelessState) ? held : quiet);
-        views.setTextViewText(R.id.mcp_state, note.mcpState);
-        views.setTextColor(R.id.mcp_state, "开".equals(note.mcpState) ? held : quiet);
+        views.setTextColor(R.id.title, context.getColor(R.color.note_text));
+        views.setTextViewText(R.id.connection, note.connection);
+        views.setTextColor(R.id.connection, context.getColor(R.color.note_muted));
+        views.setViewVisibility(R.id.connection, note.connection.isEmpty() ? View.GONE : View.VISIBLE);
+        bindStatus(context, views, R.id.wireless_cell, R.id.wireless_icon, R.id.wireless_label,
+                R.id.wireless_state, R.drawable.ic_status_wireless, "无线调试", note.wirelessState);
+        bindStatus(context, views, R.id.mcp_cell, R.id.mcp_icon, R.id.mcp_label,
+                R.id.mcp_state, R.drawable.ic_status_mcp, "MCP 服务", note.mcpState);
+        bindStatus(context, views, R.id.keeper_cell, R.id.keeper_icon, R.id.keeper_label,
+                R.id.keeper_state, R.drawable.ic_status_keep, "自动保持无线调试", note.keeperState);
         if (note.expandedDetail.isEmpty()) {
             views.setViewVisibility(R.id.detail, View.GONE);
             return;
         }
         views.setViewVisibility(R.id.detail, View.VISIBLE);
         views.setTextViewText(R.id.detail, note.expandedDetail);
-        views.setTextColor(R.id.detail, context.getColor(R.color.muted));
+        views.setTextColor(R.id.detail, context.getColor(R.color.note_muted));
     }
 
-    private static void paint(Context context, RemoteViews views, StationNote note) {
-        views.setTextViewText(R.id.title, note.title);
-        views.setTextColor(R.id.title, toneColor(context, note));
-        if (note.text.isEmpty()) {
-            views.setViewVisibility(R.id.detail, View.GONE);
-            return;
-        }
-        views.setViewVisibility(R.id.detail, View.VISIBLE);
-        views.setTextViewText(R.id.detail, note.text);
-        views.setTextColor(R.id.detail, context.getColor(R.color.muted));
-    }
-
-    private static int toneColor(Context context, StationNote note) {
-        switch (note.tone) {
-            case HELD:
-                return context.getColor(R.color.held);
-            case WAITING:
-                return context.getColor(R.color.waiting);
-            case NEUTRAL:
-            default:
-                return context.getColor(R.color.note_text);
-        }
+    private static void bindStatus(Context context, RemoteViews views, int cell, int icon,
+            int label, int stateView, int drawableId, String name, String state) {
+        boolean on = "开".equals(state);
+        int quiet = context.getColor(R.color.note_muted);
+        int ink = on ? context.getColor(R.color.note_text) : quiet;
+        views.setTextColor(label, ink);
+        views.setTextViewText(stateView, state);
+        views.setTextColor(stateView, ink);
+        views.setContentDescription(cell, name + "，" + (on ? "开启" : "关闭"));
+        // 位图走 RemoteViews 的标准入口，不依赖系统对向量着色反射方法的支持。
+        int size = Math.max(1, Math.round(16 * context.getResources().getDisplayMetrics().density));
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Drawable drawable = context.getDrawable(drawableId).mutate();
+        drawable.setTint(on ? context.getColor(R.color.held) : quiet);
+        drawable.setBounds(0, 0, size, size);
+        drawable.draw(new Canvas(bitmap));
+        views.setImageViewBitmap(icon, bitmap);
     }
 
     private static void startFg(Service service, Notification notification) {
@@ -435,8 +460,9 @@ final class StationNotifications {
                 host.linked,
                 "开".equals(keeper.wireless),
                 mcp,
+                KeeperStore.isEnabled(context),
                 keeper.headline,
-                keeper.tone);
+                host.connectionType);
     }
 
     private static void watch(Context context) {
@@ -446,16 +472,37 @@ final class StationNotifications {
         settingObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override
             public void onChange(boolean selfChange) {
-                Service service = live();
-                if (service != null) {
-                    update(service);
-                }
+                connectionChanged();
+                scheduleHostExpiry(context);
             }
         };
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor("adb_wifi_enabled"), false, settingObserver);
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(HostLink.SETTING), false, settingObserver);
+        context.getApplicationContext().getContentResolver().registerContentObserver(
+                Settings.Global.getUriFor(HostLink.TRANSPORT_SETTING), false, settingObserver);
+        ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
+        if (connectivity != null) {
+            wifiCallback = new ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(Network network) { connectionChanged(); }
+                @Override public void onLost(Network network) { connectionChanged(); }
+            };
+            connectivity.registerNetworkCallback(new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build(), wifiCallback);
+        }
+        scheduleHostExpiry(context);
+    }
+
+    private static void scheduleHostExpiry(Context context) {
+        handler().removeCallbacks(expireHost);
+        long marked = Settings.Global.getLong(context.getContentResolver(), HostLink.SETTING, 0L);
+        long now = System.currentTimeMillis();
+        if (HostLink.linked(marked, now)) {
+            handler().postDelayed(expireHost, Math.max(1L, marked + HostLink.FRESH_MS + 1L - now));
+        }
     }
 
     private static void unwatchIfIdle(Context context) {
@@ -465,6 +512,11 @@ final class StationNotifications {
         context.getApplicationContext().getContentResolver()
                 .unregisterContentObserver(settingObserver);
         settingObserver = null;
+        handler().removeCallbacks(expireHost);
+        if (wifiCallback != null) {
+            context.getSystemService(ConnectivityManager.class).unregisterNetworkCallback(wifiCallback);
+            wifiCallback = null;
+        }
     }
 
     private static Service live() {

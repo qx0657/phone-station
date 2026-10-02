@@ -24,8 +24,10 @@ if [[ -z $GO ]]; then
   print -u2 -- "找不到 Go。先安装 Go 1.23 或更新版本，再构建 Mac App。"
   exit 1
 fi
+"$GO" -C "$ROOT/lib/remote-gateway" test -race ./...
 "$GO" -C "$ROOT/lib/remote-gateway" build -trimpath \
   -o "$ROOT/build/.phone-station/phone-relay-gateway" .
+python3 "$ROOT/lib/test_mcp_pair.py"
 "$SWIFTC" -O -target "$TARGET" -sdk "$SDK" -framework Security \
   -o "$ROOT/build/.phone-station/phone-relay-keychain" \
   "$ROOT/lib/remote-gateway/keychain/main.swift"
@@ -43,6 +45,19 @@ ADB_TEST="$ROOT/build/.phone-station/adb-command-line-test"
   "$ROOT/app/mac/AdbCommandLineTest.swift" \
   -o "$ADB_TEST"
 "$ADB_TEST"
+RELAY_TEST="$ROOT/build/.phone-station/remote-relay-profile-test"
+"$SWIFTC" -parse-as-library -swift-version 5 \
+  -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/RemoteRelayProfile.swift" "$ROOT/app/mac/StationRunner.swift" \
+  "$ROOT/app/mac/RemoteRelayProfileTest.swift" -o "$RELAY_TEST"
+"$RELAY_TEST"
+CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSyncPolicyTest.swift" \
+  -o "$CLIPBOARD_TEST"
+"$CLIPBOARD_TEST"
+python3 "$ROOT/lib/test_notify_mcp.py"
+python3 "$ROOT/lib/test_remote_ops.py"
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"
@@ -53,11 +68,12 @@ trap 'rm -rf "$STAGING"' EXIT INT TERM
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES/scripts" "$RESOURCES/lib"
 cp "$ROOT/app/mac/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/README.md" "$RESOURCES/README.md"
-for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh; do
+for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh install-apk.sh; do
   cp "$ROOT/scripts/$name" "$RESOURCES/scripts/$name"
 done
 cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"
 cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/lib/torch_beat.py" "$RESOURCES/lib/"
+cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
 cp "$ROOT/build/.phone-station/phone-relay-gateway" "$RESOURCES/lib/phone-relay-gateway"
 cp "$ROOT/build/.phone-station/phone-relay-keychain" "$RESOURCES/lib/phone-relay-keychain"
 chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain"
@@ -83,6 +99,18 @@ for file in "$ROOT"/app/mac/*.swift; do
   fi
   sources+=("$file")
 done
+CONNECTION_TEST="$ROOT/build/.phone-station/connection-status-test"
+test_sources=()
+for file in "${sources[@]}"; do
+  [[ ${file:t} == PhoneStationApp.swift ]] || test_sources+=("$file")
+done
+"$SWIFTC" -parse-as-library -swift-version 5 \
+  -target "$TARGET" -sdk "$SDK" \
+  -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
+  -framework AVFoundation -framework ImageIO \
+  "${test_sources[@]}" "$ROOT/app/mac/ConnectionStatusTest.swift" \
+  -o "$CONNECTION_TEST"
+"$CONNECTION_TEST"
 "$SWIFTC" -parse-as-library -swift-version 5 -O \
   -target "$TARGET" -sdk "$SDK" \
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \

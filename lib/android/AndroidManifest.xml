@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.phonestation.adbkeep"
-    android:versionCode="32"
-    android:versionName="32">
+    android:versionCode="42"
+    android:versionName="42">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
 
@@ -33,6 +33,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:enableOnBackInvokedCallback="true"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.PhoneStation">
@@ -45,6 +46,9 @@
         <activity
             android:name=".PermissionActivity"
             android:exported="false"
+            android:theme="@style/Theme.PhoneStation" />
+
+        <activity android:name=".ClipboardActivity" android:exported="false"
             android:theme="@style/Theme.PhoneStation" />
 
         <activity
@@ -60,6 +64,12 @@
         <activity
             android:name=".McpHelpActivity"
             android:exported="false"
+            android:theme="@style/Theme.PhoneStation" />
+
+        <activity
+            android:name=".RemoteRelayActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.PhoneStation" />
 
         <activity

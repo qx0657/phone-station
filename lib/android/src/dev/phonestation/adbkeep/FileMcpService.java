@@ -30,6 +30,7 @@ public final class FileMcpService extends Service {
     private McpHttp server;
     private String token;
     private PhoneRelayClient remoteClient;
+    private boolean restoredKeeper;
 
     static boolean listening() {
         return listening;
@@ -56,6 +57,12 @@ public final class FileMcpService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         StationNotifications.attachMcp(this);
         StationNotifications.enter(this);
+        if (intent != null) { InstallRecovery.service(intent.getStringExtra(InstallRecovery.EXTRA)); }
+        // 升级助手可直接拉起 MCP；保持服务也按原偏好恢复，不依赖界面或升级广播。
+        if (!restoredKeeper) {
+            restoredKeeper = true;
+            if (KeeperStore.isEnabled(this)) { KeeperService.start(this); }
+        }
         if (server == null && KeeperStore.mcpEnabled(this)) {
             token = newToken();
             try {
@@ -78,15 +85,14 @@ public final class FileMcpService extends Service {
                 logStorage();
             }
         }
-        if (server != null) {
-            Log.i(TAG, "mcp token " + token);
+        if (remoteClient != null && (!RemoteStore.enabled(this) || !RemoteStore.configured(this)
+                || !remoteClient.matchesProfile())) {
+            remoteClient.stop();
+            remoteClient = null;
         }
         if (RemoteStore.enabled(this) && RemoteStore.configured(this) && remoteClient == null) {
             remoteClient = new PhoneRelayClient(this, versionName());
             remoteClient.start();
-        } else if (!RemoteStore.enabled(this) && remoteClient != null) {
-            remoteClient.stop();
-            remoteClient = null;
         }
         if (server == null && remoteClient == null) {
             stopSelf();
@@ -96,7 +102,14 @@ public final class FileMcpService extends Service {
     }
 
     @Override
+    public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        StationNotifications.update(this);
+    }
+
+    @Override
     public void onDestroy() {
+        SharedClipboard.close();
         listening = false;
         publishListening(false);
         McpHttp running = server;
@@ -122,6 +135,14 @@ public final class FileMcpService extends Service {
     /** ActivityManager 的 dumpsys service 入口受系统 DUMP 权限保护，供 adb 刷新本地凭据。 */
     @Override
     protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+        for (int i = 0; args != null && i + 1 < args.length; i++) {
+            if ("--install-recovery".equals(args[i])) {
+                writer.println("installRecoveryPid=" + android.os.Process.myPid());
+                writer.println("installRecoveryService=" + InstallRecovery.serviceFor(args[i + 1]));
+                writer.println("installRecoveryActivity=" + InstallRecovery.activityFor(args[i + 1]));
+                return; // 此诊断入口只返回启动事实，不输出 MCP 令牌。
+            }
+        }
         if (server != null && token != null) {
             writer.println("mcp token " + token);
         }

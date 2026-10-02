@@ -34,7 +34,8 @@ enum StationRunner {
             .appendingPathComponent(name)
     }
 
-    static func capture(_ executable: URL, _ arguments: [String], timeout: Int = 15) -> CommandResult {
+    static func capture(_ executable: URL, _ arguments: [String], timeout: Int = 15,
+                        input: Data? = nil) -> CommandResult {
         let log = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         FileManager.default.createFile(atPath: log.path, contents: nil)
         guard let writer = try? FileHandle(forWritingTo: log) else {
@@ -46,6 +47,9 @@ enum StationRunner {
         process.environment = environment
         process.standardOutput = writer
         process.standardError = writer
+        let inputPipe = input.map { _ in Pipe() }
+        if let inputPipe { process.standardInput = inputPipe }
+        else { process.standardInput = FileHandle.nullDevice }
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }
         do {
@@ -54,6 +58,10 @@ enum StationRunner {
             try? writer.close()
             try? FileManager.default.removeItem(at: log)
             return CommandResult(code: -1, output: error.localizedDescription, timedOut: false)
+        }
+        if let input, let inputPipe {
+            try? inputPipe.fileHandleForWriting.write(contentsOf: input)
+            try? inputPipe.fileHandleForWriting.close()
         }
         let timedOut = finished.wait(timeout: .now() + .seconds(timeout)) == .timedOut
         if timedOut {
@@ -71,8 +79,9 @@ enum StationRunner {
                              timedOut: timedOut)
     }
 
-    static func scriptResult(_ name: String, _ arguments: [String] = [], timeout: Int = 30) -> CommandResult {
-        capture(URL(fileURLWithPath: "/bin/zsh"), [script(name).path] + arguments, timeout: timeout)
+    static func scriptResult(_ name: String, _ arguments: [String] = [], timeout: Int = 30,
+                             input: Data? = nil) -> CommandResult {
+        capture(URL(fileURLWithPath: "/bin/zsh"), [script(name).path] + arguments, timeout: timeout, input: input)
     }
 
     static func startScript(_ name: String, _ arguments: [String], log: URL,

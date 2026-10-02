@@ -2,7 +2,17 @@ import Foundation
 import Security
 
 private let service = "com.qx0657.phone-station.remote-relay"
-private let account = "desktop-bearer"
+private let account: String = {
+    guard (2...3).contains(CommandLine.arguments.count) else {
+        fail("usage: phone-relay-keychain get|set|delete [profile-id]")
+    }
+    guard CommandLine.arguments.count == 3 else { return "desktop-bearer" }
+    let profile = CommandLine.arguments[2]
+    guard profile.range(of: "^[0-9a-f]{16}$", options: .regularExpression) != nil else {
+        fail("invalid remote profile id")
+    }
+    return "desktop-bearer-\(profile)"
+}()
 
 func fail(_ message: String, _ status: OSStatus? = nil) -> Never {
     if let status {
@@ -21,9 +31,7 @@ func baseQuery() -> [String: Any] {
     ]
 }
 
-guard CommandLine.arguments.count == 2 else {
-    fail("usage: phone-relay-keychain get|set|delete")
-}
+_ = account
 
 switch CommandLine.arguments[1] {
 case "get":

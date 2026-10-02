@@ -10,6 +10,12 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /** 只听 127.0.0.1。一次连接处理一个 POST /mcp。 */
 final class McpHttp {
@@ -17,6 +23,13 @@ final class McpHttp {
 
     private final ServerSocket socket;
     private final Thread thread;
+    private final Set<Socket> clients = new HashSet<>();
+    private final ThreadPoolExecutor requests = new ThreadPoolExecutor(
+            4, 4, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<Runnable>(8), job -> {
+                Thread worker = new Thread(job, "station-mcp-request");
+                worker.setDaemon(true);
+                return worker;
+            });
     private volatile boolean running = true;
 
     private McpHttp(
@@ -55,6 +68,15 @@ final class McpHttp {
         } catch (IOException ignored) {
             // 关掉监听即可把 accept 解出来。
         }
+        requests.shutdownNow();
+        synchronized (clients) {
+            for (Socket client : clients) {
+                try {
+                    client.close();
+                } catch (IOException ignored) {}
+            }
+            clients.clear();
+        }
         try {
             thread.join(1000);
         } catch (InterruptedException interrupted) {
@@ -73,19 +95,33 @@ final class McpHttp {
                 }
                 return;
             }
+            synchronized (clients) {
+                clients.add(client);
+            }
             try {
-                client.setSoTimeout(20_000);
-                serve(client, token, files, host, version);
-            } catch (IOException ignored) {
-                // 对端提前断开时这一次请求作废。
-            } finally {
-                try {
-                    client.close();
-                } catch (IOException ignored) {
-                    // 连接已经结束。
-                }
+                requests.execute(() -> {
+                    try {
+                        client.setSoTimeout(20_000);
+                        serve(client, token, files, host, version);
+                    } catch (IOException ignored) {
+                        // 对端提前断开时这一次请求作废。
+                    } finally {
+                        release(client);
+                    }
+                });
+            } catch (RejectedExecutionException busy) {
+                release(client);
             }
         }
+    }
+
+    private void release(Socket client) {
+        synchronized (clients) {
+            clients.remove(client);
+        }
+        try {
+            client.close();
+        } catch (IOException ignored) {}
     }
 
     private static void serve(

@@ -35,15 +35,17 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 只解释原因、或只给某条命令补一个已经有文档的坑，更新那篇文档，不新建 skill。跟这台手机无关的个人 Skill 不放进本仓库。
 
-写入的是这次验证过的结论。会变的端口和地址写怎么查，不写当天的数。某台机器上的差异写明机型。原有说法不对就改原句。手机界面上的地址是本机 `http://127.0.0.1:8765/mcp`。电脑固定访问本机网关 `http://127.0.0.1:18765/mcp`；adb 转发用 `18766`，深圳远程中继只切换 MCP 请求，不替代无线 adb。菜单栏「MCP服务」和 `./scripts/mcp.sh` 显示网关令牌与当前通道。网关令牌及临时手机本地令牌保存在用户配置目录，权限为 `0600`；手机服务自己的令牌随进程重起更换，仅通过 adb 读取。远程中继令牌在 Mac 钥匙串和 Android Keystore。任何令牌都不写进仓库或手机界面。
+写入的是这次验证过的结论。会变的端口和地址写怎么查，不写当天的数。某台机器上的差异写明机型。原有说法不对就改原句。手机界面上的地址是本机 `http://127.0.0.1:8765/mcp`。电脑固定访问本机网关 `http://127.0.0.1:18765/mcp`；adb 转发用 `18766`，用户配置的远程中继只切换 MCP 请求，不替代无线 adb。菜单栏「MCP 服务」显示接入地址、当前通道并提供复制授权头；`./scripts/mcp.sh` 打印地址与授权头。网关令牌及临时手机本地令牌保存在用户配置目录，权限为 `0600`；手机服务自己的令牌随进程重起更换，仅通过 adb 读取。远程通道默认未配置。手机「远程中继设置」与 Mac「MCP 服务 → 远程中继」可分别填写 HTTPS 地址、SPKI 指纹和各自令牌，无需 adb；Mac「同时配置手机」和 `mcp.sh pair` 经 adb 一次配置两端。升级保留已有配对。远程中继令牌在 Mac 钥匙串和 Android Keystore。令牌不写进仓库、日志或界面明文；服务启动不再把本地令牌写入 logcat，仅通过受 DUMP 权限保护的诊断入口读取。远程中继令牌经标准输入或隐藏字段传入，已有令牌不回填。
 
 ## 布局
 
-- `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`android.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
+- `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`android.sh`、`shell.sh`、`install-apk.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
 - `lib/` 是这些脚本的内部实现，不要让用户直接运行。新脚本用 `source "$DIR/../lib/common.sh"`，`DIR` 取脚本自己的目录。无线地址发现走 `lib/adb_mdns.py`；USB 序列号直接来自 `adb devices`。
-- `lib/remote-gateway/` 是 Mac 本机 MCP 网关源码，构建时打包网关和钥匙串助手。它优先走本地 adb；中继仅承接手机工位现有 MCP 工具，完整 adb、投屏、录屏与安装仍要求本机 adb。
+- `lib/remote-gateway/` 是 Mac 本机 MCP 网关源码，构建时打包网关和钥匙串助手。统一 MCP 优先走本地 adb；`remote-call` 子命令直接经中继调用，不连接 adb。完整 adb、投屏和录屏仍要求本机 adb。
+- `station_shell_status` 检查 Shizuku，`station_shell_exec` 通过已启动并授权的 Shizuku 13+ UserService 执行命令，本地与远程共用。需要用户要求 shell 或系统操作才调用执行工具。普通文件仍走 `station_file_*`。命令超时或断线不自动重做，先核实结果；非 root 手机重启后要重新启动 Shizuku。执行端不回退到应用 UID，详情在 `docs/mcp.md`。
+- 用户要求安装、升级 APK 或改需求后更新手机工位时，优先 `scripts/install-apk.sh <电脑APK>`、`scripts/android.sh --remote`；远程 shell 用 `scripts/shell.sh '<手机命令>'`，这些入口不依赖 adb 连接。安装支持 base + split、SHA-256 核对和保留数据升级，不自动卸载解决签名冲突。自身更新用最长 180 秒的独立安装助手，重连后查询原任务。结果未知时 `install-apk.sh --status <任务编号>`，不重新安装。默认 `android.sh` 仅在上传前检查远程不可用时才走 adb；`--adb` 强制本地。见 `docs/remote-ops.md`。
 - 脚本是 zsh，`set -euo pipefail`。不要用变量名 `path`，zsh 里它和 `PATH` 绑在一起，赋空值会把后续命令全部变成找不到。
-- 每个用户脚本支持 `-h`。需要设备时先跑 `scripts/connect.sh`，再用 `online_serial` 拿到唯一的在线设备。已经有在线设备（USB 或无线）时，`connect.sh` 只去掉重复连接。
+- 每个用户脚本支持 `-h`。走 adb 的脚本需要设备时先跑 `scripts/connect.sh`，再用 `online_serial` 拿到唯一的在线设备。已经有在线设备（USB 或无线）时，`connect.sh` 只去掉重复连接。远程 shell 与安装不跑 `connect.sh`，直接核实 Shizuku 与机型。
 
 ## 无线调试
 
@@ -51,11 +53,11 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 这台电脑上的 PGT-AN20 已经配对过。配对端口和连接端口不是同一个，重启无线调试后连接端口会变。已有在线设备时不要再 `adb connect` 出第二条。USB 已在线时不必再配或再连。
 
-PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB 时写不回这个设置。手机上的应用是「手机工位」，包名仍是 `dev.phonestation.adbkeep`。无线调试保持是其中一项：Wi-Fi 连着、且 `adb_enabled` 仍是 1 时，把 `adb_wifi_enabled` 写回 1。`scripts/android.sh` 安装这个应用并授写设置的权限，同时授所有文件访问。细节在 `docs/adb-keep.md` 和 `docs/mcp.md`。不要为了验证把 `adb_wifi_enabled` 写成 0：当时只走无线的话，会话会立刻断。
+PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB 时写不回这个设置。手机上的应用是「手机工位」，包名仍是 `dev.phonestation.adbkeep`。无线调试保持是其中一项：Wi-Fi 连着、且 `adb_enabled` 仍是 1 时，把 `adb_wifi_enabled` 写回 1。`scripts/android.sh` 优先远程更新并保留已有权限；首次安装或补权限用 `scripts/android.sh --adb`，授写设置与所有文件访问。细节在 `docs/adb-keep.md` 和 `docs/mcp.md`。不要为了验证把 `adb_wifi_enabled` 写成 0：当时只走无线的话，会话会立刻断。
 
 ## 文件
 
-内部存储里的普通文件走手机上「手机工位」的 MCP，工具名是 `station_file_*`。同一服务里还有只读的 `station_device_status` 和 `station_storage_summary`，以及 `station_file_open`、`station_stay_awake`、`station_notify`、`station_clipboard_set`。长说明在 `docs/mcp.md`，步骤在 `.agents/skills/phone-mcp/SKILL.md`。`scripts/mcp.sh` 打开服务并打印统一网关地址、`Authorization` 头和当前通道。手机服务只听 `127.0.0.1`；深圳中继仅承载同一批 MCP 工具。没有明确要求时只用读取类工具。打开文件、保持亮屏、发提醒、写剪贴板和改文件都要有明确要求。`Android/data`、`Android/obb` 和别的应用的私有目录不在这个服务里。删除不进回收站。
+内部存储里的普通文件走手机上「手机工位」的 MCP，工具名是 `station_file_*`。同一服务里还有只读的 `station_device_status` 和 `station_storage_summary`，以及只读的 `station_clipboard_get`、`station_clipboard_state`，写入的 `station_clipboard_set`、共享配置与交换工具。后台读取和共享使用 Shizuku，步骤见 `docs/clipboard.md`。还有 `station_file_open`、`station_stay_awake`、`station_notify`。长说明在 `docs/mcp.md`，步骤在 `.agents/skills/phone-mcp/SKILL.md`。`scripts/mcp.sh` 打开服务并打印统一网关地址、`Authorization` 头和当前通道。手机服务只听 `127.0.0.1`；用户配置的中继仅承载同一批 MCP 工具。没有明确要求时只用读取类工具。打开文件、保持亮屏、发提醒、写剪贴板和改文件都要有明确要求。`Android/data`、`Android/obb` 和别的应用的私有目录不在这个服务里。删除不进回收站。
 
 ## 已验证设备上的命令差异
 
@@ -69,9 +71,9 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 
 `scripts/status.sh` 只读，可以随时跑。`scripts/notify.sh`、`scripts/agent-notify-hook.sh`、`scripts/vibrate.sh`、`scripts/screenshot.sh`、`scripts/mirror.sh`、`scripts/record.sh`、`scripts/stay-awake.sh`、`scripts/torch.sh` 会让手机出声、震动、截屏、投屏、改息屏设置或开关闪光灯。用户或当前任务明确要求其中一件时，直接跑对应的那一个。没有这件要求时不要跑，包括不要为了看看环境而跑。改完某个脚本、要确认它还能用时，可以跑那一个。
 
-`scripts/mcp.sh` 默认会打开手机 MCP 与本机网关；`status` 不打开服务，但会读取开关、刷新 adb 转发并更新用户配置里的本地令牌。`pair` 和 `unpair` 通过 adb 修改手机与 Mac 的远程配对资料。需要用户要求读取/修改手机文件、使用 MCP 工具、配对远程通道或验证 MCP 服务时才运行相应命令。`stop` 需要 adb 在线，会关闭手机 MCP 与远程客户端但保留配对。`station_notify`、`station_stay_awake`、`station_clipboard_set` 和 `station_file_open` 会出声、改息屏、盖掉剪贴板或打开界面，没有明确要求时不要调用。
+`scripts/mcp.sh` 默认会打开手机 MCP 与本机网关；`status` 不打开服务，但会读取开关、刷新 adb 转发并更新用户配置里的本地令牌。`pair` 和 `unpair` 通过 adb 修改手机与 Mac 的远程配对资料；`desktop` 和 `forget-desktop` 只配置或清除 Mac 端，不需要 adb。需要用户要求读取/修改手机文件、使用 MCP 工具、配对远程通道或验证 MCP 服务时才运行相应命令。`stop` 需要 adb 在线，会关闭手机 MCP 与远程客户端但保留配对。`station_notify`、`station_stay_awake`、`station_clipboard_set`、`station_clipboard_configure`、`station_clipboard_exchange` 和 `station_file_open` 会出声、改设置、盖掉剪贴板或打开界面，没有明确要求时不要调用。剪贴板交换不当只读探测，也不自动重放。
 
-`scripts/android.sh` 会在手机上安装「手机工位」、授予 `WRITE_SECURE_SETTINGS` 和所有文件访问（`MANAGE_EXTERNAL_STORAGE`），并可能把无线调试打开。没有明确要求时不要跑。改了 `lib/android/` 里的 Java 时跑 `lib/android/build.sh`：它在电脑上编 APK，并跑打开时机的测试，不碰手机。
+`scripts/android.sh` 会在手机上安装「手机工位」；本地 adb 流程授予 `WRITE_SECURE_SETTINGS` 和所有文件访问（`MANAGE_EXTERNAL_STORAGE`），并可能把无线调试打开。没有明确要求时不要跑。改了 `lib/android/` 里的 Java 时跑 `lib/android/build.sh`：它在电脑上编 APK，并跑打开时机的测试，不碰手机。
 
 shell 脚本用 `zsh -n`。改了 `lib/adb_mdns.py`、`lib/pair_qr.py`、`lib/torch_beat.py`、`lib/agent_notify_hook.py` 或 `lib/install_agent_notify.py` 时用 `python3 -m py_compile`。改了 `PlayPcm.java` 时跑 `lib/notify-sound/build.sh`。改了 `lib/torch/Torch.java` 时跑 `lib/torch/build.sh`。`lib/torch-audio/main.swift` 比已编译的程序新时，`torch.sh beat` 会自己重编。
 

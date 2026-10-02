@@ -23,6 +23,10 @@ struct StationView: View {
                 AboutPage(station: station)
             case .mcp:
                 McpPage(station: station)
+            case .remoteRelay:
+                RemoteRelayPage(station: station, mcp: station.mcp)
+            case .clipboard:
+                ClipboardPage(station: station, clipboard: station.clipboard)
             }
         }
         .frame(width: 360, alignment: .leading)

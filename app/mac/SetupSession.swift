@@ -43,16 +43,31 @@ final class SetupSession: ObservableObject {
         feedback.activity = "正在安装手机上的「手机工位」…"
         feedback.notice = nil
         Task.detached(priority: .userInitiated) {
-            let result = StationRunner.scriptResult("android.sh", timeout: 180)
+            let result = StationRunner.scriptResult("android.sh", timeout: 600)
             await MainActor.run {
                 self.feedback.activity = nil
                 let tail = result.output.split(separator: "\n").suffix(4).joined(separator: "\n")
-                if result.succeeded {
+                let remote = result.output.split(separator: "\n").reversed().compactMap { line -> [String: Any]? in
+                    guard let data = String(line).data(using: .utf8),
+                          let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          value["jobId"] is String else { return nil }
+                    return value
+                }.first
+                if result.succeeded && remote?["completed"] as? Bool == true {
+                    self.feedback.notice = "已远程安装，应用已启动，远程连接已恢复。"
+                    self.onFinished()
+                } else if remote?["verified"] as? Bool == true {
+                    let failed = remote?["state"] as? String == "installed_restart_failed"
+                    self.feedback.notice = failed
+                        ? "安装已完成，但应用启动失败。先查询原安装任务，不要重复安装。"
+                        : "安装已完成，应用启动尚未确认。先查询原安装任务，不要重复安装。"
+                    self.onFinished()
+                } else if result.succeeded {
                     self.feedback.notice = tail.isEmpty ? "已安装。" : String(tail.prefix(220))
                     self.onFinished()
                 } else {
                     self.feedback.notice = result.timedOut
-                        ? "安装超时。手机若停在设置页，回到「手机工位」再试一次。"
+                        ? "安装结果未确认。先查询原安装任务，避免重复安装。"
                         : StationText.reason(result.output, fallback: "安装失败。")
                 }
             }

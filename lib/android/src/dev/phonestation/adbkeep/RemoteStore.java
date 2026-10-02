@@ -47,25 +47,26 @@ final class RemoteStore {
     }
 
     static boolean configured(Context context) {
-        return endpoint(context).startsWith("https://")
+        return RelayProfile.normalizeEndpoint(endpoint(context)) != null
                 && pin(context).matches("[0-9a-f]{64}")
                 && !prefs(context).getString(TOKEN, "").isEmpty();
     }
 
     static boolean configure(Context context, String endpoint, String pin, String token) {
-        if (endpoint == null || !endpoint.matches("https://[^/]+(:[0-9]{1,5})?/?")
-                || pin == null || !pin.matches("(?i)[0-9a-f]{64}")
-                || token == null || !token.matches("(?i)[0-9a-f]{64}")) {
+        endpoint = RelayProfile.normalizeEndpoint(endpoint);
+        if (RelayProfile.validationMessage(endpoint, pin, token,
+                endpoint(context), pin(context), configured(context)) != null) {
             return false;
         }
         try {
-            String encrypted = encrypt(token.toLowerCase(Locale.US));
-            prefs(context).edit()
-                    .putString(ENDPOINT, endpoint.replaceAll("/$", ""))
+            String encrypted = token.isEmpty() ? encryptedToken(context) : encrypt(token.toLowerCase(Locale.US));
+            boolean saved = prefs(context).edit()
+                    .putString(ENDPOINT, endpoint)
                     .putString(PIN, pin.toLowerCase(Locale.US))
                     .putString(TOKEN, encrypted)
                     .putBoolean(ENABLED, true)
                     .commit();
+            if (!saved) { return false; }
             publishState(context);
             return true;
         } catch (GeneralSecurityException error) {
@@ -73,8 +74,8 @@ final class RemoteStore {
         }
     }
 
-    static void forget(Context context) {
-        prefs(context).edit().clear().commit();
+    static boolean forget(Context context) {
+        if (!prefs(context).edit().clear().commit()) { return false; }
         publishState(context);
         try {
             KeyStore keyStore = KeyStore.getInstance(KEYSTORE);
@@ -83,10 +84,14 @@ final class RemoteStore {
         } catch (Exception ignored) {
             // Forgetting the profile succeeds even if the key was already removed.
         }
+        return true;
     }
 
-    static String token(Context context) throws GeneralSecurityException {
-        String value = prefs(context).getString(TOKEN, "");
+    static String encryptedToken(Context context) {
+        return prefs(context).getString(TOKEN, "");
+    }
+
+    static String decryptToken(String value) throws GeneralSecurityException {
         if (value.isEmpty()) {
             throw new GeneralSecurityException("remote profile is not configured");
         }

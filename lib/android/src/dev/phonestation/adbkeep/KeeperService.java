@@ -3,6 +3,7 @@ package dev.phonestation.adbkeep;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -49,6 +50,12 @@ public final class KeeperService extends Service {
         }
         onTick();
         return START_STICKY;
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        StationNotifications.update(this);
     }
 
     @Override

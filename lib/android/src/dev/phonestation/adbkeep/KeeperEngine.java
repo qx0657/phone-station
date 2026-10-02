@@ -28,6 +28,30 @@ final class KeeperEngine {
         return Settings.Global.getInt(context.getContentResolver(), WIFI_ADB, 0) == 1;
     }
 
+    /** 与 tick 串行，手动关闭期间不会有另一轮自动写入。只改无线调试，不改 USB 调试。 */
+    static synchronized WirelessControl.Result setWireless(Context context, boolean enabled) {
+        Context app = context.getApplicationContext();
+        return WirelessControl.change(new WirelessControl.Backend() {
+            public boolean canWrite() { return KeeperEngine.canWrite(app); }
+            public boolean adbEnabled() { return KeeperEngine.adbEnabled(app); }
+            public boolean wifiConnected() { return wifiHandle(app) != -1L; }
+            public boolean keeping() { return KeeperStore.isEnabled(app); }
+            public boolean setKeeping(boolean value) { return KeeperStore.setEnabled(app, value); }
+            public void recordAttempt(boolean value) {
+                KeeperStore.setFailures(app, value ? 1 : 0);
+                KeeperStore.setLastAttemptMs(app, value ? System.currentTimeMillis() : 0L);
+            }
+            public boolean writeWireless(boolean value) {
+                try {
+                    return Settings.Global.putInt(app.getContentResolver(), WIFI_ADB, value ? 1 : 0);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "manual wireless write failed", error);
+                    return false;
+                }
+            }
+        }, enabled);
+    }
+
     /** 当前 Wi-Fi 网络的 handle。没连上时是 -1。不看是不是默认网络，手机开着 VPN 时 Wi-Fi 仍算连着。 */
     static long wifiHandle(Context context) {
         ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);

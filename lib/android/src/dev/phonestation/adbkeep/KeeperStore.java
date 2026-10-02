@@ -20,8 +20,8 @@ final class KeeperStore {
         return prefs(context).getBoolean(ENABLED, true);
     }
 
-    static void setEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(ENABLED, enabled).commit();
+    static boolean setEnabled(Context context, boolean enabled) {
+        return prefs(context).edit().putBoolean(ENABLED, enabled).commit();
     }
 
     static int failures(Context context) {

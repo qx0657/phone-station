@@ -84,9 +84,12 @@ print("tap", (x1 + x2) // 2, (y1 + y2) // 2)
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "用法: android.sh"
+  print -r -- "      android.sh --remote"
+  print -r -- "      android.sh --adb"
   print -r -- "      android.sh status"
   print -r -- "      android.sh --remove"
   print -r -- "在手机上安装「手机工位」。无线调试保持是里面的一项功能。"
+  print -r -- "已有远程中继和 Shizuku 时优先远程更新；--remote 只走远程，--adb 指定本地安装。"
   print -r -- "同时授所有文件访问，给同一应用里的 MCP服务用。"
   print -r -- "并把「提醒」通道的横幅通知打开。这台 MagicOS 不会让新装应用自己弹出。"
   print -r -- "Wi-Fi 连着且 USB 调试开着时，会把被关掉的无线调试重新打开。"
@@ -97,9 +100,32 @@ if [[ $# -gt 1 ]]; then
   print -u2 -- "不认识的参数: $2"
   exit 1
 fi
-if [[ -n ${1:-} && ${1:-} != status && ${1:-} != --remove ]]; then
+if [[ -n ${1:-} && ${1:-} != status && ${1:-} != --remove && ${1:-} != --remote && ${1:-} != --adb ]]; then
   print -u2 -- "不认识的参数: $1"
   exit 1
+fi
+
+# Check before any APK write or install. Once remote deployment begins, a lost
+# response must never fall back to a second adb installation.
+if [[ -z ${1:-} || ${1:-} == --remote ]]; then
+  if "$DIR/install-apk.sh" --check; then
+    if [[ -x $ROOT/lib/android/build.sh ]]; then
+      "$ROOT/lib/android/build.sh"
+      remote_apk=$ROOT/build/adb-keep.apk
+    elif [[ -f $DIR/../phone-app.apk ]]; then
+      remote_apk=$DIR/../phone-app.apk
+    else
+      print -u2 -- "找不到手机工位的安装包。"
+      exit 1
+    fi
+    exec "$DIR/install-apk.sh" "$remote_apk"
+  else
+    remote_check_code=$?
+    if [[ ${1:-} == --remote || $remote_check_code != 75 ]]; then
+      exit "$remote_check_code"
+    fi
+  fi
+  print -u2 -- "远程安装通道未就绪，使用本地 adb 完成首次安装或配置。"
 fi
 
 "$DIR/connect.sh"
@@ -145,9 +171,8 @@ install_code=$?
 set -e
 print -r -- "$install_out"
 if [[ $install_out == *INSTALL_FAILED_UPDATE_INCOMPATIBLE* ]]; then
-  print -r -- "签名和手机上的旧版本不一样，先卸下再装。"
-  "$ADB" -s "$SERIAL" uninstall "$PKG"
-  "$ADB" -s "$SERIAL" install -r "$apk"
+  print -u2 -- "签名和手机上的旧版本不一样。保留原应用和数据，请使用相同签名的安装包。"
+  exit 1
 elif (( install_code != 0 )); then
   exit "$install_code"
 fi

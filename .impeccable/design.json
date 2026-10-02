@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-02T14:08:40.796796Z",
+  "title": "Design System: 手机工位",
+  "extensions": {
+    "colorMeta": {
+      "android-held-light": {
+        "displayName": "Android 连接与主操作 · 浅色",
+        "role": "primary"
+      },
+      "android-held-dark": {
+        "displayName": "Android 连接与主操作 · 深色",
+        "role": "primary"
+      },
+      "android-on-held-light": {
+        "displayName": "Android 主操作文字 · 浅色",
+        "role": "neutral"
+      },
+      "android-on-held-dark": {
+        "displayName": "Android 主操作文字 · 深色",
+        "role": "neutral"
+      },
+      "android-waiting-light": {
+        "displayName": "Android 等待 · 浅色"
+      },
+      "android-waiting-dark": {
+        "displayName": "Android 等待 · 深色"
+      },
+      "android-error-light": {
+        "displayName": "Android 错误 · 浅色"
+      },
+      "android-error-dark": {
+        "displayName": "Android 错误 · 深色"
+      },
+      "android-page-light": {
+        "displayName": "Android 页面底 · 浅色",
+        "role": "neutral"
+      },
+      "android-page-dark": {
+        "displayName": "Android 页面底 · 深色",
+        "role": "neutral"
+      },
+      "android-card-light": {
+        "displayName": "Android 分组卡片 · 浅色",
+        "role": "neutral"
+      },
+      "android-card-dark": {
+        "displayName": "Android 分组卡片 · 深色",
+        "role": "neutral"
+      },
+      "android-well-light": {
+        "displayName": "Android 图标底托与禁用主操作 · 浅色",
+        "role": "neutral"
+      },
+      "android-well-dark": {
+        "displayName": "Android 图标底托与禁用主操作 · 深色",
+        "role": "neutral"
+      },
+      "android-muted-light": {
+        "displayName": "Android 辅助文字 · 浅色",
+        "role": "neutral"
+      },
+      "android-muted-dark": {
+        "displayName": "Android 辅助文字 · 深色",
+        "role": "neutral"
+      },
+      "mac-connected-light": {
+        "displayName": "Mac 连通状态 · 浅色",
+        "role": "primary"
+      },
+      "mac-connected-dark": {
+        "displayName": "Mac 连通状态 · 深色",
+        "role": "primary"
+      },
+      "mac-caution-light": {
+        "displayName": "Mac 注意状态 · 浅色"
+      },
+      "mac-caution-dark": {
+        "displayName": "Mac 注意状态 · 深色"
+      },
+      "mac-recording-light": {
+        "displayName": "Mac 录屏与错误 · 浅色"
+      },
+      "mac-recording-dark": {
+        "displayName": "Mac 录屏与错误 · 深色"
+      },
+      "mac-background-light": {
+        "displayName": "Mac 面板底 · 浅色",
+        "role": "neutral"
+      },
+      "mac-background-dark": {
+        "displayName": "Mac 面板底 · 深色",
+        "role": "neutral"
+      },
+      "mac-tile-light": {
+        "displayName": "Mac 分组与操作块 · 浅色",
+        "role": "neutral"
+      },
+      "mac-tile-dark": {
+        "displayName": "Mac 分组与操作块 · 深色",
+        "role": "neutral"
+      }
+    },
+    "typographyMeta": {
+      "android-headline": {
+        "displayName": "Android 连接标题",
+        "purpose": "首页连接概览。"
+      },
+      "android-page-title": {
+        "displayName": "Android 子页标题",
+        "purpose": "返回行的页面标题。"
+      },
+      "android-group-title": {
+        "displayName": "Android 分组标题",
+        "purpose": "卡片内分组标题。"
+      },
+      "android-body": {
+        "displayName": "Android 行与输入正文",
+        "purpose": "常规操作行、输入和按钮。"
+      },
+      "android-value": {
+        "displayName": "Android 右侧状态",
+        "purpose": "只读值与导航摘要。"
+      },
+      "android-note": {
+        "displayName": "Android 说明",
+        "purpose": "辅助说明与配置反馈。"
+      },
+      "android-field-label": {
+        "displayName": "Android 字段标签",
+        "purpose": "原生字段的显式标签。"
+      },
+      "android-address": {
+        "displayName": "Android 地址",
+        "purpose": "可选择的 MCP 本机地址。"
+      },
+      "mac-page-title": {
+        "displayName": "Mac 页面与连接标题",
+        "purpose": "semibold 页面标题与首页连接标题。"
+      },
+      "mac-section-title": {
+        "displayName": "Mac 主要小标题",
+        "purpose": "MCP 与连接页的 semibold 主要标题。"
+      },
+      "mac-field": {
+        "displayName": "Mac 字段正文",
+        "purpose": "远程设置原生输入框。"
+      },
+      "mac-label": {
+        "displayName": "Mac 标签",
+        "purpose": "medium 字段/分组标签；操作块标签使用 regular。"
+      },
+      "mac-status": {
+        "displayName": "Mac 状态胶囊",
+        "purpose": "medium 首页连接状态。"
+      },
+      "mac-address": {
+        "displayName": "Mac 地址",
+        "purpose": "原生等宽 MCP 接入地址。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "android-light-card-elevation",
+        "value": "dp(1) + density × 0.5 (native View.elevation)",
+        "purpose": "StationChrome.card() 仅在浅色外观设置；平台负责阴影绘制。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "mac-action-tile-state",
+        "value": "0.16s native easeOut",
+        "purpose": "ActionTile active 状态切换。"
+      },
+      {
+        "name": "mac-hover-wash",
+        "value": "0.12s Core Animation easeOut",
+        "purpose": "HoverWashView 背景色进入与离开。"
+      }
+    ],
+    "native": {
+      "platforms": [
+        "android",
+        "macos"
+      ],
+      "units": {
+        "androidLayout": "dp",
+        "androidText": "sp",
+        "macos": "pt"
+      },
+      "systemDefaults": [
+        "Android textColorPrimary、EditText 底线、次按钮和 ripple 由当前主题提供。",
+        "macOS 系统字体、语义文字色、按钮强调色、roundedBorder、开关和对话框由 OS 提供。"
+      ],
+      "sources": [
+        "lib/android/res/values/colors.xml",
+        "lib/android/res/values-night/colors.xml",
+        "lib/android/res/drawable/bg_card.xml",
+        "lib/android/src/dev/phonestation/adbkeep/StationChrome.java",
+        "lib/android/src/dev/phonestation/adbkeep/MainActivity.java",
+        "lib/android/src/dev/phonestation/adbkeep/RemoteRelayActivity.java",
+        "app/mac/StationWidgets.swift",
+        "app/mac/StationView.swift",
+        "app/mac/MainPage.swift",
+        "app/mac/McpPage.swift",
+        "app/mac/RemoteRelayPage.swift",
+        "app/mac/ConnectionPage.swift",
+        "lib/android/src/dev/phonestation/adbkeep/ClipboardActivity.java",
+        "app/mac/ClipboardPage.swift"
+      ],
+      "scope": "提取已实现首页、连接/MCP、远程配置与共享剪贴板的共用原生组件；没有新的视觉世界或品牌假设。",
+      "representation": "原生组件用文字与源码引用记录。没有 HTML/CSS 预览、浏览器像素、合成色阶或未实现状态。",
+      "verification": {
+        "record": "docs/mcp.md#两端配置界面与独立配置验证",
+        "date": "2026-10-02",
+        "android": "PGT-AN20 实机：首页、远程浅色/深色、深色 1.3 倍字号的下部滚动区域。",
+        "macos": "真实 NSHostingView 渲染模拟数据；未通过辅助功能点击验证已安装面板。",
+        "installedVersions": {
+          "android": "36",
+          "macos": "0.1.0 (2)"
+        },
+        "reviewImages": ".impeccable/review/（忽略的本地评审证据）",
+        "clipboard": {
+          "record": "docs/clipboard.md#验证",
+          "date": "2026-10-02",
+          "installedVersions": {
+            "android": "42",
+            "macos": "0.1.0 (3)"
+          },
+          "android": "PGT-AN20 实机浅色、深色、深色 1.3 倍字号；截图中的合成文字明确标为界面验证示例。大字号检查已重建 Activity。",
+          "macos": "浅色与深色非活动 NSHostingView 原生渲染；灰色系统控件不能单独证明动作禁用，实际操作由共享剪贴板客户端实测覆盖。",
+          "reviewImages": [
+            ".impeccable/review/phone-clipboard-light.png",
+            ".impeccable/review/phone-clipboard-dark.png",
+            ".impeccable/review/phone-clipboard-large.png",
+            ".impeccable/review/mac-clipboard-light.png",
+            ".impeccable/review/mac-clipboard-dark.png"
+          ],
+          "verdict": "Pass",
+          "disposition": "ship",
+          "resolved": [
+            "关闭共享后自动同步整行禁用并变暗。"
+          ]
+        }
+      },
+      "clipboard": {
+        "navigation": {
+          "android": "42 版侧栏「设置」下依次为通知、共享剪贴板、权限和关于；复用现有 destination 行。",
+          "macos": "首页 navigationRow() 新增共享剪贴板及当前状态摘要，子页复用返回页头。"
+        },
+        "android": {
+          "composition": "单列设置、手机预览、Mac 预览、使用说明四张 StationChrome.card()，沿用既有颜色、字号与卡片布局。",
+          "preview": "可选择的正文文字，最多八行并以省略号收尾；共享关闭时两端显示「开启共享后显示」。",
+          "automaticDisabled": "关闭共享仍保留 automatic 偏好；Control.setEnabled() 禁用 Switch 与整行点击，整行 alpha 为 0.5，图标按当前实际可用状态绘制。配置期间两行均禁用。",
+          "manualCopy": "Mac 预览下方原生主按钮「复制到手机剪贴板」；仅共享开启、Mac 在线且内容为文字时可用，结果说明位于按钮下方。"
+        },
+        "macos": {
+          "composition": "沿用固定宽度原生页面、toggleRow() 与 elevatedGroup()；共享开启且 MCP 已连通时显示两端预览。",
+          "preview": "标题沿用字段正文尺寸并设 semibold；可选择正文置于 76pt 高 ScrollView，组内使用原生 borderless 手动复制按钮。",
+          "disabled": "自动同步仅在共享开启且非 busy 时可用，整行沿用现有禁用外观；手动按钮在手机未连接、busy 或对应内容非文字时禁用。",
+          "feedback": "未连通 MCP 时提供连接说明和系统主按钮；共享关闭时提供开启说明，反馈复用 feedbackBanner()，底部说明沿用系统 caption 与次要文字色。"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "Android 分组卡片",
+      "kind": "card",
+      "refersTo": "android-card-light",
+      "description": "StationChrome.card() / bg_card.xml；深色对应 android-card-dark，随内容增高。"
+    },
+    {
+      "name": "Android 主操作",
+      "kind": "button",
+      "refersTo": "android-primary-light",
+      "description": "StationChrome.action()；深色对应 android-primary-dark，禁用用 well/muted，原生 Button。"
+    },
+    {
+      "name": "Android 字段",
+      "kind": "input",
+      "description": "StationChrome.field()；显式标签、原生 EditText，密码令牌不回填，样式由系统主题提供。"
+    },
+    {
+      "name": "Android 开关与导航行",
+      "kind": "nav",
+      "description": "StationChrome.switchRow()/linkRow()；原生 Switch 或尾部箭头，系统 ripple 和文字状态。"
+    },
+    {
+      "name": "Mac 分组",
+      "kind": "card",
+      "refersTo": "mac-group-light",
+      "description": "StationWidgets.swift elevatedGroup()；深色对应 mac-group-dark，统一裁剪行 hover。"
+    },
+    {
+      "name": "Mac 操作块",
+      "kind": "button",
+      "refersTo": "mac-action-tile-light",
+      "description": "StationWidgets.swift ActionTile；深色对应 mac-action-tile-dark，图标上、文字下，具有启用与禁用状态。"
+    },
+    {
+      "name": "Mac 连接状态胶囊",
+      "kind": "chip",
+      "description": "MainPage.swift statusChip；Capsule 以状态色文字和透明底表达连接状态。"
+    },
+    {
+      "name": "Mac 导航与返回",
+      "kind": "nav",
+      "description": "StationRows.navigationRow()/subpageHeader()；SF Symbols、辅助文字与原生按钮动作。"
+    },
+    {
+      "name": "Mac 远程配置字段与操作",
+      "kind": "input",
+      "description": "RemoteRelayPage.swift；TextField/SecureField、checkbox 与系统主按钮，错误固定在保存操作之前。"
+    },
+    {
+      "name": "Mac MCP 通道状态",
+      "kind": "custom",
+      "description": "McpPage.swift channelRow()；本地 adb/远程中继并列状态，使用中、可用、未连通均有文字。"
+    },
+    {
+      "name": "Android 剪贴板预览与手动复制",
+      "kind": "custom",
+      "description": "ClipboardActivity.java；两端可选择的正文预览复用 StationChrome.card()，最多八行；Mac 文字预览下方使用现有原生主按钮，关闭共享时预览显示开启提示。"
+    },
+    {
+      "name": "Mac 剪贴板预览与手动复制",
+      "kind": "custom",
+      "description": "ClipboardPage.swift preview()；elevatedGroup() 内依次为 semibold 标题、76pt 可选择文字滚动区和原生 borderless 复制按钮；手机未连接、busy 或非文字内容时禁用。"
+    }
+  ],
+  "narrative": {
+    "overview": "本记录提取 Android 应用与 Mac 菜单栏面板已实现的原生界面。两端沿用现有平台控件、系统字体和明暗外观，以连接状态、功能分组、配置字段与操作反馈构成层级。各端尺寸分别使用 Android 的 dp/sp 与 macOS 的 pt；这些是原生单位，不代表浏览器 CSS 像素。Mac 的 `rgb()` 百分比逐项对应源码 sRGB 分量，Android 颜色来自资源文件。\n\n实现来源为 [Android 共用界面](lib/android/src/dev/phonestation/adbkeep/StationChrome.java)、[首页](lib/android/src/dev/phonestation/adbkeep/MainActivity.java)、[远程中继页](lib/android/src/dev/phonestation/adbkeep/RemoteRelayActivity.java)、[浅色资源](lib/android/res/values/colors.xml)、[深色资源](lib/android/res/values-night/colors.xml)，以及 [Mac 共用组件](app/mac/StationWidgets.swift)、[面板容器](app/mac/StationView.swift)、[首页](app/mac/MainPage.swift)、[MCP 页](app/mac/McpPage.swift)、[远程中继页](app/mac/RemoteRelayPage.swift)、[连接页](app/mac/ConnectionPage.swift)。应用图标、通知定制与其他工具子页不在这次提取范围。\n\n2026-10-02 的依据包括源码、Android 实机画面与 Mac `NSHostingView` 对模拟数据的原生渲染。Android 已检查首页、远程表单的浅色/深色，以及深色 1.3 倍字号下的下部滚动区域；后者不是整页顶部的证明。Mac 已检查配置、错误、双端配置、仅远程与等待手机状态，未用辅助功能点击验证已安装面板。Android 36 与 Mac 0.1.0 (2) 的安装和独立配置验证见 [两端配置界面与独立配置验证](docs/mcp.md#两端配置界面与独立配置验证)。评审图片在忽略的 `.impeccable/review/`，不是共享设计资产。此记录没有新增品牌方向或自定义控件状态。\n\n42 版补入 [Android 共享剪贴板页](lib/android/src/dev/phonestation/adbkeep/ClipboardActivity.java) 与 [Mac 共享剪贴板页](app/mac/ClipboardPage.swift)，继续沿用各端共用组件。PGT-AN20 已检查浅色、深色和深色 1.3 倍字号；预览文字明确标为界面验证示例。Mac 浅色与深色图片是非活动 `NSHostingView` 原生渲染，灰色系统控件不能单独证明动作禁用；操作验证见 [共享剪贴板验证](docs/clipboard.md#验证)。本次只扩展页面与导航，没有新增 palette、字号角色或布局世界。"
+  }
+}

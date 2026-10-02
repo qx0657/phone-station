@@ -4,7 +4,7 @@ package dev.phonestation.adbkeep;
  * 权限页每一行的字。没有 Android 依赖，构建时在电脑上跑测试。
  *
  * <p>读得到、又该开着却没开的，算进主界面的「还有 N 项」。自启动系统不让读，单独一行，不计入。
- * Shizuku 的远程通道还没做，这一行留着，也不计入。
+ * Shizuku 用于 shell 和剪贴板后台读取，不计入普通文件和提醒需要的权限。
  */
 final class PermissionCopy {
     enum Tone {
