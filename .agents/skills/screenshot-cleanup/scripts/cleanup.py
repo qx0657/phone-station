@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -25,6 +26,11 @@ CLASSES = (
 )
 
 NAME_RE = re.compile(r"^(?:Screenshot|IMG)_(\d{8})_(\d{6})(?:_(.+))?\.jpe?g$", re.I)
+
+
+def screenshot_name(name):
+    return (not any(c in name for c in "/\\\r\n\t\0")
+            and NAME_RE.fullmatch(name) is not None)
 
 
 def activity_of(name):
@@ -100,7 +106,7 @@ def list_class(rows, label):
         print("类: " + " ".join(names), file=sys.stderr)
         return 2
     for row in rows:
-        if row["class"] == label:
+        if row["class"] == label and screenshot_name(row["name"]):
             print(row["full"])
     return 0
 
@@ -128,6 +134,8 @@ def candidate_names(hash_rows):
     groups = defaultdict(list)
     usable = []
     for row in hash_rows:
+        if not screenshot_name(row["name"]) or not activity_of(row["name"]):
+            continue
         gray = gray_bytes(row["gray16"])
         if gray is None:
             continue
@@ -168,7 +176,8 @@ def read_hash_tsv(lines):
 
 def content_image(file_path):
     from PIL import Image
-    image = Image.open(file_path).convert("L")
+    with Image.open(file_path) as source:
+        image = source.convert("L")
     width, height = image.size
     if height > width:
         image = image.crop((0, int(height * 0.05), width, int(height * 0.97)))
@@ -179,67 +188,66 @@ def content_image(file_path):
 
 
 def mean_diff(left, right):
-    from PIL import ImageChops, ImageStat
+    from PIL import Image, ImageChops, ImageStat
     if left.size != right.size:
         right = right.resize(left.size, Image.Resampling.BOX)
     return ImageStat.Stat(ImageChops.difference(left, right)).mean[0]
 
 
 def confirm_dupes(hash_rows, directory):
-    from pathlib import Path
     groups = defaultdict(list)
-    by_name = {}
     for row in hash_rows:
+        if not screenshot_name(row["name"]) or not activity_of(row["name"]):
+            continue
         gray = gray_bytes(row["gray16"])
         if gray is None:
             continue
         row["gray"] = gray
         row["activity"] = activity_of(row["name"])
-        by_name[row["name"]] = row
         groups[(row["w"], row["h"], row["activity"])].append(row)
-
-    parent = {}
-
-    def find(name):
-        parent.setdefault(name, name)
-        while parent[name] != name:
-            parent[name] = parent[parent[name]]
-            name = parent[name]
-        return name
-
-    def union(left, right):
-        ra, rb = find(left), find(right)
-        if ra != rb:
-            parent[rb] = ra
-
     cache = {}
 
     def load(name):
         if name not in cache:
-            cache[name] = content_image(Path(directory) / name)
+            try:
+                cache[name] = content_image(Path(directory) / name)
+            except (OSError, ValueError):
+                cache[name] = None
         return cache[name]
 
-    for rows in groups.values():
-        if len(rows) < 2:
-            continue
-        for i, left in enumerate(rows):
-            for right in rows[i + 1:]:
-                if not gray_close(left["gray"], right["gray"]):
-                    continue
-                if mean_diff(load(left["name"]), load(right["name"])) < MEAN_MAX:
-                    union(left["name"], right["name"])
-
-    clusters = defaultdict(list)
-    for name in parent:
-        clusters[find(name)].append(name)
-    clusters = [names for names in clusters.values() if len(names) > 1]
     deleted = []
-    for names in clusters:
-        names.sort(key=lambda name: by_name[name]["mtime"])
-        keep = names[-1]
-        for name in names[:-1]:
-            deleted.append((name, keep, by_name[name]["bytes"]))
+    for rows in groups.values():
+        # Similarity is not transitive: compare each deletion directly with a
+        # retained, newer image. An already deleted image can never be a keeper.
+        keepers = []
+        for row in sorted(rows, key=lambda item: (item["mtime"], item["name"]), reverse=True):
+            left = load(row["name"])
+            if left is None:
+                continue
+            for keep in keepers:
+                if (gray_close(row["gray"], keep["gray"])
+                        and mean_diff(left, load(keep["name"])) < MEAN_MAX):
+                    deleted.append((row["name"], keep["name"], row["bytes"]))
+                    break
+            else:
+                keepers.append(row)
+        cache.clear()
     return deleted
+
+
+def extract_candidates(archive, directory, expected):
+    """Only materialize requested regular JPEGs; never follow archive links."""
+    seen = set()
+    with tarfile.open(archive) as bundle:
+        for item in bundle:
+            if (item.name not in expected or item.name in seen or not screenshot_name(item.name)
+                    or not item.isfile() or item.size != expected[item.name]):
+                raise ValueError("候选截图归档与名单不一致，未生成删除名单")
+            with bundle.extractfile(item) as source, (directory / item.name).open("xb") as target:
+                shutil.copyfileobj(source, target)
+            seen.add(item.name)
+    if seen != set(expected):
+        raise ValueError("候选截图不完整，未生成删除名单")
 
 
 def print_dupes(deleted):
@@ -337,7 +345,8 @@ def run_dupes():
             ).stdout
             archive = work / "orig.tar"
             archive.write_bytes(tar_bytes)
-            subprocess.run(["tar", "-xf", str(archive), "-C", str(orig)], check=True)
+            expected = {row["name"]: row["bytes"] for row in rows if row["name"] in names}
+            extract_candidates(archive, orig, expected)
             print_dupes(confirm_dupes(rows, orig))
     finally:
         subprocess.run([adb, "-s", serial, "shell", "rm", "-f", remote_tsv, remote_dex], check=False)

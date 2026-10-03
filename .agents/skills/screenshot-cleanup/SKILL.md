@@ -21,6 +21,6 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 用户点名类别，或点名按名单删，之后再删。删除不进回收站。删之前先报这一批的张数和体积。
 
-删除只针对 `list` 打出的路径，或 `dupes` 里标成可删的路径。只删以 `.jpg` 或 `.jpeg` 结尾的文件。不删目录，不删 mp4，不用通配符，不删 `dupes` 里标成留下的那张。归类和去重仍用上面的脚本，在手机上比对。不要把原图经文件工具拉下来算。
+删除只针对 `list` 打出的路径，或 `dupes` 里标成可删的路径。只删以 `.jpg` 或 `.jpeg` 结尾的文件。不删目录，不删 mp4，不用通配符，不删 `dupes` 里标成留下的那张。脚本在手机计算指纹，仅将候选原图经 adb 取到电脑临时目录核对，结束后清理；不要另写下载与比对流程。每张待删图都必须直接匹配最终留下的那张，不能沿相似链合并；解码失败或没有界面名的图不进重复删除名单。
 
-点名之后的删除走手机上「手机工位」的文件 MCP，步骤在 `.agents/skills/phone-mcp/SKILL.md`。先 `./scripts/mcp.sh`，再 `station_file_access_policy`。每条用 `station_file_delete`，参数 `path` 是名单上的那一条绝对路径，一次一条。删除会请媒体库再扫这个文件。不要用 `station_file_delete_directory`，也不要 `adb shell rm`。
+点名之后的删除走手机上「手机工位」的文件 MCP，按 `.agents/skills/phone-mcp/SKILL.md` 连接并查询 `station_file_access_policy`。每条先核对当前文件与名单一致，再将 `station_file_stat` 读到的 `targetVersion` 和绝对路径传给 `station_file_delete`，一次一条。文件已变化则跳过并报告，不沿用旧名单强删。删除会刷新媒体库；不用目录删除工具或 `adb shell rm`。
