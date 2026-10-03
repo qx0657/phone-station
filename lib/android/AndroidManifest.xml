@@ -97,6 +97,7 @@
 
         <service
             android:name=".FileMcpService"
+            android:permission="android.permission.DUMP"
             android:exported="true"
             android:foregroundServiceType="specialUse">
             <property
@@ -145,6 +146,7 @@
 
         <receiver
             android:name=".AlertReceiver"
+            android:permission="android.permission.DUMP"
             android:exported="true">
             <intent-filter>
                 <action android:name="dev.phonestation.adbkeep.ALERT" />
@@ -153,6 +155,7 @@
 
         <receiver
             android:name=".McpControlReceiver"
+            android:permission="android.permission.DUMP"
             android:exported="true">
             <intent-filter>
                 <action android:name="dev.phonestation.adbkeep.MCP" />

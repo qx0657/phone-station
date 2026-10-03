@@ -18,7 +18,8 @@ import java.security.SecureRandom;
 
 /**
  * 本机 MCP。文件是其中一项。Android 15 上 shell 拉不起没有 exported 的前台服务，所以这项是 exported。
- * 只听 127.0.0.1，并且每个请求都要带启动时打进日志的令牌。普通应用读不了这条日志。
+ * 生命周期入口受系统 DUMP 权限保护，供 shell 与本应用调用。
+ * 只听 127.0.0.1；请求令牌仅经受 DUMP 保护的诊断入口读取，不写日志。
  */
 public final class FileMcpService extends Service {
     static final String TAG = "StationMcp";
