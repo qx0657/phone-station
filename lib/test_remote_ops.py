@@ -90,6 +90,30 @@ class RemoteOpsTest(unittest.TestCase):
                 client.shell("pm install-commit 9")
             self.assertEqual(call.call_count, 1)
 
+    def test_async_shell_lost_submission_queries_same_job_without_replay(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        client.async_shell = True
+        calls = []
+        def tool(name, args):
+            calls.append((name, args))
+            if name == "station_shell_start": raise ops.RemoteError("response lost")
+            return {"jobId": args["jobId"], "state": "completed", "result": {"stdout": "done", "exitCode": 0}}
+        client.tool = tool
+        result = client.shell("test")
+        self.assertEqual(result["stdout"], "done")
+        self.assertEqual([name for name, _ in calls], ["station_shell_start", "station_operation_status"])
+        self.assertEqual(calls[0][1]["jobId"], calls[1][1]["jobId"])
+
+    def test_async_shell_unknown_job_reports_queryable_id(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        client.async_shell = True
+        with patch.object(client, "tool", return_value={"state": "result_unknown"}) as call:
+            with self.assertRaisesRegex(ops.RemoteError, "--job-status [0-9a-f]{32}"):
+                client.shell("test")
+            self.assertEqual(call.call_count, 1)
+
     def test_wait_reconnects_by_reading_same_job_only(self):
         with patch.object(ops, "install_status", side_effect=[ops.RemoteError("offline"), {"state": "running"}, {"state": "installed", "verified": True}]) as read:
             with patch.object(ops.time, "sleep"):

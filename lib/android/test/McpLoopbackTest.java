@@ -17,6 +17,8 @@ final class McpLoopbackTest {
         final boolean[] stayed = new boolean[] {false};
         final boolean[] stackPreference = new boolean[] {false};
         final int[] shellCalls = new int[] {0};
+        OperationJobs jobs = new OperationJobs(home.resolve(".jobs"));
+        CountDownLatch jobEntered = new CountDownLatch(1), jobRelease = new CountDownLatch(1);
         CountDownLatch shellEntered = new CountDownLatch(1);
         CountDownLatch shellRelease = new CountDownLatch(1);
         StationHost host = new StationHost() {
@@ -65,9 +67,18 @@ final class McpLoopbackTest {
                 return Json.obj().put("available", false).put("state", "denied");
             }
 
+            public Json shellStart(String id, ShellRequest request) {
+                return jobs.start(id, "shell", Json.obj().put("command", request.command), () -> shellExecute(request));
+            }
+            public Json operationStatus(String id) { return jobs.status(id); }
             @Override
             public Json shellExecute(ShellRequest request) {
                 shellCalls[0]++;
+                if ("job-wait".equals(request.command)) {
+                    jobEntered.countDown();
+                    try { jobRelease.await(2, TimeUnit.SECONDS); } catch (InterruptedException e) { throw new RuntimeException(e); }
+                    return Json.obj().put("stdout", "job done").put("exitCode", 0);
+                }
                 if ("wait".equals(request.command)) {
                     shellEntered.countDown();
                     try {
@@ -217,8 +228,22 @@ final class McpLoopbackTest {
 
             String[] bad = post(http.port(), "TOKEN", "{");
             expect(true, bad[1].contains("-32700"));
+            String jobID = "a".repeat(32);
+            String arguments = "{\"jobId\":\"" + jobID + "\",\"command\":\"job-wait\"}";
+            expect("200", call(http.port(), "station_shell_start", arguments)[0]);
+            expect(true, jobEntered.await(1, TimeUnit.SECONDS));
+            long quickStarted = System.nanoTime();
+            expect(true, call(http.port(), "station_device_status", "{}")[1].contains("batteryPercent"));
+            expect(true, call(http.port(), "station_notification_status", "{}")[1].contains("enabled"));
+            expect(true, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - quickStarted) < 500);
+            expect(true, call(http.port(), "station_operation_status", "{\"jobId\":\"" + jobID + "\"}")[1].contains("running"));
+            int beforeDuplicate = shellCalls[0];
+            call(http.port(), "station_shell_start", arguments);
+            expect(true, beforeDuplicate == shellCalls[0]);
+            jobRelease.countDown();
             System.out.println("McpLoopbackTest ok");
         } finally {
+            jobRelease.countDown(); jobs.close();
             http.close();
             Files.walkFileTree(home, new java.nio.file.SimpleFileVisitor<Path>() {
                 @Override

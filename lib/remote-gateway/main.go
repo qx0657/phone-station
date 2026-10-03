@@ -74,43 +74,113 @@ type gateway struct {
 	callRemote func(context.Context, config, []byte) (relayResponse, error)
 }
 
-// Cancel queue waits before dispatch; an expired operation must not run later.
+// One bounded queue shared by App, CLI, and health probes. FIFO within each priority.
+type remoteWaiter struct {
+	ready    chan struct{}
+	ctx      context.Context
+	priority int
+}
 type remoteGate struct {
-	once sync.Once
-	busy chan struct{}
+	mu             sync.Mutex
+	busy           bool
+	pending        []*remoteWaiter
+	interactiveRun int
 }
 
-func (gate *remoteGate) channel() chan struct{} {
-	gate.once.Do(func() { gate.busy = make(chan struct{}, 1) })
-	return gate.busy
-}
-
-func (gate *remoteGate) acquire(ctx context.Context) error {
+func (gate *remoteGate) acquire(ctx context.Context) error { return gate.acquirePriority(ctx, 1) }
+func (gate *remoteGate) acquirePriority(ctx context.Context, priority int) error {
+	gate.mu.Lock()
 	if err := ctx.Err(); err != nil {
+		gate.mu.Unlock()
 		return err
 	}
+	if !gate.busy {
+		gate.busy = true
+		gate.mu.Unlock()
+		return nil
+	}
+	if len(gate.pending) >= 64 {
+		gate.mu.Unlock()
+		return errors.New("远程请求队列已满，尚未执行")
+	}
+	waiter := &remoteWaiter{ready: make(chan struct{}), ctx: ctx, priority: priority}
+	gate.pending = append(gate.pending, waiter)
+	gate.mu.Unlock()
 	select {
-	case gate.channel() <- struct{}{}:
+	case <-waiter.ready:
 		if err := ctx.Err(); err != nil {
 			gate.Unlock()
 			return err
 		}
 		return nil
 	case <-ctx.Done():
+		gate.mu.Lock()
+		found := false
+		for i, pending := range gate.pending {
+			if pending == waiter {
+				gate.pending = append(gate.pending[:i], gate.pending[i+1:]...)
+				found = true
+				break
+			}
+		}
+		if !found {
+			gate.releaseLocked()
+		} // Already granted; give its slot to the next request.
+		gate.mu.Unlock()
 		return ctx.Err()
 	}
 }
-
 func (gate *remoteGate) TryLock() bool {
-	select {
-	case gate.channel() <- struct{}{}:
-		return true
-	default:
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.busy {
 		return false
 	}
+	gate.busy = true
+	return true
+}
+func (gate *remoteGate) Unlock() { gate.mu.Lock(); defer gate.mu.Unlock(); gate.releaseLocked() }
+func (gate *remoteGate) releaseLocked() {
+	for len(gate.pending) > 0 {
+		next := 0
+		if gate.interactiveRun < 3 {
+			for i, waiter := range gate.pending {
+				if waiter.priority > gate.pending[next].priority {
+					next = i
+				}
+			}
+		}
+		if gate.pending[next].priority == 2 {
+			gate.interactiveRun++
+		} else {
+			gate.interactiveRun = 0
+		}
+		waiter := gate.pending[next]
+		gate.pending = append(gate.pending[:next], gate.pending[next+1:]...)
+		// Canceled waiters still receive a grant, allowing their cancel path to release it.
+		close(waiter.ready)
+		return
+	}
+	gate.busy = false
 }
 
-func (gate *remoteGate) Unlock() { <-gate.channel() }
+func remotePriority(body []byte) int {
+	var request struct {
+		Method string
+		Params struct{ Name string }
+	}
+	if json.Unmarshal(body, &request) != nil {
+		return 1
+	}
+	switch request.Params.Name {
+	case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll",
+		"station_operation_status", "station_device_status", "station_controls_status":
+		return 2
+	case "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes":
+		return 0
+	}
+	return 1
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -155,7 +225,7 @@ func main() {
 		var value config
 		value, err = loadConfig()
 		if err == nil {
-			err = runRemoteCLI(value, os.Stdin, os.Stdout, remoteCall)
+			err = runRemoteCLI(value, os.Stdin, os.Stdout, remoteViaGateway)
 		}
 	default:
 		usage()
@@ -203,6 +273,42 @@ func runRemoteCLI(value config, input io.Reader, output io.Writer,
 	}
 	_, err = output.Write(append(response.Body, '\n'))
 	return err
+}
+
+// All CLI processes use the daemon's queue; this never opens or starts adb.
+func remoteViaGateway(ctx context.Context, value config, body []byte) (relayResponse, error) {
+	if err := startDaemon(); err != nil {
+		return relayResponse{}, err
+	}
+	current, err := loadConfig()
+	if err != nil {
+		return relayResponse{}, err
+	}
+	if current.remoteProfileKey() != value.remoteProfileKey() {
+		return relayResponse{}, errors.New("远程配置已变化，尚未提交请求")
+	}
+	return remoteViaHTTP(ctx, publicAddress, current, body)
+}
+func profileFingerprint(value config) string {
+	digest := sha256.Sum256([]byte(value.remoteProfileKey()))
+	return hex.EncodeToString(digest[:])
+}
+func remoteViaHTTP(ctx context.Context, address string, value config, body []byte) (relayResponse, error) {
+	address = strings.TrimSuffix(address, "/mcp") + "/__remote-call"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewReader(body))
+	if err != nil {
+		return relayResponse{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Phone-Station-Remote-Profile", profileFingerprint(value))
+	response, err := (&http.Client{Timeout: 4 * time.Minute}).Do(request)
+	if err != nil {
+		return relayResponse{}, err
+	}
+	defer response.Body.Close()
+	result, err := readBody(response.Body, maxBody)
+	return relayResponse{Status: response.StatusCode, Body: result}, err
 }
 
 func configPath() (string, error) {
@@ -543,7 +649,7 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.Method != http.MethodPost || r.URL.Path != "/mcp" {
+	if r.Method != http.MethodPost || (r.URL.Path != "/mcp" && r.URL.Path != "/__remote-call") {
 		writeMCPError(w, nil, http.StatusNotFound, "unknown endpoint")
 		return
 	}
@@ -554,6 +660,14 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r.Body, maxBody)
 	if err != nil {
 		writeMCPError(w, nil, http.StatusRequestEntityTooLarge, "请求过大或无法读取")
+		return
+	}
+	if r.URL.Path == "/__remote-call" {
+		if r.Header.Get("X-Phone-Station-Remote-Profile") != profileFingerprint(value) {
+			writeMCPError(w, requestID(body), http.StatusConflict, "远程配置已变化，尚未执行")
+			return
+		}
+		g.proxyRemote(r.Context(), w, body, value)
 		return
 	}
 	mode := g.mode()
@@ -863,7 +977,8 @@ func safeToReplay(body []byte) bool {
 		return true
 	case "tools/call":
 		switch request.Params.Name {
-		case "station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
+		case "station_operation_status", "station_controls_status", "station_screen_capture_status",
+			"station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
 			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
 			"station_file_search", "station_file_search_text":
 			return true
@@ -873,14 +988,24 @@ func safeToReplay(body []byte) bool {
 }
 
 func (g *gateway) proxyRemote(parent context.Context, w http.ResponseWriter, body []byte, value config) {
-	if g.remoteMu.acquire(parent) != nil {
+	ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
+	defer cancel()
+	if err := g.remoteMu.acquirePriority(ctx, remotePriority(body)); err != nil {
+		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "排队取消或队列已满，本次尚未执行")
 		return
 	}
 	defer g.remoteMu.Unlock()
 	g.setRemoteBusy(true)
 	defer g.setRemoteBusy(false)
-	ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
-	defer cancel()
+	current, err := g.config()
+	if err != nil || current.remoteProfileKey() != value.remoteProfileKey() {
+		writeMCPError(w, requestID(body), http.StatusConflict, "远程配置已变化，本次尚未执行")
+		return
+	}
+	if value.RemoteURL == "" || value.RemotePin == "" {
+		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "尚未配置远程中继")
+		return
+	}
 	start := time.Now()
 	response, err := g.remoteCall(ctx, value, body)
 	if err != nil {

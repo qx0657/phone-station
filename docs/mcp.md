@@ -127,9 +127,9 @@ appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
 
 命令在 `/` 下运行，标准输入立即关闭，没有交互终端。用 `setsid` 建立独立进程组，结束或超时会终止该组内的子进程，每次调用后移除 UserService，不保留后台任务；命令主动脱离该进程组的进程不保证被清理。超时不撤销已经生效的修改。服务停止、授权撤销或网络断开时，先核实结果，不自动重做。工具标为非只读、具有破坏性，连 `id` 这种只读命令也不会加入自动重放白名单；只读状态工具允许重试。
 
-本地 HTTP 用有上限的请求线程池，工具调用仍串行执行，`ping` 不等待长 shell 命令，避免网关因忙碌误判断线。原有文件、亮屏、通知等工具继续使用应用自身权限。
+本地 HTTP 用有上限的请求线程池，文件事务跨通道串行；主机状态、剪贴板和通知不占文件锁。`station_shell_start` / `station_screen_capture_start` 立即提交后台任务，`station_operation_status` 查询原编号；新版 CLI 和 Mac 截屏使用这些接口，长执行期间仍可接收通知与剪贴板。原有文件、亮屏、通知等工具继续使用应用自身权限。
 
-电脑侧 `scripts/shell.sh` 直接经中继调用这个 shell 工具，不连接 adb；`scripts/install-apk.sh` 复用同一组文件和 shell 工具，实现 APK 校验、安装 session、应用自身更新后的结果查询。安装助手是明确需要跨应用重启继续运行的有界任务；普通 shell 请求仍按原来的进程组规则清理。步骤与边界见 [remote-ops.md](remote-ops.md)。
+电脑侧 `scripts/shell.sh` 经网关共享队列固定使用中继，不连接 adb；`scripts/install-apk.sh` 复用同一组文件和 shell 工具，实现 APK 校验、安装 session、应用自身更新后的结果查询。安装助手是明确需要跨应用重启继续运行的有界任务；普通 shell 请求仍按原来的进程组规则清理。步骤与边界见 [remote-ops.md](remote-ops.md)。
 
 ## 路径
 
@@ -184,6 +184,7 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 | `station_file_access_policy` | Home、规则、六个常用目录、交接目录，以及不开放的目录。动文件之前先调这个 |
 | `station_storage_summary` | 剩余空间，以及六个常用目录各占多少 |
 | `station_device_status` | 在线状态、连接类型、远程是否在线，以及电量、是否在充电、响铃模式、Wi-Fi 是否连着、USB 调试和无线调试开关、息屏时间和充电时常亮、剩余空间。不读 Wi-Fi 名字 |
+| `station_operation_status` | 原后台任务状态与短期结果；只查询、不重新执行 |
 | `station_shell_status` | Shizuku 的运行、授权、执行身份和不可用原因；不启动服务 |
 | `station_clipboard_get` | 读手机当前文字剪贴板；后台读取需要 Shizuku，锁屏或敏感内容不返回文字 |
 | `station_clipboard_state` | 读共享设置、内存中的预览和 Mac 在线状态，不发起系统剪贴板读取 |
@@ -200,6 +201,8 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 
 | 工具 | 作用 |
 | --- | --- |
+| `station_shell_start` | 提交有编号的后台 shell 任务；同参数同编号去重 |
+| `station_screen_capture_start` | 提交有编号的后台截图任务 |
 | `station_shell_exec` | 通过已授权的 Shizuku 执行 shell 命令；参数和结果见上面的「Shizuku shell」 |
 | `station_file_write_text` | 把整个文件写成 UTF-8。新建时不带 `targetVersion` |
 | `station_file_replace_text` | 在整个原文上做不重叠的字面替换，按原来的编码写回 |
@@ -330,3 +333,7 @@ Mac 构建时网关和钥匙串助手先输出到独立暂存文件，再原子�
 `mcp.sh stop` 要求手机广播确认、两个开关明确为 0 且实际服务退出，才清理转发和本地令牌并报告成功。请求失败、断线或退出未确认时返回非零，保留本机通道状态；不以直接 stopservice 替代远程开关关闭。旧版没有确认码时须先更新。
 
 MCP 前台服务、MCP 开关与提醒广播入口均由系统 `android.permission.DUMP` 保护；保持 exported 供 adb shell 调用，同 UID 的应用内调用仍可用。Android 29–33 也由系统权限拦住普通第三方应用，不依赖 Android 34 才提供的发送方 UID 检查。远程配对广播沿用同一权限边界。
+
+MCP 网关所有 App、CLI 和探测请求共用最多 64 项队列。状态、任务查询、剪贴板与通知优先，字节上传下载在后；连续三次交互请求后让最早的等待请求前进，避免大文件饥饿。排队取消后不得迟到执行，配置变化时拒绝尚未派发的旧请求。健康探测仅在队列空闲时发起，不把忙碌当离线。
+
+后台任务使用 32 位小写十六进制 jobId，同编号同参数只返回原回执，不同参数拒绝。一个工作线程、最多四项等待，排队超过 10 秒的任务不再执行。回执最多 256 个，私有目录 0700、文件 0600，保留 24 小时；只存请求摘要与有界结果，不保存 shell 命令原文。应用重起后未完成任务返回 `result_unknown`，查询不触发执行；超出保留窗口仍不可自动重提旧任务。`station_shell_exec` 与 `station_screen_capture` 留作旧客户端同步接口，新客户端优先后台接口。

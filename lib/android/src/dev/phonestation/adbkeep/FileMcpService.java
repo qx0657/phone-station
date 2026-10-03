@@ -122,6 +122,7 @@ public final class FileMcpService extends Service {
     @Override
     public void onDestroy() {
         if (captureCleanup != null) { captureCleanup.shutdownNow(); captureCleanup = null; }
+        StationBridge.closeJobs();
         SharedClipboard.close();
         ShizukuTorch.close();
         listening = false;

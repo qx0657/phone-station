@@ -72,3 +72,5 @@ curl -sS -X POST "$MCP" \
 - 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。投屏、录屏和灯光跟随声音仍要求本机 adb。
 
 实现与验证见 `docs/remote-controls.md`。
+
+远程 shell 优先 `scripts/shell.sh`，新版会自动使用 `station_shell_start` 后台任务，旧版协商回同步接口。提交应答丢失后只查询原 jobId（`--job-status` 或 `station_operation_status`），不重新提交。新版远程截图使用 `station_screen_capture_start`；恢复时先查询任务，再读取已有 PNG，不重拍。

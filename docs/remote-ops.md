@@ -1,10 +1,10 @@
 # 远程 shell 与安装升级
 
-已配置的远程中继负责传输，手机上的 Shizuku 13+ 提供 shell 权限。以下入口直接调用中继，不运行 `adb connect`、`adb shell` 或本地 adb 转发，也不需要菜单栏 App 保持打开。复用已有 HTTPS 地址、SPKI 指纹及钥匙串凭据，不打印令牌。手机工位需要已有 MCP 文件工具和 `station_shell_*`（37 版起）。
+已配置的远程中继负责传输，手机上的 Shizuku 13+ 提供 shell 权限。以下入口经本机网关共享队列固定调用中继，不运行 `adb connect`、`adb shell` 或本地 adb 转发，也不需要菜单栏 App 保持打开。复用已有 HTTPS 地址、SPKI 指纹及钥匙串凭据，不打印令牌。手机工位需要已有 MCP 文件工具和 `station_shell_*`（37 版起）。
 
 ## 使用
 
-仓库检出后先按 [Mac 构建说明](mac-app.md) 运行 `./scripts/build-mac-app.sh`，生成 `build/.phone-station/phone-relay-gateway` 与钥匙串助手。构建不安装到手机。已安装的 Mac App 自带这些入口，使用随包脚本时不需要重新构建。随后配置两端中继，见 [MCP 配置](mcp.md#启动)；配置完成后，远程脚本直接使用钥匙串和配置文件，不要求本机网关进程运行。
+仓库检出后先按 [Mac 构建说明](mac-app.md) 运行 `./scripts/build-mac-app.sh`，生成 `build/.phone-station/phone-relay-gateway` 与钥匙串助手。构建不安装到手机。已安装的 Mac App 自带这些入口，使用随包脚本时不需要重新构建。随后配置两端中继，见 [MCP 配置](mcp.md#启动)；配置完成后，远程脚本自动启动本机网关（若未运行），所有 CLI 与菜单栏请求共用有界队列；无需 App 窗口保持打开。网关更新后需重启旧网关进程，旧版不支持共享 CLI 入口。
 
 在仓库根目录运行：
 
@@ -14,6 +14,8 @@
 
 # 写手机上的命令，不带 adb shell 前缀
 ./scripts/shell.sh 'pm list packages'
+# 查询原 shell 后台任务，不重新执行
+./scripts/shell.sh --job-status <32位任务编号>
 ./scripts/shell.sh --json --timeout-ms 60000 'dumpsys package dev.phonestation.adbkeep'
 
 # 上传前只检查远程能力，不安装；通道未就绪返回 75，未验证机型返回 1
@@ -100,3 +102,5 @@ MCP 和远程开关均保持 1，Shizuku 授权沿用，已有中继资料保留
 安装助手写入启动 PID、boot ID、开始时间与 180 秒单调期限。状态查询只有在同次开机、期限内且进程命令确为该任务助手时才报运行中；助手被杀、手机重启或旧任务缺记录时返回结果未知，并核对当前已安装 APK 的 SHA-256。启动恢复未确认且助手已结束时保留“已安装”事实，不永久等待。正常超时先 TERM 并给 5 秒清理窗口，再 KILL；启动锁阻止同一任务再次执行。
 
 Mac 在启动安装前保存唯一任务编号（`--job-id`），重启后仍可在「更多」查询原任务或复制编号。查询只检查状态，不重新安装；本地 adb 安装成功后清除不适用的远程编号。服务不可达时保留编号和未知状态。
+
+新版手机提供 `station_shell_start` / `station_operation_status`，CLI 自动协商使用后台任务，旧版仍可用同步工具完成升级。提交前生成唯一编号；提交应答丢失后只查询同一编号。执行结果与 shell 编号一同返回，未知结果提示 `--job-status`。后台任务不把常规子进程变成常驻服务，仍有同样的执行期限、输出上限与进程组清理。

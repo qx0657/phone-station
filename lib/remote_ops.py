@@ -44,6 +44,7 @@ class Client:
         self.binary = gateway_binary()
         self.rid = 0
         self.rpc_timeout = 245
+        self.async_shell = False
 
     def rpc(self, method: str, params: dict) -> dict:
         self.rid += 1
@@ -82,6 +83,7 @@ class Client:
             required |= {"station_file_access_policy", "station_file_create_directory", "station_file_write_bytes", "station_file_append_bytes", "station_file_write_text"}
         if not required <= names:
             raise RemoteError("手机工位版本缺少远程工具，请先更新到支持 Shizuku shell 的版本。")
+        self.async_shell = {"station_shell_start", "station_operation_status"} <= names
         state = self.tool("station_shell_status")
         if not state.get("available"):
             raise RemoteError(state.get("reason", "Shizuku 尚不可用。"))
@@ -90,8 +92,30 @@ class Client:
             raise DeviceMismatch(f"当前机型 {model} 尚未验证，停止设备操作。")
 
     def shell(self, command: str, timeout_ms: int = 10000, output_bytes: int = 32768) -> dict:
-        return self.tool("station_shell_exec", {"command": command, "timeoutMs": timeout_ms,
-                                                "maxOutputBytes": output_bytes})
+        arguments = {"command": command, "timeoutMs": timeout_ms, "maxOutputBytes": output_bytes}
+        if not self.async_shell:  # Bootstrap upgrades from APKs predating the job tools.
+            return self.tool("station_shell_exec", arguments)
+        job_id = uuid.uuid4().hex
+        deadline = time.monotonic() + timeout_ms / 1000 + 25
+        original_timeout = self.rpc_timeout
+        status = None
+        try:
+            self.rpc_timeout = min(original_timeout, 20)
+            try: status = self.tool("station_shell_start", {**arguments, "jobId": job_id})
+            except RemoteError: pass  # Unknown submission: query the same ID, never start again.
+            while time.monotonic() < deadline:
+                self.rpc_timeout = max(1, min(original_timeout, 15, deadline - time.monotonic()))
+                if status is not None:
+                    if status.get("state") == "completed" and isinstance(status.get("result"), dict):
+                        return {**status["result"], "jobId": job_id}
+                    if status.get("state") not in {"queued", "running"}:
+                        break
+                try: status = self.tool("station_operation_status", {"jobId": job_id})
+                except RemoteError: status = None
+                if status is None or status.get("state") in {"queued", "running"}: time.sleep(0.5)
+        finally: self.rpc_timeout = original_timeout
+        reason = status.get("error", "执行结果未知") if status else "执行结果未知"
+        raise RemoteError(f"{reason}。shell 任务编号：{job_id}；用 shell.sh --job-status {job_id} 查询，不要重做。")
 
     def checked_shell(self, command: str, timeout_ms: int = 10000) -> str:
         result = self.shell(command, timeout_ms)
@@ -480,6 +504,7 @@ def main(argv=None) -> int:
     modes = parser.add_subparsers(dest="mode", required=True)
     shell = modes.add_parser("shell", description="执行手机 /system/bin/sh -c 命令，不能使用电脑路径或 adb 前缀。")
     shell.add_argument("--status", action="store_true", help="只读检查 Shizuku")
+    shell.add_argument("--job-status", metavar="JOB_ID", help="只查询原后台命令任务，不执行命令")
     shell.add_argument("--json", action="store_true", help="返回完整执行结果")
     shell.add_argument("--timeout-ms", type=int, default=10000, choices=range(100, 60001), metavar="100..60000")
     shell.add_argument("--max-output-bytes", type=int, default=32768, choices=range(1, 65537), metavar="1..65536")
@@ -492,7 +517,7 @@ def main(argv=None) -> int:
     install.add_argument("--no-open", action="store_true", help="更新手机工位时只恢复后台服务，不打开主页")
     install.add_argument("apks", nargs="*")
     args = parser.parse_args(argv)
-    if args.mode == "shell" and not args.status and not args.command:
+    if args.mode == "shell" and not args.status and not args.job_status and not args.command:
         shell.error("需要一条用引号包住的 command 或 --status")
     if args.mode == "shell" and args.command and (args.command.startswith("adb ") or len(args.command) > 16384 or "\0" in args.command):
         shell.error("只传手机 shell 命令，去掉 adb shell 前缀；最多 16384 字")
@@ -502,9 +527,14 @@ def main(argv=None) -> int:
         install.error("--no-open 仅与 APK 文件一起使用")
     if args.mode == "install" and args.job_id and (not args.apks or not re.fullmatch(r"[0-9a-f]{32}", args.job_id)):
         install.error("--job-id 需要 APK 与唯一的 32 位小写十六进制编号")
+    if args.mode == "shell" and args.job_status and (args.command or args.status or not re.fullmatch(r"[0-9a-f]{32}", args.job_status)):
+        shell.error("--job-status 仅接受原任务的 32 位小写十六进制编号")
     job_id = None
     try:
         client = Client()
+        if args.mode == "shell" and args.job_status:
+            print(json.dumps(client.tool("station_operation_status", {"jobId": args.job_status}), ensure_ascii=False))
+            return 0
         if args.mode == "shell" and args.status:
             client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "phone-shell", "version": "1"}})
             print(json.dumps(client.tool("station_shell_status"), ensure_ascii=False))

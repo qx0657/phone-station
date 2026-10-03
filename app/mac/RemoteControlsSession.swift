@@ -191,6 +191,25 @@ final class RemoteControlsSession: ObservableObject {
             } catch { feedback.notice = "清理结果未确认，保留截图编号：\(pending.id)" }
         }
     }
+    private func captureInformation(id: String, endpoint: String, token: String, new: Bool) async throws -> Data {
+        let jobID = id.replacingOccurrences(of: "-", with: "")
+        let data = new
+            ? try await rpc(endpoint, token, "station_screen_capture_start", ["jobId": jobID, "requestId": id])
+            : try await rpc(endpoint, token, "station_operation_status", ["jobId": jobID])
+        var receipt = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let deadline = Date().addingTimeInterval(90)
+        while receipt?["state"] as? String == "queued" || receipt?["state"] as? String == "running" {
+            guard Date() < deadline else { throw ClipboardRPC.Failure(message: "截图任务等待超时；可查询原编号") }
+            try await Task.sleep(nanoseconds: 500_000_000)
+            let data = try await rpc(endpoint, token, "station_operation_status", ["jobId": jobID])
+            receipt = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+        if receipt?["state"] as? String == "completed", let result = receipt?["result"] as? [String: Any] {
+            return try JSONSerialization.data(withJSONObject: result)
+        }
+        // A restart or an older pending capture may leave a PNG even when its job receipt is missing.
+        return try await rpc(endpoint, token, "station_screen_capture_status", ["requestId": id])
+    }
     private func runCapture(id: String, endpoint: String, token: String, new: Bool) {
         operation = true; epoch += 1
         feedback.activity = new ? "正在远程截取画面…" : "正在恢复上次截图…"; feedback.notice = nil
@@ -198,10 +217,9 @@ final class RemoteControlsSession: ObservableObject {
             defer { feedback.activity = nil; operation = false; refresh() }
             do {
                 if pendingCapture?.localFile == nil {
-                    let name = new ? "station_screen_capture" : "station_screen_capture_status"
-                    let data = try await rpc(endpoint, token, name, ["requestId": id])
+                    let data = try await captureInformation(id: id, endpoint: endpoint, token: token, new: new)
                     if !new, let status = try JSONSerialization.jsonObject(with: data) as? [String: Any], status["available"] as? Bool == false {
-                        rememberCapture(nil); feedback.notice = "上次手机截图已清理或过期，可重新截取。"; return
+                        throw ClipboardRPC.Failure(message: "原截图未找到或已过期；可放弃并清理原编号")
                     }
                     let info = try JSONDecoder().decode(RemoteCapture.Info.self, from: data)
                     try RemoteCapture.validate(info, id: id)

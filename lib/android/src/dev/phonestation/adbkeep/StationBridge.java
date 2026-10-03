@@ -31,6 +31,14 @@ final class StationBridge implements StationHost {
     private static final int OPEN_ID = 5;
     private static final String OPEN_TAG = "open";
 
+    private static OperationJobs operationJobs;
+    private static synchronized OperationJobs jobs(Context context) {
+        if (operationJobs == null) { operationJobs = new OperationJobs(context.getFilesDir().toPath().resolve("operation-jobs")); }
+        return operationJobs;
+    }
+    static synchronized void closeJobs() {
+        if (operationJobs != null) { operationJobs.close(); operationJobs = null; }
+    }
     private final Context context;
     private final FileOps files;
 
@@ -38,6 +46,17 @@ final class StationBridge implements StationHost {
         this.context = context;
         this.files = files;
     }
+
+    @Override public Json shellStart(String id, ShellRequest request) {
+        requireVerifiedModel();
+        Json args = Json.obj().put("command", request.command).put("timeoutMs", request.timeoutMs).put("maxOutputBytes", request.maxOutputBytes);
+        return jobs(context).start(id, "shell", args, () -> ShizukuShell.execute(context, request));
+    }
+    @Override public Json captureStart(String id, String requestId) {
+        requireVerifiedModel(); ScreenCapture.path(requestId);
+        return jobs(context).start(id, "capture", Json.obj().put("requestId", requestId), () -> screenCapture(requestId));
+    }
+    @Override public Json operationStatus(String id) { return jobs(context).status(id); }
 
     @Override
     public Json shellStatus() {

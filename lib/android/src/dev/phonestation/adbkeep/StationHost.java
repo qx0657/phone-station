@@ -37,4 +37,8 @@ interface StationHost {
     Json shellStatus();
 
     Json shellExecute(ShellRequest request);
+
+    default Json shellStart(String jobId, ShellRequest request) { throw new FileFailure("请更新手机工位以支持后台任务"); }
+    default Json captureStart(String jobId, String requestId) { throw new FileFailure("请更新手机工位以支持后台任务"); }
+    default Json operationStatus(String jobId) { throw new FileFailure("请更新手机工位以支持后台任务"); }
 }

@@ -148,7 +148,9 @@ struct ConnectionStatusTest {
         var captureCalls = 0
         var statusCalls = 0
         let recovery = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
-            if name == "station_screen_capture" { captureCalls += 1; throw ClipboardRPC.Failure(message: "lost") }
+            if name == "station_screen_capture_start" { captureCalls += 1; throw ClipboardRPC.Failure(message: "lost") }
+            if name == "station_operation_status" { return Data("{\"state\":\"result_unknown\"}".utf8) }
+            if name == "station_screen_capture_release" { return Data("{}".utf8) }
             if name == "station_screen_capture_status" {
                 statusCalls += 1
                 return try JSONSerialization.data(withJSONObject: ["available": false])
@@ -169,7 +171,10 @@ struct ConnectionStatusTest {
         precondition(restored.pendingCapture?.id == recovery.pendingCapture?.id, "重启后保留原编号")
         recovery.recoverCapture()
         for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
-        precondition(captureCalls == 1 && statusCalls == 1 && recovery.pendingCapture == nil, "恢复只查询，不重拍")
+        precondition(captureCalls == 1 && statusCalls == 1 && recovery.pendingCapture != nil, "未知结果只查询，不重拍")
+        recovery.discardCapture()
+        for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(recovery.pendingCapture == nil)
 
         let cleanupID = UUID().uuidString.lowercased()
         let saved = RemoteControlsSession.PendingCapture(id: cleanupID, endpoint: "capture-endpoint", localFile: "/test/saved.png")

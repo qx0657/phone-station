@@ -48,10 +48,12 @@ final class McpProtocol {
                 return rpc(id, Json.obj().put("tools", tools()));
             }
             if ("tools/call".equals(method)) {
-                // 文件请求仍按顺序执行；长 shell 调用期间 ping 独立响应，避免网关误判断线。
-                synchronized (FileOps.TRANSACTIONS) {
-                    return rpc(id, call(params, files, host));
+                // 文件事务跨通道串行；主机状态与后台任务查询不占文件锁。
+                String name = params == null || params.get("name") == null ? "" : params.get("name").string();
+                if (name.startsWith("station_file_") || name.equals("station_storage_summary")) {
+                    synchronized (FileOps.TRANSACTIONS) { return rpc(id, call(params, files, host)); }
                 }
+                return rpc(id, call(params, files, host));
             }
             if ("ping".equals(method)) {
                 return rpc(id, Json.obj());
@@ -107,6 +109,13 @@ final class McpProtocol {
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
+        if ("station_shell_start".equals(name)) {
+            return host(host).shellStart(required(args, "jobId"), new ShellRequest(required(args, "command"),
+                    optionalInt(args, "timeoutMs", ShellRequest.DEFAULT_TIMEOUT_MS),
+                    optionalInt(args, "maxOutputBytes", ShellRequest.DEFAULT_OUTPUT_BYTES)));
+        }
+        if ("station_screen_capture_start".equals(name)) { return host(host).captureStart(required(args, "jobId"), required(args, "requestId")); }
+        if ("station_operation_status".equals(name)) { return host(host).operationStatus(required(args, "jobId")); }
         if ("station_controls_status".equals(name)) { return host(host).controlsStatus(); }
         if ("station_screen_capture".equals(name)) { return host(host).screenCapture(required(args, "requestId")); }
         if ("station_screen_capture_status".equals(name)) { return ScreenCapture.status(files, required(args, "requestId")); }
@@ -472,6 +481,18 @@ final class McpProtocol {
                 true,
                 false,
                 schema(new String[0], Json.obj())));
+        tools.add(tool("station_shell_start", "提交 Shizuku shell 后台任务。jobId 必须新建并预先保存；同编号同参数去重，不同参数拒绝。丢失应答后只查询原编号，不重做。",
+                false, true, schema(new String[] {"jobId", "command"}, Json.obj()
+                        .put("jobId", text("32 位小写十六进制唯一编号。"))
+                        .put("command", text("用户要求执行的手机 shell 命令。"))
+                        .put("timeoutMs", integer("超时毫秒数。", 100, 60000))
+                        .put("maxOutputBytes", integer("总输出保留上限。", 1, 65536)))));
+        tools.add(tool("station_screen_capture_start", "提交一次截图后台任务，立即返回任务回执，不等待 screencap。丢失应答后只查询原编号或原截图，不重拍。",
+                false, false, schema(new String[] {"jobId", "requestId"}, Json.obj()
+                        .put("jobId", text("32 位小写十六进制唯一任务编号。"))
+                        .put("requestId", text("截图 UUID。")))));
+        tools.add(tool("station_operation_status", "只读查询原任务状态与短期结果。应用重起后未完成任务为结果未知，不重新执行。",
+                true, false, schema(new String[] {"jobId"}, Json.obj().put("jobId", text("原任务编号。")))));
         tools.add(tool(
                 "station_shell_exec",
                 "通过已授权的 Shizuku 13+ 执行手机 shell 命令，本地和远程均可用。"

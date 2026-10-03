@@ -128,6 +128,9 @@ actor StationRPCQueue {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { reply in
                 guard !Task.isCancelled else { reply.resume(throwing: CancellationError()); return }
+                guard pending.count < 64 else {
+                    reply.resume(throwing: ClipboardRPC.Failure(message: "请求队列已满，本次尚未执行")); return
+                }
                 pending.append(Entry(id: id, priority: priority, operation: operation, reply: reply))
                 peakWaiting = max(peakWaiting, pending.count)
                 startNext()
@@ -188,7 +191,8 @@ enum ClipboardRPC {
         let priority: Int
         switch name {
         case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll", "station_notification_icon": priority = 1
-        case "station_device_status", "station_controls_status", "station_notification_status": priority = 2
+        case "station_device_status", "station_controls_status", "station_notification_status",
+             "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes": priority = 2
         default: priority = 0
         }
         return try await queue.run(priority: priority) {

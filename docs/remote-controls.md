@@ -12,7 +12,7 @@ Mac 0.1.0 (14)、Android 58 起，首页这三项在只有已配置的远程中�
 
 ## 单次截图
 
-`station_screen_capture` 要求新的 UUID `requestId`。手机用普通文件工具的路径规则创建 `Download/手机工位/.captures/<UUID>.png`，已存在文件时拒绝覆盖。Shizuku 执行固定的 `/system/bin/screencap -p`，不经电脑 adb。最多执行 15 秒；执行结束后核对 PNG 签名与 32 MiB 上限，返回绝对路径、size、targetVersion 和 SHA-256。手机执行失败会清理本次文件。
+Mac 使用 `station_screen_capture_start` 立即提交有编号的后台任务，再用 `station_operation_status` 查询；不会在执行 screencap 时占住中继队列。旧的同步接口 `station_screen_capture` 仍可用。两者要求新的 UUID `requestId`。手机用普通文件工具的路径规则创建 `Download/手机工位/.captures/<UUID>.png`，已存在文件时拒绝覆盖。Shizuku 执行固定的 `/system/bin/screencap -p`，不经电脑 adb。最多执行 15 秒；执行结束后核对 PNG 签名与 32 MiB 上限，返回绝对路径、size、targetVersion 和 SHA-256。手机执行失败会清理本次文件。
 
 Mac 用 `station_file_read_bytes` 分块下载，每页最多 65536 字节，核对偏移、字节数、版本和最终 SHA-256，并确认可解码为 PNG。完整图片才原子写入 `~/Pictures/scrcpy/<时间>-remote-<编号前六位>.png`，打开预览、刷新最近文件，再用 `station_screen_capture_release` 删除本次手机临时文件。清理失败不会把已保存的图片报成截图失败。
 
