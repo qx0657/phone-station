@@ -54,6 +54,10 @@ RELAY_TEST="$ROOT/build/.phone-station/remote-relay-profile-test"
   "$ROOT/app/mac/RemoteRelayProfile.swift" "$ROOT/app/mac/StationRunner.swift" \
   "$ROOT/app/mac/RemoteRelayProfileTest.swift" -o "$RELAY_TEST"
 "$RELAY_TEST"
+RUNNER_TEST="$ROOT/build/.phone-station/station-runner-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/StationRunnerTest.swift" -o "$RUNNER_TEST"
+"$RUNNER_TEST"
 CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSyncPolicyTest.swift" \
