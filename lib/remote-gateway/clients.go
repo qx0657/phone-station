@@ -34,6 +34,8 @@ var clientToolScopes = map[string]string{
 	"station_file_delete_directory": "files.write", "station_file_truncate_bytes": "files.write", "station_file_move": "files.write",
 	"station_file_copy": "files.write", "station_file_delete": "files.write",
 	"station_shell_exec": "shell", "station_shell_start": "shell", "station_operation_status": "shell",
+	"station_terminal_open": "shell", "station_terminal_read": "shell", "station_terminal_input": "shell",
+	"station_terminal_resize": "shell", "station_terminal_close": "shell",
 }
 var clientScopes = map[string]bool{"status": true, "files.read": true, "files.write": true, "shell": true}
 

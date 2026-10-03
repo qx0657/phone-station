@@ -6,7 +6,7 @@
 
 - `AGENTS.md` 与 `CLAUDE.md` 镜像、Claude/Grok 项目 Skill 软链接，以及当前/历史文档的本地文件链接与锚点。
 - shell 与 Python 语法；自动发现 `lib/` 和 `.agents/` 下的 Python 回归。
-- 两个 Go 模块的 race 检查、真实中继持久化与 TLS 联合合约，以及临时网关构建。配对测试使用这次编出的网关和模拟钥匙串，不依赖旧构建产物。
+- 网关、中继、Android PTY 三个 Go 模块的 race 检查与 Android/arm64 交叉编译、真实中继持久化与 TLS 联合合约，以及临时网关构建。Linux CI 另验证真实 PTY、目录保持、Ctrl-C、中文与窗口尺寸。配对测试使用这次编出的网关和模拟钥匙串，不依赖旧构建产物。
 - `lib/android/test/*Test.java` 的全部纯 Java 回归，不需要 Android SDK。
 - Swift 测试与 Mac 全量源码编译。新增 `*Test.swift` 必须在 `lib/check.py` 登记依赖，漏登会失败。
 

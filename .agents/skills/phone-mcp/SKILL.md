@@ -58,6 +58,10 @@ Mac 19 起，可为独立 MCP 客户端签发 `status`、`files.read`、`files.w
 
 提交应答丢失、超时或重连后，只用原 `jobId` 查询（`shell.sh --job-status <编号>` 或 `station_operation_status`），不重新提交。`missing`、`result_unknown` 都不表示肯定没有执行，先核实实际结果。普通文件仍使用 `station_file_*`；通过 adb 启动的 Shizuku 也没有其他应用 `/data/user/0` 的访问权。详细边界见 `docs/mcp.md` 的「Shizuku shell」。
 
+## 远程交互终端
+
+用户要求交互终端时使用 `scripts/terminal.sh` 或手机 61 起的 `station_terminal_*`，具体协议与期限见 `docs/remote-ops.md` 的「远程交互终端」。先读取机型与 Shizuku 状态；创建前保存唯一 sessionId，open 只提交一次，read 查询原会话。input 发送前记录连续序号，应答丢失后只读查询 nextInputSequence，不重发；手机应用或 Shizuku 重启后不重新创建原会话。普通文件仍走文件工具。close 只在用户要求关闭或已授权验证结束时清理原会话；不能为了只读检查创建终端。无需持续会话的单次命令继续使用有编号的 station_shell_start。
+
 ## 远程安装与 AI 更新
 
 仓库内的远程入口需要先构建 Mac 网关与钥匙串助手；找不到网关时运行 `./scripts/build-mac-app.sh`，这一步不安装到手机。已安装 App 的随包入口不需要重新构建。

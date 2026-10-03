@@ -8,6 +8,7 @@ enum CommandSessionTest {
         var model = "PGT-AN20"
         var verified = true
         var shellAvailable = true
+        var terminalSupported = false
         var dropStart = false
         var failStatus = false
         var state = "completed"
@@ -33,7 +34,7 @@ enum CommandSessionTest {
                 }
                 return data(["model": model, "verified": verified])
             case "station_shell_status":
-                return data(["available": shellAvailable, "reason": shellAvailable ? "" : "Shizuku 未启动"])
+                return data(["available": shellAvailable, "reason": shellAvailable ? "" : "Shizuku 未启动", "terminalSupported": terminalSupported, "terminalProtocol": 1])
             case "station_shell_start":
                 jobID = arguments["jobId"] as! String
                 precondition(arguments["timeoutMs"] as? Int == 15000)
@@ -95,6 +96,10 @@ enum CommandSessionTest {
         precondition(phone.calls.allSatisfy { ["station_controls_status", "station_shell_status"].contains($0.name) },
                      "opening the page must not execute shell commands")
         precondition(!session.canOpenShell)
+        phone.terminalSupported = true
+        session.refreshRemote()
+        await waitFor { session.canOpenShell }
+        precondition(session.shellTitle == "在终端中打开远程 shell")
         let install = SavedAdbCommand(id: UUID(), name: "install", arguments: "install app.apk")
         let interactive = SavedAdbCommand(id: UUID(), name: "shell", arguments: "shell")
         for command in [install, interactive] {

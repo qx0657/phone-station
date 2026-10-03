@@ -95,6 +95,8 @@ final class CommandSession: ObservableObject {
     private struct ShellStatus: Decodable {
         var available: Bool
         var reason: String
+        var terminalSupported: Bool?
+        var terminalProtocol: Int?
     }
     private struct ShellResult: Decodable {
         var stdout: String
@@ -242,6 +244,11 @@ final class CommandSession: ObservableObject {
         do { _ = try AdbCommandLine.remoteShell(tokens) }
         catch let error as AdbCommandLine.ParseError { return error.message }
         catch { return "参数无法识别。" }
+        return remoteCommandReason
+    }
+
+    private var remoteCommandReason: String? {
+        if feedback.activity != nil || running { return "正在执行其他操作…" }
         if pendingCommand != nil { return "上次远程命令结果未确认，请先查询原任务。" }
         guard let route = remoteRoute() else { return "请先连接手机。" }
         if let remoteFailure { return remoteFailure }
@@ -252,10 +259,18 @@ final class CommandSession: ObservableObject {
         return remoteShell.available ? nil : (remoteShell.reason.isEmpty ? "Shizuku 尚不可用。" : remoteShell.reason)
     }
 
-    var canOpenShell: Bool { serial() != nil && allow() && feedback.activity == nil }
-    var shellDetail: String {
-        serial() == nil ? "交互式 shell 需要本地 adb 连接" : "在「终端」里打开，序列号已经绑上"
+    var canOpenShell: Bool {
+        if serial() != nil { return allow() && feedback.activity == nil }
+        guard remoteCommandReason == nil else { return false }
+        return remoteShell?.terminalSupported == true && remoteShell?.terminalProtocol == 1
     }
+    var shellDetail: String {
+        if serial() != nil { return "在「终端」里打开，序列号已经绑上" }
+        if let reason = remoteCommandReason { return reason }
+        if remoteShell?.terminalSupported != true || remoteShell?.terminalProtocol != 1 { return "远程终端需要手机工位 61 或更新版本" }
+        return "远程 Shizuku shell，支持连续输入与 Ctrl-C"
+    }
+    var shellTitle: String { serial() == nil && remoteRoute() != nil ? "在终端中打开远程 shell" : "在终端中打开 shell" }
 
     /// Only capability reads; opening this page never submits a shell command.
     func refreshRemote() {
@@ -393,24 +408,31 @@ final class CommandSession: ObservableObject {
     }
 
     func openDeviceShell() {
-        guard canOpenShell, let serial = serial(), let adb = StationRunner.executable("adb") else { return }
+        guard canOpenShell else { return }
+        let arguments: [String]
+        let body: String
+        if let serial = serial() {
+            guard let adb = StationRunner.executable("adb") else { return }
+            arguments = [adb.path, serial]
+            body = "do script quoted form of item 1 of argv & \" -s \" & quoted form of item 2 of argv & \" shell\""
+        } else {
+            arguments = [StationRunner.script("terminal.sh").path]
+            body = "do script quoted form of item 1 of argv"
+        }
         feedback.activity = "正在打开终端…"
         feedback.notice = nil
         let script = """
         on run argv
-            if (count of argv) is less than 2 then error "缺少参数"
-            set adbPath to item 1 of argv
-            set deviceSerial to item 2 of argv
             tell application "Terminal"
                 activate
-                do script quoted form of adbPath & " -s " & quoted form of deviceSerial & " shell"
+                \(body)
             end tell
         end run
         """
         Task.detached(priority: .userInitiated) {
             let result = StationRunner.capture(
                 URL(fileURLWithPath: "/usr/bin/osascript"),
-                ["-e", script, adb.path, serial],
+                ["-e", script] + arguments,
                 timeout: 20)
             let failure = result.succeeded ? nil : (result.timedOut ? "打开终端超时。" : StationText.reason(result.output, fallback: "无法打开终端。"))
             await MainActor.run {

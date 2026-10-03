@@ -16,7 +16,7 @@ Mac 19 的本机网关支持独立客户端令牌。适合把读取文件的客�
 | `status` | 设备、控件、通知同步与 Shizuku 状态 | 不含剪贴板、通知正文、任务输出，也不操作控件 |
 | `files.read` | 文件策略、存储概况、列目录、stat、读文本/字节、搜索 | 适用于手机 MCP 已开放的全部普通文件；不是指定目录授权 |
 | `files.write` | 创建目录、写入/追加/替换/补丁/截断、复制/移动、删除文件与目录 | 各工具原有版本校验、路径规则仍有效；通常与 `files.read` 一起授予 |
-| `shell` | shell exec/start 与 operation status | 可读所有已知编号的短期任务结果。shell 本身拥有 Shizuku 的 shell/root 系统能力，不是受文件目录限制的沙箱 |
+| `shell` | shell exec/start、operation status 与全部 terminal 工具 | 可读所有已知编号的短期任务结果。shell 本身拥有 Shizuku 的 shell/root 系统能力，不是受文件目录限制的沙箱 |
 
 四项独立授予，没有隐式继承或通配权限。客户端可初始化、ping、列出自己可用的工具；不允许未知 RPC 方法。`station_file_open` 会打开手机界面，不属于文件读写；剪贴板、手机通知接收/配置、提醒、截屏、手电筒与亮屏目前仅主令牌可用。以后增加的工具默认拒绝，必须显式加入网关授权表。
 

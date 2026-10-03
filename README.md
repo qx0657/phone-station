@@ -49,7 +49,7 @@ open "/Applications/手机工位.app"
 
 点击可以投屏、截取画面、录屏，保持亮屏，开关闪光灯，或让灯跟随这台 Mac 正在播放的声音。首页标题旁显示电量。命令行做这几件，见 [闪光灯](#闪光灯) 和 [屏幕](#屏幕)。
 
-主页的「adb 命令」可以保存几条常用命令，点一下就在这台手机上执行。远程连接也能执行 `shell …`，需要手机上的 Shizuku 已启动并授权；交互式终端仍需要本地 adb。「MCP 服务」打开或停止手机工具，显示统一网关地址和当前通道，并提供「复制 Authorization」，见 [文件](#文件)。「共享剪贴板」查看同步状态，开启后自动双向同步。最近的截图与录屏在首页的「最近文件」：一行一个缩略图，鼠标停在上面会在面板旁边放出大图，点这一行把图片或文件复制到剪贴板，箭头在 Finder 里显示。录屏或灯光跟随声音时，收起面板不会结束任务。
+主页的「adb 命令」可以保存几条常用命令，点一下就在这台手机上执行。远程连接也能执行 `shell …`，需要手机上的 Shizuku 已启动并授权；Mac 22 和手机 61 起也能从该页打开远程交互终端，支持持续输入和 Ctrl-C。「MCP 服务」打开或停止手机工具，显示统一网关地址和当前通道，并提供「复制 Authorization」，见 [文件](#文件)。「共享剪贴板」查看同步状态，开启后自动双向同步。最近的截图与录屏在首页的「最近文件」：一行一个缩略图，鼠标停在上面会在面板旁边放出大图，点这一行把图片或文件复制到剪贴板，箭头在 Finder 里显示。录屏或灯光跟随声音时，收起面板不会结束任务。
 
 ### 连接与配对
 
@@ -210,6 +210,8 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 
 ```bash
 ./scripts/shell.sh 'pm list packages'
+./scripts/terminal.sh                    # 远程交互式 shell，Ctrl-] 关闭
+./scripts/terminal.sh --resume <会话编号>  # 只恢复原会话
 ./scripts/install-apk.sh /电脑上的路径/app.apk
 ./scripts/android.sh --remote
 ```
@@ -222,7 +224,7 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 
 Mac 19 起，`./scripts/mcp.sh clients create '资料读取' status,files.read` 可生成独立客户端令牌，按需授予状态、文件读写或 shell 权限；`clients list` 查看，`clients revoke <编号>` 撤销。创建时只显示一次令牌，详细范围见 [客户端权限](docs/mcp-clients.md)。
 
-需要通过本地或远程通道执行 shell 命令时，在手机上启动 Shizuku 13 或更新版，并在「手机工位 → 权限 → Shizuku」允许使用。`station_shell_status` 检查是否可用，新客户端用 `station_shell_start` 提交有编号的后台任务，再用 `station_operation_status` 查询结果；`station_shell_exec` 保留给旧客户端。默认执行 10 秒，最长 60 秒，没有交互终端，普通子进程不保证长期存活。提交应答丢失后只查询原编号，不重新执行。非 root 手机重启后需要重新启动 Shizuku，之前的应用授权仍保留。参数和权限边界见 [MCP 文档](docs/mcp.md#shizuku-shell)。
+需要通过本地或远程通道执行 shell 命令时，在手机上启动 Shizuku 13 或更新版，并在「手机工位 → 权限 → Shizuku」允许使用。`station_shell_status` 检查是否可用，新客户端用 `station_shell_start` 提交有编号的后台任务，再用 `station_operation_status` 查询结果；`station_shell_exec` 保留给旧客户端。这类单次命令默认执行 10 秒，最长 60 秒，标准输入关闭。交互终端使用独立的 `terminal.sh`，保留目录与环境；断线 60 秒或会话运行 1 小时后清理进程。提交应答丢失后只查询原编号，不重新执行。非 root 手机重启后需要重新启动 Shizuku，之前的应用授权仍保留。参数和权限边界见 [MCP 文档](docs/mcp.md#shizuku-shell)。
 
 远程通道默认未配置，没有内置服务器地址。手机「远程中继设置」填写 HTTPS 地址、SPKI SHA-256 证书指纹和手机令牌；Mac「MCP 服务 → 远程中继」填写相同地址、指纹和另一枚电脑令牌，点「保存 Mac 配置」。两端均可独立配置，无需 adb。Mac 勾选「同时配置手机」后，可通过已连接的 adb 一次保存两端资料。地址支持域名或 IP、可选端口和路径，例如 `https://relay.example.com/station`。中继需要实现手机工位的转发协议，见 [docs/mcp.md](docs/mcp.md)；任意 MCP 服务器不能直接代替它。已有配对在更新后保留。
 
@@ -317,7 +319,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 | `python3` | 发现设备、配对、MCP 通知、远程 shell/安装、闪光灯跟随声音 | 系统自带 |
 | `node`、`npm` | `pair-qr.sh` | 先准备 Node.js 与 npm；首次运行自动安装的是二维码依赖，放在 `lib/node_modules`，这个目录不入库 |
 | `swiftc` | Mac App 构建、`torch.sh beat` | 由 Command Line Tools 提供；跟随声音没有程序或源码较新时会自己编译 |
-| `go` | Mac App 与 MCP 网关构建 | Go 1.23 或更新版；已打包 App 运行时不用它 |
+| `go` | Mac App、MCP 网关与 Android PTY 构建 | Go 1.23 或更新版；已打包 App 运行时不用它 |
 | `javac`、Android SDK | Android APK 构建，包括 Mac App 的随包 APK | OpenJDK 17 或更新版、Android 35 平台与 build-tools，见 [构建说明](docs/adb-keep.md#构建) |
 
 `android` 不参与上面这些脚本。装它和它能做的事见 [docs/android-cli.md](docs/android-cli.md)。

@@ -178,7 +178,7 @@ func remotePriority(body []byte) int {
 	}
 	switch request.Params.Name {
 	case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll",
-		"station_operation_status", "station_device_status", "station_controls_status":
+		"station_operation_status", "station_device_status", "station_controls_status", "station_terminal_read":
 		return 2
 	case "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes":
 		return 0
@@ -1159,7 +1159,7 @@ func safeToReplay(body []byte) bool {
 		return true
 	case "tools/call":
 		switch request.Params.Name {
-		case "station_operation_status", "station_controls_status", "station_screen_capture_status",
+		case "station_operation_status", "station_controls_status", "station_screen_capture_status", "station_terminal_read",
 			"station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
 			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
 			"station_file_search", "station_file_search_text":

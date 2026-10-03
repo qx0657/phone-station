@@ -61,6 +61,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/ClipboardMethods.java" \
   "$here/src/dev/phonestation/adbkeep/ShellRequest.java" \
   "$here/src/dev/phonestation/adbkeep/OperationJobs.java" \
+  "$here/src/dev/phonestation/adbkeep/TerminalJobs.java" \
   "$here/src/dev/phonestation/adbkeep/ShellRunner.java" \
   "$here/src/dev/phonestation/adbkeep/ScreenCapture.java" \
   "$here/src/dev/phonestation/adbkeep/FileOps.java" \
@@ -91,6 +92,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/McpHttpTest.java" \
   "$here/test/McpLoopbackTest.java" \
   "$here/test/OperationJobsTest.java" \
+  "$here/test/TerminalJobsTest.java" \
   "$here/test/ShellRunnerTest.java" \
   "$here/test/ClipboardStateTest.java" \
   "$here/test/HealthStatusTest.java" \
@@ -119,6 +121,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.McpProtocolTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpHttpTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpLoopbackTest
 java -cp "$work/policy" dev.phonestation.adbkeep.OperationJobsTest
+java -cp "$work/policy" dev.phonestation.adbkeep.TerminalJobsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ShellRunnerTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ClipboardStateTest
 java -cp "$work/policy" dev.phonestation.adbkeep.HealthStatusTest
@@ -167,6 +170,12 @@ mkdir -p "$work/dex"
 class_files=("${(@f)$(find "$work/classes" -name '*.class')}")
 "$bt/d8" --min-api 29 --lib "$jar" --output "$work/dex" "${class_files[@]}" "${shizuku_jars[@]}"
 zip -j -q "$work/unsigned.apk" "$work/dex/classes.dex"
+
+print -r -- "构建 Android PTY…"
+go -C "$here/terminal" test -race ./...
+mkdir -p "$work/assets"
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go -C "$here/terminal" build -trimpath -ldflags='-s -w' -o "$work/assets/terminal-arm64" .
+(cd "$work" && zip -q unsigned.apk assets/terminal-arm64)
 
 mkdir -p "$repo/build"
 # 签过名的钥匙不放进 build/。删掉构建目录或换一台电脑时，把这一份拷到同一路径再编，才不用卸掉重装。

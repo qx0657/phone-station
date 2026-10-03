@@ -118,7 +118,7 @@ adb 或远程任一实际在线时，标题固定为正文色「电脑已连接�
 
 ## 构建
 
-`lib/android/build.sh` 用本机的 OpenJDK、`platforms/android-35` 和 build-tools 打包。没有这些时，先按 [android-cli.md](android-cli.md) 安装 SDK，再执行 `android sdk install platforms/android-35 build-tools/35.0.0`。
+`lib/android/build.sh` 用本机的 OpenJDK、Go 1.23+、`platforms/android-35` 和 build-tools 打包。Go 将独立的 PTY 辅助程序交叉编译为 Android/arm64 静态可执行文件并放入 APK assets，无需 NDK；由已授权的 Shizuku 以 shell/root 身份运行，应用 UID 不执行它。没有这些时，先按 [android-cli.md](android-cli.md) 安装 SDK，再执行 `android sdk install platforms/android-35 build-tools/35.0.0`。
 
 签名存在 `~/.phonestation/adb-keep.keystore`。要换目录就设 `PHONE_STATION_KEY_DIR`，文件名仍是 `adb-keep.keystore`。这份不入库。原来的 `build/adb-keep.keystore` 若还在、而新位置没有，构建会把它拷过去，不删旧文件。删掉 `build/` 不会换签名。密钥目录固定为 0700，密钥与 `adb-keep.password` 固定为 0600；密码经文件传给 keytool/apksigner，不进入进程参数。新密钥使用随机密码。旧的公开 `android` 密码会重新加密为随机密码，转换前后比较签名证书，保留原签名身份；中断后可恢复，已有无效或未知密码的密钥不会被替换。也可用 `PHONE_STATION_KEY_PASS_FILE` 指定已有私密密码文件。换电脑时安全备份并一起恢复密钥和密码文件，不能只拷密钥。安装脚本遇到 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 会停止并保留原应用和数据，需要相同签名的安装包，不再自动卸载。
 

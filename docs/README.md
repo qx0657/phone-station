@@ -15,7 +15,7 @@
 | [mcp.md](mcp.md) | `scripts/mcp.sh` | 手机工位 MCP、Mac 统一网关、可配置远程中继、两端配置界面、鉴权与路径边界，以及 PGT-AN20 上读到和读不到的地方 |
 | [mcp-clients.md](mcp-clients.md) | `mcp.sh clients` | 独立令牌、文件读写与 shell 权限、撤销和隔离边界 |
 | [relay-contract.md](relay-contract.md) | `scripts/check-relay.sh` | 共用协议、会话编号、持久回执、仓库内联合检查与公网隔离验收 |
-| [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku shell、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
+| [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/terminal.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku 单次命令与交互终端、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
 | [remote-controls.md](remote-controls.md) | Mac 首页远程截屏、亮屏和手电筒 | 三项控件的权限与机型判断、截图下载校验及清理、Shizuku 持续持灯、断线后只核实状态 |
 | [clipboard.md](clipboard.md) | 两端「共享剪贴板」页与 `station_clipboard_*` | Shizuku 后台读取、双向交换、回传和冲突处理、重连基线、敏感内容及文字范围 |
 | [notify.md](notify.md) | 两端通知设置与 `scripts/notify.sh` | 手机所选应用的新通知同步到 Mac：系统通知使用权、白名单、短期接收队列与断线基线。电脑提醒发到手机：下拉通知与铃声、媒体音量、`--agent` 图标、`--shell` PCM 及全局 hook |

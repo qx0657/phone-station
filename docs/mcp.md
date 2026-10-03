@@ -20,7 +20,7 @@ Authorization: Bearer <本机网关令牌>
 
 本地派发前先做 `ping`，转发还接受 TCP 但手机已经不可达时，实际操作直接走可用远程通道。检测到本地断线会取消仍在等响应的本地请求；`ping`、`initialize`、`tools/list` 和明确列入白名单的只读工具可以自动转到远程重试。读取手机剪贴板的 `station_clipboard_get` 与客户端交换都不在重放白名单中；具体工具不能仅凭 `readOnlyHint` 判断是否会重试。文件修改、通知、剪贴板、打开文件、保持亮屏和未知工具均不自动重放，结果不明时报告需要核实。已取消的旧探测也不能把通道重新报成在线。
 
-`./scripts/mcp.sh stop` 需要 adb 在线，通过 `McpControlReceiver` 关闭手机 MCP 与远程开关，再移除转发；配对资料会保留。`./scripts/mcp.sh status` 不启动服务，也不跑 `connect.sh`，只刷新已有 adb 转发信息并报告网关探测到的通道。读取手机服务开关、刷新转发和读取令牌的 adb 命令各有 2 秒超时。菜单栏通过内部 `watch` 命令持续接收网关的鉴权 NDJSON 状态流（每 100 毫秒检查状态差异），流中断自动重连，并用 `snapshot` 兜底；adb 转发与令牌另行在后台刷新，其他操作进行中也会继续刷新连接显示。远程在线时，首页和菜单栏图标也显示已连接，只有远程可用时标明「远程连接」；截屏、保持亮屏和手电筒按 MCP 实际能力启用，命令页的 `shell …` 可通过已授权 Shizuku 的 MCP 后台任务执行；其他 adb 子命令和交互式终端仍需要本地连接。手机首页与常驻通知同样把实际远程连接计入已连接，开关打开或已配对本身不算。两端远程状态只把最近 6 秒的成功应答作为已确认连接；远程业务占用通道、暂时无法新探测时显示「确认连接中」，不会取消或重放正在执行的操作。adb 连接由列表事件与实际 shell 应答单独判断，本地 MCP 关闭不会导致误报 adb 断线。
+`./scripts/mcp.sh stop` 需要 adb 在线，通过 `McpControlReceiver` 关闭手机 MCP 与远程开关，再移除转发；配对资料会保留。`./scripts/mcp.sh status` 不启动服务，也不跑 `connect.sh`，只刷新已有 adb 转发信息并报告网关探测到的通道。读取手机服务开关、刷新转发和读取令牌的 adb 命令各有 2 秒超时。菜单栏通过内部 `watch` 命令持续接收网关的鉴权 NDJSON 状态流（每 100 毫秒检查状态差异），流中断自动重连，并用 `snapshot` 兜底；adb 转发与令牌另行在后台刷新，其他操作进行中也会继续刷新连接显示。远程在线时，首页和菜单栏图标也显示已连接，只有远程可用时标明「远程连接」；截屏、保持亮屏和手电筒按 MCP 实际能力启用，命令页的 `shell …` 可通过已授权 Shizuku 的 MCP 后台任务执行；其他 adb 子命令需要本地连接；Mac 22 与手机 61 起，交互式远程终端使用 `station_terminal_*` PTY 会话。手机首页与常驻通知同样把实际远程连接计入已连接，开关打开或已配对本身不算。两端远程状态只把最近 6 秒的成功应答作为已确认连接；远程业务占用通道、暂时无法新探测时显示「确认连接中」，不会取消或重放正在执行的操作。adb 连接由列表事件与实际 shell 应答单独判断，本地 MCP 关闭不会导致误报 adb 断线。
 
 远程中继由用户配置，默认没有服务器地址或凭据。手机「远程中继设置」与 Mac「MCP 服务 → 远程中继」可独立保存资料，不需要 adb。两端使用同一 HTTPS 地址和 SPKI 指纹，分别保存手机、电脑两枚不同令牌。手机点「保存并连接」，Mac 点「保存 Mac 配置」。地址与指纹回填，令牌隐藏且不回填。Mac 勾选「同时配置手机」可通过 adb 一次配置两端；这条流程以及 `pair`、`unpair` 才要求 adb 在线。也可以使用脚本：
 
@@ -117,7 +117,7 @@ appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
 
 ### Shizuku shell
 
-`station_shell_status` 只读检查 Shizuku 是否安装、运行及授权，返回 `available`、`state`、`uid`、`identity`、`serverVersion` 和不可用原因 `reason`。不启动 Shizuku，也不弹授权框。要执行命令，先在手机上启动 Shizuku 13 或更新版，再到手机工位的「权限 → Shizuku」允许使用；已保存的授权沿用。非 root 手机重启后需要重新启动 Shizuku。
+`station_shell_status` 只读检查 Shizuku 是否安装、运行及授权，返回 `available`、`state`、`uid`、`identity`、`serverVersion` 和不可用原因 `reason`；61 起另返回 `terminalSupported` 与 `terminalProtocol: 1`。不启动 Shizuku，也不弹授权框。要执行命令，先在手机上启动 Shizuku 13 或更新版，再到手机工位的「权限 → Shizuku」允许使用；已保存的授权沿用。非 root 手机重启后需要重新启动 Shizuku。
 
 `station_shell_exec` 在本地 MCP 和远程中继使用同一个执行端。手机通过 `bindUserService` 创建特权进程，调用方 UID 必须是手机工位的应用 UID，执行进程 UID 必须是 `2000`（shell）或 `0`（root）。没有服务或授权时拒绝执行，不回退到普通应用 UID。中继令牌负责远程接入，Shizuku 授权负责手机执行，两者互不替代。通过 adb 启动的 Shizuku 仍不能访问其他应用的 `/data/user/0/<包名>`；已有文件工具的范围保持原样。
 
@@ -136,6 +136,12 @@ appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
 本地 HTTP 用有上限的请求线程池，文件事务跨通道串行；主机状态、剪贴板和通知不占文件锁。`station_shell_start` / `station_screen_capture_start` 立即提交后台任务，`station_operation_status` 查询原编号；新版 CLI 和 Mac 截屏使用这些接口，长执行期间仍可接收通知与剪贴板。原有文件、亮屏、通知等工具继续使用应用自身权限。
 
 电脑侧 `scripts/shell.sh` 经网关共享队列固定使用中继，不连接 adb；`scripts/install-apk.sh` 复用同一组文件和 shell 工具，实现 APK 校验、安装 session、应用自身更新后的结果查询。安装助手是明确需要跨应用重启继续运行的有界任务；普通 shell 请求仍按原来的进程组规则清理。步骤与边界见 [remote-ops.md](remote-ops.md)。
+
+### 交互式 PTY
+
+手机 61 起新增 `station_terminal_open/read/input/resize/close`。创建前保存唯一 `sessionId`，open 返回后台创建回执，用 read 查询原会话；input 用连续序号与十六进制字节，read 返回不消耗的输出游标、遗漏字节数和已接收序号。输入应答丢失后只查原序号，不重发。独立 Shizuku UserService 只允许应用 UID 调用，PTY 辅助程序运行身份为 shell/root。查询不启动或重新绑定执行服务，关闭、服务停止与租期到期会清理原会话。
+
+界面、CLI、租期、输出范围与恢复方法见 [远程交互终端](remote-ops.md#远程交互终端)。单次 `station_shell_*` 的标准输入关闭与进程组清理语义独立保留。只有 `station_terminal_read` 加入网关的只读重放白名单，其他 terminal 操作不自动重放；全部 terminal 工具要求 `shell` 客户端权限。
 
 ## 路径
 
@@ -191,7 +197,8 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 | `station_storage_summary` | 剩余空间，以及六个常用目录各占多少 |
 | `station_device_status` | 在线状态、连接类型、远程是否在线，以及电量、是否在充电、响铃模式、Wi-Fi 是否连着、USB 调试和无线调试开关、息屏时间和充电时常亮、剩余空间。不读 Wi-Fi 名字 |
 | `station_operation_status` | 原后台任务状态与短期结果；只查询、不重新执行 |
-| `station_shell_status` | Shizuku 的运行、授权、执行身份和不可用原因；不启动服务 |
+| `station_shell_status` | Shizuku 的运行、授权、执行身份、终端协议支持和不可用原因；不启动服务 |
+| `station_terminal_read` | 原终端输出、字节游标、状态与已接收输入序号；不创建会话，定期查询维持租期 |
 | `station_clipboard_get` | 读手机当前文字剪贴板；后台读取需要 Shizuku，锁屏或敏感内容不返回文字 |
 | `station_clipboard_state` | 读共享设置、内存中的预览和 Mac 在线状态，不发起系统剪贴板读取 |
 | `station_notification_status` | 读手机通知同步、系统授权、监听状态、已选应用数量和 Mac 在线状态；不返回正文，不建立接收会话 |

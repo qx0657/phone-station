@@ -85,6 +85,9 @@ def main():
         print("文档镜像、Skill 入口与脚本语法通过", flush=True)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "server/relay", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/android/terminal", "test", "-race", "./..."])
+        terminal_env = {**os.environ, "GOOS": "android", "GOARCH": "arm64", "CGO_ENABLED": "0"}
+        run(["go", "-C", ROOT / "lib/android/terminal", "build", "-trimpath", "-o", work / "terminal-arm64", "."], env=terminal_env)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "-tags", "relaycontract", "-run", "^(TestRelayContractHarness|TestRepositoryRelayContract)$", "."])
         gateway = work / "phone-relay-gateway"
         run(["go", "-C", ROOT / "lib/remote-gateway", "build", "-o", gateway, "."])

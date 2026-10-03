@@ -243,6 +243,18 @@ func TestShellStatusCanReplay(t *testing.T) {
 	}
 }
 
+func TestTerminalReplayPolicy(t *testing.T) {
+	for _, operation := range []string{"open", "read", "input", "resize", "close"} {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_terminal_` + operation + `"}}`)
+		if safeToReplay(body) != (operation == "read") {
+			t.Fatal("unsafe terminal replay", operation)
+		}
+		if clientToolScopes["station_terminal_"+operation] != "shell" {
+			t.Fatal("terminal must require shell scope", operation)
+		}
+	}
+}
+
 func TestNotificationReplayPolicy(t *testing.T) {
 	if !safeToReplay([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_notification_status"}}`)) {
 		t.Fatal("notification status should be safe to replay")

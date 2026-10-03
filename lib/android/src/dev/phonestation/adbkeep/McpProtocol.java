@@ -140,6 +140,11 @@ final class McpProtocol {
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
+        if ("station_terminal_open".equals(name)) { return host(host).terminalOpen(required(args, "sessionId"), optionalInt(args, "columns", 80), optionalInt(args, "rows", 24)); }
+        if ("station_terminal_read".equals(name)) { return host(host).terminalRead(required(args, "sessionId"), optionalLong(args, "offset", 0)); }
+        if ("station_terminal_input".equals(name)) { return host(host).terminalInput(required(args, "sessionId"), optionalLong(args, "sequence", -1), required(args, "hex")); }
+        if ("station_terminal_resize".equals(name)) { return host(host).terminalResize(required(args, "sessionId"), optionalInt(args, "columns", 80), optionalInt(args, "rows", 24)); }
+        if ("station_terminal_close".equals(name)) { return host(host).terminalClose(required(args, "sessionId")); }
         if ("station_shell_start".equals(name)) {
             return host(host).shellStart(required(args, "jobId"), new ShellRequest(required(args, "command"),
                     optionalInt(args, "timeoutMs", ShellRequest.DEFAULT_TIMEOUT_MS),
@@ -518,6 +523,20 @@ final class McpProtocol {
                         .put("command", text("用户要求执行的手机 shell 命令。"))
                         .put("timeoutMs", integer("超时毫秒数。", 100, 60000))
                         .put("maxOutputBytes", integer("总输出保留上限。", 1, 65536)))));
+        tools.add(tool("station_terminal_open", "创建交互式 Shizuku PTY，立即返回创建任务回执。预先保存 sessionId；同编号不会重建。用 terminal_read 查询原会话。仅在用户要求终端时调用。最多 2 个会话，断线 60 秒或运行 1 小时后清理进程。",
+                false, true, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("32 位小写十六进制唯一编号。"))
+                        .put("columns", integer("列数，默认 80。", 20, 500)).put("rows", integer("行数，默认 24。", 5, 200)))));
+        tools.add(tool("station_terminal_read", "读取原终端输出与输入序号，不创建会话，不消耗输出。offset 是字节游标；返回十六进制、nextOffset 与丢失字节数。定期读取维持 60 秒会话租期。手机或 Shizuku 重启后不恢复执行。",
+                true, false, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("原会话编号。"))
+                        .put("offset", integer("输出字节游标，默认 0。", 0, Long.MAX_VALUE)))));
+        tools.add(tool("station_terminal_input", "向原终端写入 1–4096 字节；sequence 从 0 连续递增。应答丢失后只读查询 nextInputSequence，不重发。Ctrl-C 为 03，回车为 0d。拥有 shell/root 能力，只发送用户要求的输入。",
+                false, true, schema(new String[] {"sessionId", "sequence", "hex"}, Json.obj().put("sessionId", text("原会话编号。"))
+                        .put("sequence", integer("输入序号。", 0, Long.MAX_VALUE)).put("hex", text("原始输入字节的十六进制。")))));
+        tools.add(tool("station_terminal_resize", "调整原终端尺寸并通知前台进程，不创建会话。",
+                false, false, schema(new String[] {"sessionId", "columns", "rows"}, Json.obj().put("sessionId", text("原会话编号。"))
+                        .put("columns", integer("列数。", 20, 500)).put("rows", integer("行数。", 5, 200)))));
+        tools.add(tool("station_terminal_close", "关闭原终端并清理该会话的前台和后台进程，不重新执行输入。可重复关闭同一编号。",
+                false, true, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("原会话编号。")))));
         tools.add(tool("station_screen_capture_start", "提交一次截图后台任务，立即返回任务回执，不等待 screencap。丢失应答后只查询原编号或原截图，不重拍。",
                 false, false, schema(new String[] {"jobId", "requestId"}, Json.obj()
                         .put("jobId", text("32 位小写十六进制唯一任务编号。"))

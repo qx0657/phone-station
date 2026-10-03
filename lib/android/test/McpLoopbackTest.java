@@ -18,6 +18,7 @@ final class McpLoopbackTest {
         final boolean[] stackPreference = new boolean[] {false};
         final int[] shellCalls = new int[] {0};
         OperationJobs jobs = new OperationJobs(home.resolve(".jobs"));
+        TerminalJobs terminals = new TerminalJobs(jobs, (request, start) -> TerminalJobs.ended(request.get("sessionId").string(), request.get("op").string().equals("close") ? "closed" : "running", ""));
         CountDownLatch jobEntered = new CountDownLatch(1), jobRelease = new CountDownLatch(1);
         CountDownLatch shellEntered = new CountDownLatch(1);
         CountDownLatch shellRelease = new CountDownLatch(1);
@@ -71,6 +72,11 @@ final class McpLoopbackTest {
                 return jobs.start(id, "shell", Json.obj().put("command", request.command), () -> shellExecute(request));
             }
             public Json operationStatus(String id) { return jobs.status(id); }
+            public Json terminalOpen(String id, int columns, int rows) { return terminals.open(id, columns, rows); }
+            public Json terminalRead(String id, long offset) { return terminals.read(id, offset); }
+            public Json terminalInput(String id, long sequence, String hex) { return terminals.input(id, sequence, hex); }
+            public Json terminalResize(String id, int columns, int rows) { return terminals.resize(id, columns, rows); }
+            public Json terminalClose(String id) { return terminals.close(id); }
             @Override
             public Json shellExecute(ShellRequest request) {
                 shellCalls[0]++;
@@ -145,6 +151,18 @@ final class McpLoopbackTest {
             }
             expect(true, tools[1].contains("station_shell_exec"));
             expect(true, tools[1].contains("station_shell_status"));
+            for (String operation : new String[] {"open", "read", "input", "resize", "close"}) {
+                expect(true, tools[1].contains("station_terminal_" + operation));
+            }
+            String terminalId = "d".repeat(32);
+            expect(true, call(http.port(), "station_terminal_read", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("lost"));
+            expect(true, Json.parse(call(http.port(), "station_terminal_open", "{\"sessionId\":\"" + terminalId + "\",\"columns\":0}")[1]).get("result").get("isError").boolValue());
+            expect(true, jobs.status(terminalId).get("state").string().equals("missing"));
+            expect(true, call(http.port(), "station_terminal_open", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("terminal"));
+            for (int i = 0; i < 200 && !jobs.status(terminalId).get("state").string().equals("completed"); i++) { Thread.sleep(5); }
+            expect(true, call(http.port(), "station_terminal_input", "{\"sessionId\":\"" + terminalId + "\",\"sequence\":0,\"hex\":\"03\"}")[1].contains("running"));
+            expect(true, call(http.port(), "station_terminal_resize", "{\"sessionId\":\"" + terminalId + "\",\"columns\":100,\"rows\":30}")[1].contains("running"));
+            expect(true, call(http.port(), "station_terminal_close", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("closed"));
             expect(true, tools[1].contains("destructiveHint"));
             expect(true, call(http.port(), "station_controls_status", "{}")[1].contains("verified"));
             expect(true, call(http.port(), "station_torch", "{\"on\":true}")[1].contains("true"));

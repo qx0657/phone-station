@@ -32,12 +32,18 @@ final class StationBridge implements StationHost {
     private static final String OPEN_TAG = "open";
 
     private static OperationJobs operationJobs;
+    private static TerminalJobs terminalJobs;
     private static synchronized OperationJobs jobs(Context context) {
         if (operationJobs == null) { operationJobs = new OperationJobs(context.getFilesDir().toPath().resolve("operation-jobs")); }
         return operationJobs;
     }
     static synchronized void closeJobs() {
         if (operationJobs != null) { operationJobs.close(); operationJobs = null; }
+        ShizukuTerminal.close(); terminalJobs = null;
+    }
+    private static synchronized TerminalJobs terminals(Context context) {
+        if (terminalJobs == null) { terminalJobs = new TerminalJobs(jobs(context), (request, start) -> ShizukuTerminal.call(context, request, start)); }
+        return terminalJobs;
     }
     private final Context context;
     private final FileOps files;
@@ -57,10 +63,21 @@ final class StationBridge implements StationHost {
         return jobs(context).start(id, "capture", Json.obj().put("requestId", requestId), () -> screenCapture(requestId));
     }
     @Override public Json operationStatus(String id) { return jobs(context).status(id); }
+    @Override public Json terminalOpen(String id, int columns, int rows) {
+        requireVerifiedModel(); return terminals(context).open(id, columns, rows);
+    }
+    @Override public Json terminalRead(String id, long offset) { return terminals(context).read(id, offset); }
+    @Override public Json terminalInput(String id, long sequence, String hex) {
+        requireVerifiedModel(); return terminals(context).input(id, sequence, hex);
+    }
+    @Override public Json terminalResize(String id, int columns, int rows) {
+        requireVerifiedModel(); return terminals(context).resize(id, columns, rows);
+    }
+    @Override public Json terminalClose(String id) { return terminals(context).close(id); }
 
     @Override
     public Json shellStatus() {
-        return ShizukuShell.status(context);
+        return ShizukuShell.status(context).put("terminalSupported", true).put("terminalProtocol", 1);
     }
 
     @Override

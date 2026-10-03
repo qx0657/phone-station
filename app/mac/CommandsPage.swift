@@ -151,7 +151,7 @@ struct CommandsPage: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("在终端中打开 shell")
+                    Text(station.commands.shellTitle)
                     Text(station.commands.shellDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)

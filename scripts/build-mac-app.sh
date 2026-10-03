@@ -118,12 +118,12 @@ trap 'rm -rf "$STAGING"' EXIT INT TERM
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES/scripts" "$RESOURCES/lib"
 cp "$ROOT/app/mac/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/README.md" "$RESOURCES/README.md"
-for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh install-apk.sh; do
+for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh terminal.sh install-apk.sh; do
   cp "$ROOT/scripts/$name" "$RESOURCES/scripts/$name"
 done
 cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"
 cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/lib/torch_beat.py" "$RESOURCES/lib/"
-cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
+cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/remote_terminal.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
 cp "$ROOT/build/.phone-station/phone-relay-gateway" "$RESOURCES/lib/phone-relay-gateway"
 cp "$ROOT/build/.phone-station/phone-relay-keychain" "$RESOURCES/lib/phone-relay-keychain"
 chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain"
