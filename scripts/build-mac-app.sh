@@ -17,6 +17,11 @@ fi
 
 SWIFTC=$(xcrun --find swiftc)
 SDK=$(xcrun --show-sdk-path)
+sdk_version=$(xcrun --show-sdk-version)
+if (( ${sdk_version%%.*} < 26 )); then
+  print -u2 -- "Mac App 构建需要 macOS 26 或更新 SDK；请用 DEVELOPER_DIR 选择兼容的 Xcode/Command Line Tools。"
+  exit 1
+fi
 TARGET="$(uname -m)-apple-macosx13.0"
 mkdir -p "$ROOT/build/.phone-station"
 GO=$(command -v go || true)

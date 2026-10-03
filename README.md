@@ -33,7 +33,7 @@ cd phone-station
 
 ### 构建
 
-本机构建需要 Command Line Tools、Go 1.23 或更新版、Python 3、OpenJDK 17 或更新版，以及 Android SDK 的 `platforms/android-35` 和 build-tools。Android 的 SDK 与签名准备见 [docs/adb-keep.md](docs/adb-keep.md#构建)。构建会运行两端测试并生成随包 APK，不安装到手机。
+本机构建需要带 macOS 26 或更新 SDK 的 Xcode / Command Line Tools、Go 1.23 或更新版、Python 3、OpenJDK 17 或更新版，以及 Android SDK 的 `platforms/android-35` 和 build-tools。App 运行目标仍为 macOS 13，新系统外观由运行时可用性判断。Android 的 SDK 与签名准备见 [docs/adb-keep.md](docs/adb-keep.md#构建)。构建会运行两端测试并生成随包 APK，不安装到手机。
 
 ```bash
 ./scripts/build-mac-app.sh

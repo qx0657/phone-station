@@ -1,6 +1,6 @@
 # 本机回归与验证范围
 
-运行 `./scripts/check.sh`。依赖 Python 3.10+、zsh、Go 1.23+、JDK 17+ 和 macOS Command Line Tools。允许通过 `JAVA_HOME` 指定 JDK；作者机器上未指定时使用已有的 Homebrew OpenJDK。`--core` 明确跳过 Swift，其余依赖仍需要。不自动安装工具。
+运行 `./scripts/check.sh`。依赖 Python 3.10+、zsh、Go 1.23+、JDK 17+，完整 Mac 检查还需要 macOS 26 或更新 SDK。可通过 `DEVELOPER_DIR` 选择兼容的 Xcode / Command Line Tools，入口先核对 SDK；编译目标仍是 macOS 13，macOS 26 API 保留运行时可用性判断。CI 从运行器已安装的 Xcode 中选择兼容 SDK，不依赖默认旧版。允许通过 `JAVA_HOME` 指定 JDK；作者机器上未指定时使用已有的 Homebrew OpenJDK。`--core` 明确跳过 Swift，其余依赖仍需要。不自动安装工具。
 
 检查过程使用临时目录，包含：
 

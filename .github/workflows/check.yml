@@ -31,6 +31,25 @@ jobs:
         with:
           go-version-file: lib/remote-gateway/go.mod
           cache: false
+      - name: Select macOS 26 or newer SDK
+        run: |
+          python3 - <<'PY'
+          import os, plistlib
+          from pathlib import Path
+          choices = []
+          for app in Path('/Applications').glob('Xcode*.app'):
+              settings = app / 'Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/SDKSettings.plist'
+              if settings.is_file():
+                  version = tuple(int(part) for part in plistlib.loads(settings.read_bytes())['Version'].split('.'))
+                  if version[0] >= 26:
+                      choices.append((version, str(app.resolve() / 'Contents/Developer')))
+          if not choices:
+              raise SystemExit('Full Mac checks require a macOS 26 or newer SDK')
+          version, developer = max(choices)
+          with Path(os.environ['GITHUB_ENV']).open('a') as stream:
+              stream.write('DEVELOPER_DIR=' + developer + '\n')
+          print('Selected SDK', version, developer)
+          PY
       - run: ./scripts/check.sh
 
   relay-linux:

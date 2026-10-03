@@ -66,6 +66,10 @@ def main():
     for tool in ("zsh", "go", "javac", "java", "keytool") + (() if args.core else ("xcrun",)):
         if not shutil.which(tool):
             parser.error(f"缺少 {tool}，请按 README 的本机检查说明安装")
+    if not args.core:
+        sdk_version = subprocess.check_output(["xcrun", "--show-sdk-version"], text=True).strip()
+        if int(sdk_version.split(".")[0]) < 26:
+            parser.error("完整 Mac 检查需要 macOS 26 或更新 SDK；用 DEVELOPER_DIR 选择兼容的 Xcode/Command Line Tools，或用 --core 仅验证跨平台部分")
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="phone-station-check-") as temp:
         work = Path(temp)
