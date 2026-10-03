@@ -6,8 +6,8 @@
 
 | 组件 | 当前源码目标 | 状态与证据 |
 |---|---|---|
-| Android | 61 | 远程 PTY 源码与本机回归通过，正式 APK 构建、安装与真机验收待完成；当前手机仍是 60 |
-| Mac / 本机网关 | 0.1.0 (22) | 远程终端入口与全量源码编译通过，正式 App 构建、安装待完成；当前安装仍是 21 |
+| Android | 61 | 已远程保留数据安装，APK 校验、后台服务自动恢复、实际 MCP 61 与远程 PTY 真机验收通过 |
+| Mac / 本机网关 | 0.1.0 (22) | 已安装完整 App，整包清单与签名核对通过，实际安装网关的两通道与终端恢复验收通过 |
 | 公网中继 | 2 / durable-epochs-v1 | 已部署并启用持久回执，TLS、角色隔离与只读 MCP 验收通过 |
 
 本轮最终构建摘要和提交编号见下方验收记录。历史 Android 59 / Mac 17 的安装及旧中继上线事实见 [历史验证](history/README.md)，不能用来声明本轮版本已部署。
@@ -79,3 +79,21 @@ APK 和中继回执使用文件 SHA-256；Mac 回执列出整个 App 内每个�
 Mac 安装包从干净提交 `387e8f3502719f1e6dc3a409c69cf920d598a167` 构建，整包 SHA-256 为 `0341853cd6decdda031fd7ed49a0290c9f1f161b38404f6c162dab414cfb8e8c`。已退出旧 App 与本机网关、保留 Mac 20 完整备份，再替换并启动 Mac 21；安装目录整包摘要与构建清单相同，签名核对通过。实际网关进程使用 `/Applications/手机工位.app/Contents/Resources/phone-station/lib/phone-relay-gateway`，本地与远程均已确认在线。安装后通过该网关再次完成上述两个远程只读命令。原配对与凭据沿用，没有更新手机 Android 60 或公网中继 2。构建清单仍为 `deployed: false`，独立安装回执 `build/.phone-station/mac-21-deployment.json` 为 `deployed: true` 并记录连接验收。
 
 首次云端检查在已有的 `McpHttpTest` 慢请求用例触发 Broken pipe：服务器按绝对期限关闭连接后，客户端仍可能继续写入。后续提交 `187ce1978d8d2969395253ae76be47ba925000de` 只修正该回归测试，允许写端断开并继续严格验证实际 HTTP 408 与 1500 毫秒上限，未改变 Android 运行逻辑。该用例连续运行 12 次、统一本机检查及 Android 打包通过；[修正后的 Mac 与 Linux CI](https://github.com/qx0657/phone-station/actions/runs/37136601098) 均通过。
+
+
+## Mac 22 远程交互终端
+
+2026-10-04：Mac 22 和 Android 61 增加经现有 MCP 中继使用的 Shizuku PTY。只有远程连接时，Mac「adb 命令」页可在系统终端中打开远程 shell；本地 adb 在线时继续优先本地终端。远程会话保留目录和环境，支持 Ctrl-C、持续输出、UTF-8、方向键编辑和窗口尺寸同步。短暂断线或 Mac 客户端退出后按原 sessionId 恢复；输入应答丢失时只查询原输入序号，不重发。会话 60 秒无人读取或达到 1 小时时清理前台和后台进程，手机应用或 Shizuku 重启后不重建原 shell。
+
+统一本机检查通过：59 项 Python 测试、29 个 Java 测试程序、三个 Go 模块 race、Android/arm64 交叉编译、真实中继 TLS 联合合约、13 个 Swift 测试及 Mac 全量源码编译。完整 APK 与 App 打包通过，[最终代码的 Mac 与 Linux CI](https://github.com/qx0657/phone-station/actions/runs/37140717519) 均通过；Linux 另执行真实 PTY 的目录、Ctrl-C 和尺寸回归。云端曾发现服务关闭会覆盖尚留在活跃列表中的已过期回执；已修正为只将 queued/running 标记未知，确定性回归能捕获原实现，修正后该测试连续运行 30 次通过。
+
+两端最终产物均来自干净提交 `8b6f407c8ccccb003530f9421cbeb8be520fbe3b`，构建清单 `dirtyWorkingTree: false`。手机安装任务 `62fec1a81a31495aa301c2409653af38` 保留原数据，只恢复后台服务，未打开手机主页。首次电脑等待未确认；安装助手已有成功退出码，随后按原编号经远程查询得到 `installed`、`verified: true`、`completed: true`，没有重新安装该任务。服务记录确认进程更换、MCP 前台服务及相同 PID 的本次任务标记；最终 Mac 网关替换并启动后，本地与远程 MCP 均实际返回 61，两通道均在线。公网中继 2 保留原程序与持久回执，本轮没有停启公网服务。
+
+| 实际安装产物 | SHA-256 | 独立部署回执 |
+|---|---|---|
+| Android 61 APK（与最终 Mac 随包 APK 相同） | `b95a4fa6f222ebcb49c71c3c41736081cbfcdfbd229296945f298bbc48e4b02f` | `build/.phone-station/android-61-deployment.json` |
+| Mac 0.1.0 (22) 整包清单 | `0572e8967ed83b59021c6fa9ad787a4d8c60ad2970f77613d196d5cb2ff1e289` | `build/.phone-station/mac-22-deployment.json` |
+
+Mac 安装保留旧 App 的完整备份，核对安装目录整包摘要、深层严格签名，以及实际 App 和网关均从 `/Applications/手机工位.app/` 运行。构建过程同时修正钥匙串助手的程序身份：旧输出名含 PID，源码未改也会改变模块名和临时签名。现在按源码、目标架构和二进制摘要复用未变化的已授权助手，新编译使用固定模块名与文件名；真实编译回归验证两个不同目录的产物摘要一致。最终包保留原已授权助手的相同字节和签名，沿用配对与凭据，两通道恢复已核实。
+
+PGT-AN20 / Android 15 的实际远程验收确认 PTY、目录与环境保留、Ctrl-C 中断后 shell 继续运行、尺寸 110×37、中文输出、方向键编辑、持续输出及原会话读取。注入输入应答丢失后只查询原序号，命令仅执行一次。断读 64 秒后原会话为 expired，shell 与已记录的后台 sleep 子进程均已不存在。已安装 Mac 的随包终端客户端被强杀后，以同一编号恢复并核对原目录和环境；Ctrl-] 关闭成功，正常关闭后本机 TTY 模式恢复。原生 Android 提示符来自系统 mksh 配置，真机验收按实际提示符判断，不依赖自定义 PS1。
