@@ -6,11 +6,15 @@
 
 | 文档 | 对应 | 这篇里有什么 |
 | --- | --- | --- |
-| [validation.md](validation.md) | `scripts/check.sh`、CI | 统一本机回归、依赖、Android 打包与真机验证的区别，以及下一轮设计检查的剩余边界 |
+| [architecture.md](architecture.md) | 三端系统与源码 | 组件关系、能力矩阵、身份边界及源码唯一归属 |
+| [troubleshooting.md](troubleshooting.md) | 状态与任务恢复 | 认证、通道、Shizuku、结果未知、安装恢复和中继存储的排障入口 |
+| [releases.md](releases.md) | 三端发布与部署 | 版本、提交、产物摘要、独立完成层次、升级顺序与安全回滚 |
+| [history/](history/README.md) | 历史证据 | 日期与版本限定的测试、界面、安装和部署记录 |
+| [validation.md](validation.md) | `scripts/check.sh`、CI | 统一本机回归、依赖、Android 打包与真机验证的区别，以及三端联合检查与剩余实机边界 |
 | [mac-app.md](mac-app.md) | `scripts/build-mac-app.sh` | 菜单栏 App 的构建、脚本打包、面板上的亮屏和闪光灯，以及录屏、跟随声音的结束方式。图标不在菜单栏上时，看 Hidden Bar 记下的位置，以及控制中心是否把它算进已禁用的 App |
 | [mcp.md](mcp.md) | `scripts/mcp.sh` | 手机工位 MCP、Mac 统一网关、可配置远程中继、两端配置界面、鉴权与路径边界，以及 PGT-AN20 上读到和读不到的地方 |
 | [mcp-clients.md](mcp-clients.md) | `mcp.sh clients` | 独立令牌、文件读写与 shell 权限、撤销和隔离边界 |
-| [relay-contract.md](relay-contract.md) | `scripts/check-relay.sh` | 公网中继角色、操作去重、应答丢失与重启持久化的隔离验收 |
+| [relay-contract.md](relay-contract.md) | `scripts/check-relay.sh` | 共用协议、会话编号、持久回执、仓库内联合检查与公网隔离验收 |
 | [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku shell、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
 | [remote-controls.md](remote-controls.md) | Mac 首页远程截屏、亮屏和手电筒 | 三项控件的权限与机型判断、截图下载校验及清理、Shizuku 持续持灯、断线后只核实状态 |
 | [clipboard.md](clipboard.md) | 两端「共享剪贴板」页与 `station_clipboard_*` | Shizuku 后台读取、双向交换、回传和冲突处理、重连基线、敏感内容及文字范围 |

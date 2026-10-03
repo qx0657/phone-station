@@ -66,8 +66,11 @@ func runRelayContract(p contractPeer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
 	call := func(route, token string, body any) contractReply { return p.post(ctx, route, token, body) }
-	poll := func() contractReply { return call("/v1/phone/poll", p.phone, map[string]int{"waitMs": 100}) }
-	id := randomHex(16)
+	poll := func() contractReply { return call("/v1/phone/poll", p.phone, map[string]int{"waitMs": 250}) }
+	id, err := relayOperationID(ctx, p.client, p.endpoint, p.desktop)
+	if err != nil {
+		return errors.New("无法取得隔离中继操作会话")
+	}
 	payload := map[string]any{"jsonrpc": "2.0", "id": id, "method": "ping"}
 	request := map[string]any{"operationId": id, "payload": payload}
 	for _, wrong := range []struct {
@@ -146,11 +149,14 @@ func runRelayContract(p contractPeer) error {
 	if conflict.err != nil || conflict.status != 409 || !empty() {
 		return errors.New("同编号不同负载没有拒绝")
 	}
-	conflict = call("/v1/phone/result", p.phone, map[string]any{"operationId": id, "response": map[string]int{"status": 500}})
+	conflict = call("/v1/phone/result", p.phone, map[string]any{"operationId": id, "response": map[string]any{"status": 500, "body": map[string]string{"error": "different"}}})
 	if conflict.err != nil || conflict.status != 409 {
 		return errors.New("冲突结果没有拒绝")
 	}
-	abandonedID := randomHex(16)
+	abandonedID, err := relayOperationID(ctx, p.client, p.endpoint, p.desktop)
+	if err != nil {
+		return errors.New("无法取得隔离中继操作会话")
+	}
 	abandonedContext, abandon := context.WithCancel(ctx)
 	abandoned := p.async(abandonedContext, abandonedID, payload)
 	if !dispatch(abandonedID) {
@@ -227,11 +233,15 @@ func TestRelayContractHarness(t *testing.T) {
 			operations := map[string]*operation{}
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				token := "phone-test-token-000"
-				if r.URL.Path == "/v1/desktop/call" {
+				if r.URL.Path == "/v1/desktop/call" || r.URL.Path == "/v1/desktop/status" {
 					token = "desktop-test-token-000"
 				}
 				if !authorized(r, token) {
 					w.WriteHeader(401)
+					return
+				}
+				if r.URL.Path == "/v1/desktop/status" {
+					writeJSON(w, 200, map[string]any{"online": true})
 					return
 				}
 				var request struct {

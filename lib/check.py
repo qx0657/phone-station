@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 
+from doc_links import check as check_doc_links
+
 ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
     "ReconnectPolicy": ["Reconnect"],
@@ -68,7 +70,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="phone-station-check-") as temp:
         work = Path(temp)
         agent_docs()
-        for name in ("scripts", "lib", ".agents"):
+        print(f"Markdown 文件与锚点 {check_doc_links(ROOT)} 份通过", flush=True)
+        for name in ("scripts", "lib", ".agents", "server"):
             directory = ROOT / name
             for source in sorted(directory.rglob("*.sh")):
                 run(["zsh", "-n", source])
@@ -76,7 +79,8 @@ def main():
                 py_compile.compile(str(source), cfile=str(work / "syntax.pyc"), doraise=True)
         print("文档镜像、Skill 入口与脚本语法通过", flush=True)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "./..."])
-        run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "-tags", "relaycontract", "-run", "^TestRelayContractHarness$", "."])
+        run(["go", "-C", ROOT / "server/relay", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "-tags", "relaycontract", "-run", "^(TestRelayContractHarness|TestRepositoryRelayContract)$", "."])
         gateway = work / "phone-relay-gateway"
         run(["go", "-C", ROOT / "lib/remote-gateway", "build", "-o", gateway, "."])
         os.environ["PHONE_STATION_TEST_GATEWAY"] = str(gateway)

@@ -1212,7 +1212,18 @@ func (g *gateway) remoteCall(ctx context.Context, value config, payload []byte) 
 }
 
 func remoteCall(ctx context.Context, value config, payload []byte) (relayResponse, error) {
-	operationID := randomHex(16)
+	token, err := loadRemoteToken(value)
+	if err != nil {
+		return relayResponse{}, err
+	}
+	transport := pinnedTransport(value.RemotePin)
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 4 * time.Minute, Transport: transport, CheckRedirect: rejectRelayRedirect}
+	endpoint := strings.TrimRight(value.RemoteURL, "/")
+	operationID, err := relayOperationID(ctx, client, endpoint, token)
+	if err != nil {
+		return relayResponse{}, err
+	}
 	requestBody, err := json.Marshal(struct {
 		OperationID string          `json:"operationId"`
 		Payload     json.RawMessage `json:"payload"`
@@ -1220,14 +1231,9 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 	if err != nil {
 		return relayResponse{}, err
 	}
-	token, err := loadRemoteToken(value)
+	response, err := postRelayCall(ctx, client, endpoint+"/v1/desktop/call", token, requestBody)
 	if err != nil {
-		return relayResponse{}, err
-	}
-	client := &http.Client{Timeout: 4 * time.Minute, Transport: pinnedTransport(value.RemotePin), CheckRedirect: rejectRelayRedirect}
-	response, err := postRelayCall(ctx, client, strings.TrimRight(value.RemoteURL, "/")+"/v1/desktop/call", token, requestBody)
-	if err != nil {
-		return relayResponse{}, err
+		return relayResponse{}, fmt.Errorf("relay operation %s outcome unknown: %w", operationID, err)
 	}
 	defer response.Body.Close()
 	result, err := readBody(response.Body, maxBody)
@@ -1235,7 +1241,7 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 		return relayResponse{}, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return relayResponse{}, fmt.Errorf("relay returned status %d", response.StatusCode)
+		return relayResponse{}, fmt.Errorf("relay operation %s returned status %d; do not replay", operationID, response.StatusCode)
 	}
 	var wrapped relayResponse
 	if err := json.Unmarshal(result, &wrapped); err != nil || wrapped.Status < 200 || wrapped.Status > 599 {
@@ -1245,6 +1251,44 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 		return relayResponse{}, errors.New("relay response body is empty")
 	}
 	return wrapped, nil
+}
+
+// This authenticated, pinned handshake happens before any operation is submitted.
+// Legacy relays have no epoch; keeping their IDs supports client-first upgrades.
+func relayOperationID(ctx context.Context, client *http.Client, endpoint, token string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/desktop/status", nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := client.Do(request)
+	if err != nil {
+		return "", errors.New("relay handshake failed before submission")
+	}
+	defer response.Body.Close()
+	body, err := readBody(response.Body, 16384)
+	if err != nil || response.StatusCode != 200 {
+		return "", errors.New("relay handshake rejected before submission")
+	}
+	var info struct {
+		Epoch   string `json:"operationEpoch"`
+		Durable bool   `json:"durable"`
+	}
+	body = bytes.TrimSpace(body)
+	if json.Unmarshal(body, &info) != nil || len(body) == 0 || body[0] != '{' {
+		return "", errors.New("invalid relay handshake")
+	}
+	id := randomHex(16)
+	if info.Epoch == "" && !info.Durable {
+		return id, nil
+	}
+	digest, err := hex.DecodeString(info.Epoch)
+	if err != nil || len(digest) != 16 || info.Epoch != strings.ToLower(info.Epoch) || !info.Durable {
+		return "", errors.New("invalid relay operation epoch")
+	}
+	return info.Epoch + "." + id, nil
 }
 
 func postRelayCall(ctx context.Context, client *http.Client, endpoint, token string, requestBody []byte) (*http.Response, error) {
@@ -1258,7 +1302,7 @@ func postRelayCall(ctx context.Context, client *http.Client, endpoint, token str
 		response, err := client.Do(request)
 		if err != nil {
 			// A lost reply may follow a completed side effect. External relay
-			// durability is not established here, so never assume same-ID replay is safe.
+			// durability alone cannot prove whether the phone already executed it.
 			return nil, err
 		}
 		if response.StatusCode != http.StatusTooManyRequests || response.Header.Get("X-Phone-Station-Not-Queued") != "1" {

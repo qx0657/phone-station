@@ -203,7 +203,7 @@ if [[ ${1:-} == pair ]]; then
   SERIAL=$(online_serial "$ADB" </dev/null)
   pair_capability=$("$ADB" -s "$SERIAL" shell am broadcast -f 0x00400000 \
     -n "$PKG/.PhoneRelayControlReceiver" -a "$PKG.PHONE_RELAY" --es action capabilities)
-  if ! print -r -- "$pair_capability" | rg -q 'Broadcast completed: result=2(,|[[:space:]]|$)'; then
+  if ! print -r -- "$pair_capability" | grep -Eq 'Broadcast completed: result=2(,|[[:space:]]|$)'; then
     unset phone_token desktop_token
     print -u2 -- "手机应用尚不支持配置确认，请先安装或更新手机应用，再配对远程通道。"
     exit 1
@@ -212,7 +212,7 @@ if [[ ${1:-} == pair ]]; then
   pair_reply=$(print -r -- "${phone_token:l}" | "$ADB" -s "$SERIAL" shell "$remote_cmd")
   unset phone_token
   remote_flag=$("$ADB" -s "$SERIAL" shell settings get global phonestation_remote | tr -d '\r[:space:]')
-  if [[ $remote_flag != 1 ]] || ! print -r -- "$pair_reply" | rg -q 'Broadcast completed: result=1(,|[[:space:]]|$)'; then
+  if [[ $remote_flag != 1 ]] || ! print -r -- "$pair_reply" | grep -Eq 'Broadcast completed: result=1(,|[[:space:]]|$)'; then
     unset desktop_token
     print -u2 -- "手机没有确认接受配对；请更新手机应用，再检查中继地址、SPKI 指纹和手机令牌。"
     exit 1
@@ -226,7 +226,7 @@ if [[ ${1:-} == pair ]]; then
   unset desktop_token
   "$GATEWAY_BIN" start
   for _ in {1..30}; do
-    if "$GATEWAY_BIN" status | rg -q 'relay=online'; then
+    if "$GATEWAY_BIN" status | grep -Eq 'relay=online'; then
       print -r -- "已配对，远程中继往返正常。手机设置里的「远程通道」已打开。"
       exit 0
     fi
@@ -282,7 +282,7 @@ if [[ ${1:-} == stop ]]; then
     print -u2 -- "停止请求失败或超时；未确认手机已停止，保留本机通道状态。"
     exit 1
   fi
-  if ! print -r -- "$stop_reply" | rg -q 'Broadcast completed: result=1(,|[[:space:]]|$)'; then
+  if ! print -r -- "$stop_reply" | grep -Eq 'Broadcast completed: result=1(,|[[:space:]]|$)'; then
     print -u2 -- "手机没有确认停止请求；旧版应用请先更新。本机通道状态已保留。"
     exit 1
   fi
@@ -296,7 +296,7 @@ if [[ ${1:-} == stop ]]; then
     fi
     # 明确的两个关闭标记，加上实际服务退出；空输出不能冒充成功。
     if [[ $(print -r -- "$flags" | tr -d '\r') == $'0\n0' && $services == *'ACTIVITY MANAGER SERVICES'* ]] \
-      && ! print -r -- "$services" | rg -q 'ServiceRecord.*FileMcpService'; then
+      && ! print -r -- "$services" | grep -Eq 'ServiceRecord.*FileMcpService'; then
       stopped=1
       break
     fi
@@ -323,7 +323,7 @@ fi
 "$GATEWAY_BIN" start
 if ! "$DIR/connect.sh" >/dev/null 2>&1; then
   for _ in {1..30}; do
-    if "$GATEWAY_BIN" status | rg -q '^http://127\.0\.0\.1:18765/mcp$'; then
+    if "$GATEWAY_BIN" status | grep -Eq '^http://127\.0\.0\.1:18765/mcp$'; then
       "$GATEWAY_BIN" credentials
       exit 0
     fi

@@ -200,3 +200,37 @@ func TestRelayRedirectDoesNotResubmit(t *testing.T) {
 		t.Fatal("redirect resubmitted operation")
 	}
 }
+
+func TestRelayHandshakeBeforeDispatchSupportsClientFirstUpgrade(t *testing.T) {
+	for _, tc := range []struct {
+		body      string
+		wantEpoch bool
+		wantError bool
+	}{
+		{`{"online":true}`, false, false},
+		{`{"durable":true,"operationEpoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, true, false},
+		{" \n{\"durable\":true,\"operationEpoch\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}\n", true, false},
+		{`{"durable":true,"operationEpoch":"invalid"}`, false, true},
+		{`{"durable":true}`, false, true},
+		{`null`, false, true},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/desktop/status" || r.Header.Get("Authorization") != "Bearer test" {
+					t.Error("handshake dispatched an operation")
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			id, err := relayOperationID(context.Background(), server.Client(), server.URL, "test")
+			if (err != nil) != tc.wantError || calls != 1 {
+				t.Fatal(id, err, calls)
+			}
+			if err == nil && strings.Contains(id, ".") != tc.wantEpoch {
+				t.Fatal("wrong namespace", id)
+			}
+		})
+	}
+}

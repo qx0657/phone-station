@@ -1,0 +1,9 @@
+# Copy outside the checkout, set mode 0600, and replace every placeholder.
+PHONE_RELAY_LISTEN=0.0.0.0:24443
+PHONE_RELAY_DEVICE_ID=your-device
+# Empty values fail startup; generate two independent values of at least 32 characters.
+PHONE_RELAY_PHONE_TOKEN=
+PHONE_RELAY_DESKTOP_TOKEN=
+PHONE_RELAY_CERT=/etc/phone-station-relay/server.crt
+PHONE_RELAY_KEY=/etc/phone-station-relay/server.key
+PHONE_RELAY_STATE_DIR=/var/lib/phone-station-relay

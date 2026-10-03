@@ -5,7 +5,9 @@ description: 通过手机工位 MCP 操作 Android 普通文件、剪贴板、�
 
 # 手机工位 MCP
 
-工具名和参数以当次 `tools/list` 为准。路径和范围以 `station_file_access_policy` 的返回为准。`docs/mcp.md` 是上次连通时的记录。
+组件与源码归属见 `docs/architecture.md`，故障恢复见 `docs/troubleshooting.md`，版本与部署状态见 `docs/releases.md`。中继源码统一在 `server/relay/`；Mac 20 先握手取得持久会话编号，远程未知结果仍不重放。
+
+工具名和参数以当次 `tools/list` 为准。路径和范围以 `station_file_access_policy` 的返回为准。当前机制见 `docs/mcp.md`，限定日期与版本的连通验证见 `docs/history/mcp.md`。
 
 ## 连接
 

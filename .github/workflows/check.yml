@@ -32,3 +32,17 @@ jobs:
           go-version-file: lib/remote-gateway/go.mod
           cache: false
       - run: ./scripts/check.sh
+
+  relay-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/relay/go.mod
+          cache: false
+      - run: go -C server/relay test -race ./...
+      - run: go -C lib/remote-gateway test -race -tags relaycontract -run '^(TestRelayContractHarness|TestRepositoryRelayContract)$' .

@@ -101,7 +101,7 @@ mode=""
 while (( $# )); do
   case "$1" in
     --job-id)
-      if (( $# < 2 )) || ! print -r -- "$2" | rg -q '^[0-9a-f]{32}$' || (( ${#remote_job_args} )); then
+      if (( $# < 2 )) || ! print -r -- "$2" | grep -Eq '^[0-9a-f]{32}$' || (( ${#remote_job_args} )); then
         print -u2 -- "--job-id 需要唯一的 32 位小写十六进制编号。"
         exit 2
       fi

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ const (
 	phoneFresh         = 45 * time.Second
 	callTimeout        = 3 * time.Minute
 	resultKeep         = 10 * time.Minute
-	maxRemembered      = 1024
+	maxRemembered      = 4096
 	maxCachedResponses = 8
 )
 
@@ -28,20 +29,25 @@ type Config struct {
 	DeviceID     string
 	PhoneToken   string
 	DesktopToken string
+	StateDir     string
 }
 
 type Server struct {
 	config Config
 	device *device
+	store  *diskStore
 }
 
 type device struct {
-	mu         sync.Mutex
-	changed    chan struct{}
-	polling    bool
-	lastSeen   time.Time
-	active     *operation
-	operations map[string]*operation
+	mu             sync.Mutex
+	changed        chan struct{}
+	polling        bool
+	pollGeneration uint64
+	pollCancel     chan struct{}
+	lastSeen       time.Time
+	active         *operation
+	operations     map[string]*operation
+	closed         bool
 }
 
 type operation struct {
@@ -64,6 +70,92 @@ func New(config Config) *Server {
 		config: config,
 		device: &device{changed: make(chan struct{}), operations: make(map[string]*operation)},
 	}
+}
+
+// Open is the production constructor. New is an in-memory test fixture only.
+func Open(config Config) (*Server, error) {
+	if config.PhoneToken == "" || config.DesktopToken == "" || config.PhoneToken == config.DesktopToken {
+		return nil, errors.New("distinct non-empty role tokens are required")
+	}
+	store, err := openStore(config)
+	if err != nil {
+		return nil, err
+	}
+	s := New(config)
+	s.store = store
+	if err = store.rotate(config, time.Now()); err == nil {
+		s.device.operations, err = store.load()
+	}
+	if err == nil {
+		err = s.prune(time.Now(), nil)
+	}
+	if err != nil {
+		store.close()
+		return nil, err
+	}
+	// Bodies without a committed cached receipt and interrupted temp writes are disposable.
+	entries, err := os.ReadDir(store.dir)
+	if err == nil {
+		keep := make(map[string]bool)
+		for _, op := range s.device.operations {
+			if op.response.Body != nil {
+				keep[store.name(op.id)+".body"] = true
+			}
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".pending-") || (strings.HasSuffix(entry.Name(), ".body") && !keep[entry.Name()]) {
+				if err = store.remove(entry.Name()); err != nil {
+					break
+				}
+			}
+		}
+	}
+	if err != nil {
+		store.close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Server) Close() error {
+	s.device.mu.Lock()
+	defer s.device.mu.Unlock()
+	if s.device.closed {
+		return nil
+	}
+	s.device.closed = true
+	for _, op := range s.device.operations {
+		if !op.doneClosed {
+			op.state = "unknown"
+			close(op.done)
+			op.doneClosed = true
+		}
+	}
+	signal(s.device)
+	if s.store != nil {
+		s.store.close()
+	}
+	return nil
+}
+
+func (s *Server) available(w http.ResponseWriter) bool {
+	if s.device.closed || (s.store != nil && s.store.err != nil) {
+		writeError(w, http.StatusServiceUnavailable, "relay storage unavailable; outcome may be unknown")
+		return false
+	}
+	return true
+}
+
+func (s *Server) persist(op *operation) bool {
+	if s.store == nil {
+		return true
+	}
+	if err := s.store.save(op); err != nil {
+		s.store.err = err
+		signal(s.device)
+		return false
+	}
+	return true
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -122,32 +214,72 @@ func (s *Server) authorized(w http.ResponseWriter, r *http.Request, want string)
 }
 
 func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
+	wait := pollWait
+	if r.ContentLength != 0 {
+		var input struct {
+			WaitMS int `json:"waitMs"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.WaitMS != 0 {
+			if input.WaitMS < 250 || input.WaitMS > int(pollWait.Milliseconds()) {
+				writeError(w, http.StatusBadRequest, "poll wait must be between 250 and 25000 milliseconds")
+				return
+			}
+			wait = time.Duration(input.WaitMS) * time.Millisecond
+		}
+	}
 	d := s.device
 	d.mu.Lock()
-	if d.polling {
+	if !s.available(w) {
 		d.mu.Unlock()
-		writeError(w, http.StatusConflict, "a phone poll is already active")
 		return
 	}
+	if d.polling {
+		// Wi-Fi may disappear without delivering a TCP close. Let the same
+		// authenticated phone take over its idle poll on the new network.
+		close(d.pollCancel)
+	}
 	d.polling = true
+	d.pollGeneration++
+	generation := d.pollGeneration
+	replaced := make(chan struct{})
+	d.pollCancel = replaced
 	d.lastSeen = time.Now()
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
-		d.polling = false
+		if d.pollGeneration == generation {
+			d.polling = false
+			d.pollCancel = nil
+		}
 		d.mu.Unlock()
 	}()
 
-	deadline := time.NewTimer(pollWait)
+	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
 	for {
 		d.mu.Lock()
+		if !s.available(w) {
+			d.mu.Unlock()
+			return
+		}
+		if d.pollGeneration != generation {
+			d.mu.Unlock()
+			return
+		}
 		d.lastSeen = time.Now()
 		if op := d.active; op != nil && op.state == "queued" {
 			if time.Since(op.createdAt) > callTimeout {
 				op.state = "expired"
 				op.payload = nil
 				op.completedAt = time.Now()
+				if !s.persist(op) {
+					s.available(w)
+					d.mu.Unlock()
+					return
+				}
 				if !op.doneClosed {
 					close(op.done)
 					op.doneClosed = true
@@ -159,6 +291,11 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			}
 			op.state = "running"
 			op.startedAt = time.Now()
+			if !s.persist(op) {
+				s.available(w)
+				d.mu.Unlock()
+				return
+			}
 			out := pollReply{OperationID: op.id, Payload: op.payload}
 			d.mu.Unlock()
 			writeJSON(w, http.StatusOK, out)
@@ -168,6 +305,11 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			(time.Since(op.startedAt) > callTimeout || (op.probe && time.Since(op.startedAt) > 15*time.Second)) {
 			op.state = "unknown"
 			op.completedAt = time.Now()
+			if !s.persist(op) {
+				s.available(w)
+				d.mu.Unlock()
+				return
+			}
 			op.payload = nil
 			if !op.doneClosed {
 				close(op.done)
@@ -182,10 +324,12 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 		d.mu.Unlock()
 
 		select {
+		case <-replaced:
+			return
 		case <-r.Context().Done():
 			return
 		case <-deadline.C:
-			writeJSON(w, http.StatusOK, pollReply{Idle: true})
+			writeJSON(w, http.StatusOK, map[string]any{"idle": true, "operationId": nil})
 			return
 		case <-changed:
 		}
@@ -206,8 +350,15 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	d := s.device
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if !s.available(w) {
+		return
+	}
 	d.lastSeen = time.Now()
 	op := d.operations[input.OperationID]
+	if len(input.OperationID) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid operation ID")
+		return
+	}
 	if op == nil || d.active != op || op.state != "running" {
 		if op != nil && op.state == "complete" && op.response.Status == input.Response.Status &&
 			op.responseDigest == sha256.Sum256(input.Response.Body) {
@@ -221,21 +372,41 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "operation is not active")
 		return
 	}
-	op.response = responseEnvelope{
+	next := *op
+	next.response = responseEnvelope{
 		Status: input.Response.Status,
 		Body:   append(json.RawMessage(nil), input.Response.Body...),
 	}
-	op.responseDigest = sha256.Sum256(input.Response.Body)
-	op.payload = nil
-	op.state = "complete"
-	op.completedAt = time.Now()
+	next.responseDigest = sha256.Sum256(input.Response.Body)
+	next.payload = nil
+	next.state = "complete"
+	next.completedAt = time.Now()
+	if err := s.prune(time.Now(), &next); err != nil {
+		s.store.err = err
+		signal(s.device)
+		s.available(w)
+		return
+	}
+	if s.store != nil && next.response.Body != nil {
+		if err := s.store.atomic(s.store.name(next.id)+".body", next.response.Body); err != nil {
+			s.store.err = err
+			signal(s.device)
+			s.available(w)
+			return
+		}
+	}
+	if !s.persist(&next) {
+		s.available(w)
+		return
+	}
+	op.response, op.responseDigest = next.response, next.responseDigest
+	op.payload, op.state, op.completedAt = next.payload, next.state, next.completedAt
 	d.active = nil
 	if !op.doneClosed {
 		close(op.done)
 		op.doneClosed = true
 	}
 	signal(d)
-	pruneResponses(d, op)
 	writeJSON(w, http.StatusOK, map[string]string{"state": "complete"})
 }
 
@@ -251,10 +422,15 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 
 	d := s.device
 	d.mu.Lock()
-	prune(d, time.Now())
-	if d.lastSeen.IsZero() || time.Since(d.lastSeen) > phoneFresh {
+	if !s.available(w) {
 		d.mu.Unlock()
-		writeError(w, http.StatusServiceUnavailable, "phone is offline")
+		return
+	}
+	if err := s.prune(time.Now(), nil); err != nil {
+		s.store.err = err
+		signal(s.device)
+		s.available(w)
+		d.mu.Unlock()
 		return
 	}
 	digest := sha256.Sum256(input.Payload)
@@ -274,18 +450,35 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, response)
 			return
 		}
+		if previous.state == "unknown" || previous.state == "expired" {
+			d.mu.Unlock()
+			writeError(w, http.StatusGone, "operation is expired or its outcome is unknown; do not execute again")
+			return
+		}
 		done := previous.done
 		d.mu.Unlock()
 		s.await(w, r, previous, done)
 		return
 	}
+	if s.store != nil && !s.store.currentID(input.OperationID) {
+		d.mu.Unlock()
+		writeError(w, http.StatusGone, "operation epoch expired; do not replay this ID")
+		return
+	}
+	if d.lastSeen.IsZero() || time.Since(d.lastSeen) > phoneFresh {
+		d.mu.Unlock()
+		writeError(w, http.StatusServiceUnavailable, "phone is offline")
+		return
+	}
 	if d.active != nil {
 		d.mu.Unlock()
+		w.Header().Set("X-Phone-Station-Not-Queued", "1")
 		writeError(w, http.StatusTooManyRequests, "another operation is still in progress")
 		return
 	}
 	if len(d.operations) >= maxRemembered {
 		d.mu.Unlock()
+		w.Header().Set("X-Phone-Station-Not-Queued", "1")
 		writeError(w, http.StatusTooManyRequests, "operation history is full; wait for old entries to expire")
 		return
 	}
@@ -298,6 +491,11 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 	}
 	if json.Unmarshal(input.Payload, &method) == nil {
 		op.probe = method.Method == "ping"
+	}
+	if !s.persist(op) {
+		s.available(w)
+		d.mu.Unlock()
+		return
 	}
 	d.operations[op.id] = op
 	d.active = op
@@ -341,6 +539,10 @@ func (s *Server) await(w http.ResponseWriter, r *http.Request, op *operation, do
 			}
 			op.payload = nil
 			op.completedAt = time.Now()
+			if !s.persist(op) {
+				s.device.mu.Unlock()
+				return
+			}
 			s.device.active = nil
 			if !op.doneClosed {
 				close(op.done)
@@ -360,6 +562,11 @@ func (s *Server) await(w http.ResponseWriter, r *http.Request, op *operation, do
 			}
 			op.payload = nil
 			op.completedAt = time.Now()
+			if !s.persist(op) {
+				s.available(w)
+				s.device.mu.Unlock()
+				return
+			}
 			s.device.active = nil
 			if !op.doneClosed {
 				close(op.done)
@@ -378,6 +585,30 @@ func (s *Server) await(w http.ResponseWriter, r *http.Request, op *operation, do
 func (s *Server) status(w http.ResponseWriter) {
 	d := s.device
 	d.mu.Lock()
+	if !s.available(w) {
+		d.mu.Unlock()
+		return
+	}
+	epoch := ""
+	if s.store != nil {
+		if d.active == nil {
+			if err := s.store.rotate(s.config, time.Now()); err != nil {
+				s.store.err = err
+				signal(s.device)
+				s.available(w)
+				d.mu.Unlock()
+				return
+			}
+		}
+		if err := s.prune(time.Now(), nil); err != nil {
+			s.store.err = err
+			signal(s.device)
+			s.available(w)
+			d.mu.Unlock()
+			return
+		}
+		epoch = s.store.epoch
+	}
 	online := !d.lastSeen.IsZero() && time.Since(d.lastSeen) <= phoneFresh
 	lastSeen := d.lastSeen
 	d.mu.Unlock()
@@ -385,13 +616,17 @@ func (s *Server) status(w http.ResponseWriter) {
 	if !lastSeen.IsZero() {
 		seen = &lastSeen
 	}
-	writeJSON(w, http.StatusOK, statusReply{DeviceID: s.config.DeviceID, Online: online, LastSeen: seen})
+	writeJSON(w, http.StatusOK, statusReply{DeviceID: s.config.DeviceID, Online: online, LastSeen: seen, Version: "2", OperationEpoch: epoch, Durable: s.store != nil})
 }
 
 func (s *Server) operationStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	d := s.device
 	d.mu.Lock()
+	if !s.available(w) {
+		d.mu.Unlock()
+		return
+	}
 	op := d.operations[id]
 	if op == nil {
 		d.mu.Unlock()
@@ -423,33 +658,69 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
-func prune(d *device, now time.Time) {
+func (s *Server) prune(now time.Time, incoming *operation) error {
+	d := s.device
 	for id, op := range d.operations {
-		if op != d.active && (op.state == "complete" || op.state == "expired" || op.state == "unknown") &&
-			now.Sub(op.completedAt) > resultKeep {
+		if op == d.active || op.completedAt.IsZero() || now.Sub(op.completedAt) <= resultKeep {
+			continue
+		}
+		if s.store == nil {
+			delete(d.operations, id)
+			continue
+		}
+		if op.response.Body != nil {
+			next := *op
+			next.response.Body = nil
+			if err := s.store.save(&next); err != nil {
+				return err
+			}
+			if err := s.store.remove(s.store.name(id) + ".body"); err != nil {
+				return err
+			}
+			op.response.Body = nil
+		}
+		if !s.store.currentID(id) {
+			if err := s.store.remove(s.store.name(id) + ".json"); err != nil {
+				return err
+			}
 			delete(d.operations, id)
 		}
 	}
-}
-
-func pruneResponses(d *device, newest *operation) {
 	completed := make([]*operation, 0, len(d.operations))
+	count, total := 0, 0
+	if incoming != nil && incoming.response.Body != nil {
+		count++
+		total += len(incoming.response.Body)
+	}
 	for _, op := range d.operations {
 		if op.state == "complete" && op.response.Body != nil {
 			completed = append(completed, op)
+			count++
+			total += len(op.response.Body)
 		}
-	}
-	if len(completed) <= maxCachedResponses {
-		return
 	}
 	sort.Slice(completed, func(i, j int) bool {
-		return completed[i].completedAt.After(completed[j].completedAt)
+		return completed[i].completedAt.Before(completed[j].completedAt)
 	})
-	for _, op := range completed[maxCachedResponses:] {
-		if op != newest {
-			op.response.Body = nil
+	for _, op := range completed {
+		if count <= maxCachedResponses && total <= maxCachedBytes && now.Sub(op.completedAt) <= resultKeep {
+			continue
 		}
+		if s.store != nil {
+			next := *op
+			next.response.Body = nil
+			if err := s.store.save(&next); err != nil {
+				return err
+			}
+			if err := s.store.remove(s.store.name(op.id) + ".body"); err != nil {
+				return err
+			}
+		}
+		count--
+		total -= len(op.response.Body)
+		op.response.Body = nil
 	}
+	return nil
 }
 
 func cloneResponse(response responseEnvelope) *responseEnvelope {
@@ -507,9 +778,12 @@ type responseEnvelope struct {
 }
 
 type statusReply struct {
-	DeviceID string     `json:"deviceId"`
-	Online   bool       `json:"online"`
-	LastSeen *time.Time `json:"lastSeen,omitempty"`
+	DeviceID       string     `json:"deviceId"`
+	Online         bool       `json:"online"`
+	LastSeen       *time.Time `json:"lastSeen,omitempty"`
+	Version        string     `json:"version"`
+	OperationEpoch string     `json:"operationEpoch,omitempty"`
+	Durable        bool       `json:"durable"`
 }
 
 type operationReply struct {

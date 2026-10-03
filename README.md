@@ -20,7 +20,7 @@
 | [连接](#连接) | 配对、接上、断开 |
 | [给 AI 的步骤](#给-ai-的步骤) | 这个仓库里给 AI 的步骤 |
 
-这篇是用法。命令里看不出来的做法在 [docs/](docs/README.md)。改这个仓库的 AI 读 `AGENTS.md`（与 `CLAUDE.md` 同步）。许可是 [MIT](LICENSE)。
+这篇是用法。完整组件与源码归属见 [系统架构](docs/architecture.md)，异常处理见 [故障排查](docs/troubleshooting.md)，三端版本、部署与回滚见 [发布记录](docs/releases.md)。命令里看不出来的做法在 [docs/](docs/README.md)。改这个仓库的 AI 读 `AGENTS.md`（与 `CLAUDE.md` 同步）。许可是 [MIT](LICENSE)。
 
 ```bash
 git clone https://github.com/qx0657/phone-station.git
@@ -222,7 +222,7 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 
 Mac 19 起，`./scripts/mcp.sh clients create '资料读取' status,files.read` 可生成独立客户端令牌，按需授予状态、文件读写或 shell 权限；`clients list` 查看，`clients revoke <编号>` 撤销。创建时只显示一次令牌，详细范围见 [客户端权限](docs/mcp-clients.md)。
 
-需要通过本地或远程通道执行 shell 命令时，在手机上启动 Shizuku 13 或更新版，并在「手机工位 → 权限 → Shizuku」允许使用。`station_shell_status` 检查是否可用，`station_shell_exec` 执行命令并返回输出、退出码和是否超时。默认 10 秒，最长 60 秒，没有交互终端，也不保留后台任务。非 root 手机重启后需要重新启动 Shizuku，之前的应用授权仍保留。参数和权限边界见 [MCP 文档](docs/mcp.md#shizuku-shell)。
+需要通过本地或远程通道执行 shell 命令时，在手机上启动 Shizuku 13 或更新版，并在「手机工位 → 权限 → Shizuku」允许使用。`station_shell_status` 检查是否可用，新客户端用 `station_shell_start` 提交有编号的后台任务，再用 `station_operation_status` 查询结果；`station_shell_exec` 保留给旧客户端。默认执行 10 秒，最长 60 秒，没有交互终端，普通子进程不保证长期存活。提交应答丢失后只查询原编号，不重新执行。非 root 手机重启后需要重新启动 Shizuku，之前的应用授权仍保留。参数和权限边界见 [MCP 文档](docs/mcp.md#shizuku-shell)。
 
 远程通道默认未配置，没有内置服务器地址。手机「远程中继设置」填写 HTTPS 地址、SPKI SHA-256 证书指纹和手机令牌；Mac「MCP 服务 → 远程中继」填写相同地址、指纹和另一枚电脑令牌，点「保存 Mac 配置」。两端均可独立配置，无需 adb。Mac 勾选「同时配置手机」后，可通过已连接的 adb 一次保存两端资料。地址支持域名或 IP、可选端口和路径，例如 `https://relay.example.com/station`。中继需要实现手机工位的转发协议，见 [docs/mcp.md](docs/mcp.md)；任意 MCP 服务器不能直接代替它。已有配对在更新后保留。
 
@@ -312,10 +312,10 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 | 命令 | 用在 | 没有时 |
 | --- | --- | --- |
 | `adb` | 本地连接、配对、屏幕、闪光灯及首次安装 | `~/Library/Android/sdk/platform-tools/adb`，或加入 `PATH` |
-| `scrcpy` | 投屏、录屏、截屏 | `brew install scrcpy`。脚本不会自己装 |
+| `scrcpy` | 投屏、录屏；本地截屏使用 adb | `brew install scrcpy`。脚本不会自己装 |
 | `ffmpeg` | `notify.sh --shell` | `brew install ffmpeg`。默认铃声由手机上的应用播放，用不到它 |
 | `python3` | 发现设备、配对、MCP 通知、远程 shell/安装、闪光灯跟随声音 | 系统自带 |
-| `node` | `pair-qr.sh` | 第一次运行时安装到 `lib/node_modules`。这个目录不入库 |
+| `node`、`npm` | `pair-qr.sh` | 先准备 Node.js 与 npm；首次运行自动安装的是二维码依赖，放在 `lib/node_modules`，这个目录不入库 |
 | `swiftc` | Mac App 构建、`torch.sh beat` | 由 Command Line Tools 提供；跟随声音没有程序或源码较新时会自己编译 |
 | `go` | Mac App 与 MCP 网关构建 | Go 1.23 或更新版；已打包 App 运行时不用它 |
 | `javac`、Android SDK | Android APK 构建，包括 Mac App 的随包 APK | OpenJDK 17 或更新版、Android 35 平台与 build-tools，见 [构建说明](docs/adb-keep.md#构建) |
@@ -382,9 +382,19 @@ PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，�
 
 无线调试页面上的 `172.19.0.1` 不要拿来 `adb pair` 或 `adb connect`。那是 VPN 地址。这台 Mac 上的 Clash 会把 `172.19.0.0/16` 送进隧道，握手报 `protocol fault`。用局域网地址，例如 `192.168.0.103`，并且路由不能走 `utun`。
 
+## 公网中继源码与发布
+
+公网中继现在与两端客户端一起维护，源码在 [server/relay](server/relay/README.md)，本机网关仍在 `lib/remote-gateway/`。通用配置与 systemd 模板随源码发布，真实主机资料、凭据和私钥留在部署侧。
+
+```sh
+./scripts/build-relay.sh
+```
+
+该入口运行服务端回归并生成 Linux/amd64 程序和发布回执，不部署。Mac 20 支持中继 2 的持久会话编号；先升级 Mac，再升级中继，保留原配对。协议、隔离验收与回滚限制见 [中继合约](docs/relay-contract.md) 和 [发布记录](docs/releases.md)。
+
 ## 本机检查
 
-开发时运行 `./scripts/check.sh`，统一检查文档镜像、项目 Skill 入口、脚本语法、Python/Java/Go race/Swift 测试和 Mac 全量源码编译。依赖 Python 3.10+、zsh、Go 1.23+、JDK 17+ 和 macOS Command Line Tools；无 Android SDK 也可运行。其他平台用 `./scripts/check.sh --core`，明确排除 Swift。
+开发时运行 `./scripts/check.sh`，统一检查文档镜像、项目 Skill 入口、脚本语法、Python/Java/Go race/Swift 测试、真实中继 TLS 联合合约和 Mac 全量源码编译。依赖 Python 3.10+、zsh、Go 1.23+、JDK 17+ 和 macOS Command Line Tools；无 Android SDK 也可运行。其他平台用 `./scripts/check.sh --core`，明确排除 Swift。
 
 检查只使用临时产物与测试数据，不连接手机、不启动真实网关、不读发布签名。Android 资源和 APK 打包仍用 `lib/android/build.sh`；可安装 Mac 包用 `scripts/build-mac-app.sh`。CI 使用同一检查入口，范围及尚未覆盖的设计边界见 [验证说明](docs/validation.md)。
 
