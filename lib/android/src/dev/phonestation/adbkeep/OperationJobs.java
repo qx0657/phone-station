@@ -153,6 +153,8 @@ final class OperationJobs implements AutoCloseable {
     @Override public synchronized void close() {
         closed = true; worker.shutdownNow();
         for (Json receipt : active.values()) {
+            String state = receipt.get("state").string();
+            if (!state.equals("queued") && !state.equals("running")) { continue; }
             receipt.put("state", "result_unknown").put("error", "服务停止，结果未确认；不要重做");
             try { save(receipt); } catch (FileFailure ignored) {}
         }

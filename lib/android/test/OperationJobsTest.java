@@ -47,7 +47,34 @@ final class OperationJobsTest {
         expect(Files.getPosixFilePermissions(root.resolve(id + ".json")).equals(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));
         expect(!Files.readString(root.resolve(id + ".json")).contains("command"));
         restored.close();
+        closePreservesExpiredReceipt();
         System.out.println("OperationJobsTest ok");
+    }
+    private static void closePreservesExpiredReceipt() throws Exception {
+        Path root = Files.createTempDirectory("operation-jobs-close");
+        AtomicLong clock = new AtomicLong(System.currentTimeMillis());
+        OperationJobs jobs = new OperationJobs(root, clock::get);
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        String running = "c".repeat(32), expired = "d".repeat(32);
+        Json input = Json.obj().put("command", "test");
+        try {
+            jobs.start(running, "shell", input, () -> {
+                entered.countDown(); release.await(); return Json.obj();
+            });
+            expect(entered.await(5, TimeUnit.SECONDS));
+            // Keep the worker from removing the expired entry before close.
+            synchronized (jobs) {
+                jobs.start(expired, "shell", input, () -> { throw new AssertionError("expired mutation ran"); });
+                clock.addAndGet(OperationJobs.QUEUE_MS + 1);
+                expect(jobs.status(expired).get("state").string().equals("expired"));
+                jobs.close();
+            }
+            OperationJobs restored = new OperationJobs(root);
+            try {
+                expect(restored.status(expired).get("state").string().equals("expired"));
+                expect(restored.status(running).get("state").string().equals("result_unknown"));
+            } finally { restored.close(); }
+        } finally { release.countDown(); jobs.close(); }
     }
     private static void expect(boolean value) { if (!value) { throw new AssertionError(); } }
 }
