@@ -42,8 +42,16 @@ APK 和中继回执使用文件 SHA-256；Mac 回执列出整个 App 内每个�
 
 ## 验收记录
 
-2026-10-03：统一本机检查通过，包含文档镜像与 36 份 Markdown 链接、51 个 Python 用例、28 个纯 Java 测试、两个 Go 模块 race、真实中继 TLS 联合合约、12 个 Swift 测试及 Mac 全量源码编译。新增覆盖关闭/存储失效的等待轮询和结果正文/完成回执落盘失败。之前云端配对测试依赖未安装的 rg，已改用系统 grep；完整 Mac 编译使用 macOS 26 API，补充 SDK 前置核对并让 CI 选择已安装的新 Xcode。连接帧解码器显式声明初始化入口，兼容云端 Swift 对私有存储属性的访问控制；原分片解码回归保留。推送后另验收最终 CI。
+2026-10-03：统一本机检查通过，包含文档镜像与 36 份 Markdown 链接、51 个 Python 用例、28 个纯 Java 测试、两个 Go 模块 race、真实中继 TLS 联合合约、12 个 Swift 测试及 Mac 全量源码编译。新增覆盖关闭/存储失效的等待轮询和结果正文/完成回执落盘失败。之前云端配对测试依赖未安装的 rg，已改用系统 grep；完整 Mac 编译使用 macOS 26 API，补充 SDK 前置核对并让 CI 选择已安装的新 Xcode。连接帧解码器显式声明初始化入口，兼容云端 Swift 对私有存储属性的访问控制；原分片解码回归保留。发布源码提交的 [Mac 全量与 Linux CI](https://github.com/qx0657/phone-station/actions/runs/37130545576) 均通过。
 
-源码迁移保留原相关提交，并逐文件核对迁移前的未提交修改。Linux/amd64 中继、Android 60 APK 与 Mac 0.1.0 (20) 完整包均已构建；最终发布包将从已提交工作区重建并记录摘要。
+源码迁移保留原相关提交，并逐文件核对迁移前的未提交修改。最终发布包从干净提交 `551714e6ff67e6f812b3c50673cb4750f05fa30f` 构建，三份清单的 `dirtyWorkingTree` 与 `deployed` 均为 false；重新计算产物摘要一致，Mac 整包签名核对通过。结果缓存的读取窗口与空闲时物理清理边界见 [中继合约](relay-contract.md#会话编号与兼容)。
+
+| 产物 | SHA-256 | 本地回执 |
+|---|---|---|
+| Linux/amd64 中继 2 | `018c2ab442a759d7bc6de3084d8c2f186d4468e7d91d5e8409b44de016625632` | `build/.phone-station/relay/linux-amd64/manifest.json` |
+| Android 60 APK | `f5ad85e97096733e4efc21b9e9032478d121b5a7040df7619428d60bbe5afa70` | `build/.phone-station/android-manifest.json` |
+| Mac 0.1.0 (20) 整包清单 | `0642738a1f5fe050a919d83365a82403110c79d6d718ae667810d541af7a63bf` | `build/.phone-station/mac-manifest.json` |
+
+中继候选程序已在目标 Linux 上核对同一摘要、版本输出及 systemd unit 语法；生产程序和进程保持原状，候选包不代表已部署。旧 Mac 整包、旧中继程序和 unit 的恢复副本已准备；具体主机、暂存位置和切换步骤在私有运维记录中。
 
 只读核查仍为 Android 59、已安装 Mac 0.1.0 (17)、原内存中继。已有网关本地/远程均在线；没有安装 APK、替换 Mac App 或重启生产中继。生产版本与实际主机回执留在私有运维记录，正式切换仍待覆盖具体动作的停机授权。
