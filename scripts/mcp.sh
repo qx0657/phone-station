@@ -260,11 +260,40 @@ if [[ ${1:-} == stop ]]; then
     print -u2 -- "停止手机 MCP 与远程通道需要 adb 在线；手机仍可从应用里关闭这两项。"
     exit 1
   fi
-  "$ADB" -s "$SERIAL" shell am broadcast -f 0x10000000 \
-    -n "$PKG/.McpControlReceiver" -a "$PKG.MCP" --ez on false >/dev/null 2>&1 || \
-    "$ADB" -s "$SERIAL" shell am stopservice -n "$PKG/.FileMcpService" >/dev/null 2>&1 || true
-  "$ADB" -s "$SERIAL" forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1 || true
-  "$GATEWAY_BIN" clear-local >/dev/null 2>&1 || true
+  if ! stop_reply=$(bounded_adb -s "$SERIAL" shell am broadcast -f 0x10400000 \
+    -n "$PKG/.McpControlReceiver" -a "$PKG.MCP" --ez on false 2>/dev/null); then
+    print -u2 -- "停止请求失败或超时；未确认手机已停止，保留本机通道状态。"
+    exit 1
+  fi
+  if ! print -r -- "$stop_reply" | rg -q 'Broadcast completed: result=1(,|[[:space:]]|$)'; then
+    print -u2 -- "手机没有确认停止请求；旧版应用请先更新。本机通道状态已保留。"
+    exit 1
+  fi
+  stopped=0
+  for _ in {1..10}; do
+    if ! flags=$(bounded_adb -s "$SERIAL" shell 'settings get global phonestation_mcp; settings get global phonestation_remote' 2>/dev/null); then
+      break
+    fi
+    if ! services=$(bounded_adb -s "$SERIAL" shell dumpsys activity services "$PKG" 2>/dev/null); then
+      break
+    fi
+    # 明确的两个关闭标记，加上实际服务退出；空输出不能冒充成功。
+    if [[ $(print -r -- "$flags" | tr -d '\r') == $'0\n0' && $services == *'ACTIVITY MANAGER SERVICES'* ]] \
+      && ! print -r -- "$services" | rg -q 'ServiceRecord.*FileMcpService'; then
+      stopped=1
+      break
+    fi
+    sleep 0.2
+  done
+  if (( ! stopped )); then
+    print -u2 -- "停止请求已接受，但服务退出结果未确认；保留本机通道状态，请核实手机后再查询。"
+    exit 1
+  fi
+  if ! bounded_adb -s "$SERIAL" forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1 \
+    || ! "$GATEWAY_BIN" clear-local >/dev/null 2>&1; then
+    print -u2 -- "手机服务已停止，但本机转发或网关状态清理失败。"
+    exit 1
+  fi
   print -r -- "已停止手机 MCP 与远程通道。"
   exit 0
 fi

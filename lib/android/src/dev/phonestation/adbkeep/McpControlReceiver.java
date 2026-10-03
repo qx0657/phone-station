@@ -20,6 +20,7 @@ public final class McpControlReceiver extends BroadcastReceiver {
             Log.w(KeeperEngine.TAG, "mcp rejected");
             return;
         }
+        setResultCode(0);
         boolean on = intent.getBooleanExtra("on", false);
         KeeperStore.setMcpEnabled(context, on);
         if (on) {
@@ -28,5 +29,6 @@ public final class McpControlReceiver extends BroadcastReceiver {
             RemoteStore.setEnabled(context, false);
             FileMcpService.stop(context);
         }
+        setResultCode(1);
     }
 }

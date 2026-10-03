@@ -29,6 +29,7 @@ fi
   -o "$ROOT/build/.phone-station/.phone-relay-gateway-$$" .
 mv -f "$ROOT/build/.phone-station/.phone-relay-gateway-$$" "$ROOT/build/.phone-station/phone-relay-gateway"
 python3 "$ROOT/lib/test_mcp_pair.py"
+python3 "$ROOT/lib/test_mcp_stop.py"
 "$SWIFTC" -O -target "$TARGET" -sdk "$SDK" -framework Security \
   -o "$ROOT/build/.phone-station/.phone-relay-keychain-$$" \
   "$ROOT/lib/remote-gateway/keychain/main.swift"
