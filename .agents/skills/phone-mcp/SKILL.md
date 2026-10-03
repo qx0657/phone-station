@@ -1,6 +1,6 @@
 ---
 name: phone-mcp
-description: 连接 Android 手机上「手机工位」的 MCP，使用 adb 本地通道或自行配置并配对的远程通道。读取或修改普通文件、查看空间与状态、打开文件、开关保持亮屏、远程截屏和手电筒、发提醒、共享剪贴板，通过已授权的 Shizuku 执行远程 shell，或上传 APK 安装升级、在 AI 修改需求后远程更新手机工位。用户要这些手机侧动作时使用。本地截取当前画面用 scripts/screenshot.sh；远程控件见本 skill，图库里已有的截图走 screenshot-cleanup。
+description: 通过手机工位 MCP 操作 Android 普通文件、剪贴板、远程截屏与控件，执行 Shizuku shell，安装 APK 或更新手机工位，以及配置本地/远程连接。用于这些手机侧操作；图库截图归类去重用 screenshot-cleanup，本机 adb 截屏用 scripts/screenshot.sh。
 ---
 
 # 手机工位 MCP
@@ -9,19 +9,20 @@ description: 连接 Android 手机上「手机工位」的 MCP，使用 adb 本�
 
 ## 连接
 
-在仓库根目录运行 `./scripts/mcp.sh`。它打开统一网关，打印电脑上的 MCP 地址和 `Authorization: Bearer …`；`./scripts/mcp.sh status` 还显示当前通道。使用当次打印的地址和令牌。adb 不在线时，已配对且在线的远程通道仍可用。网关令牌保存在本机用户配置，手机本地令牌随服务重启更换，由脚本刷新。手机界面上的 `http://127.0.0.1:8765/mcp` 只在手机上监听。
+在仓库根目录操作。已运行时用 `./scripts/mcp.sh status --safe` 查看状态，它不输出令牌、不刷新 adb。当前任务需要启动 MCP 时运行 `./scripts/mcp.sh >/dev/null`，避免默认输出的授权头进入聊天记录。adb 不在线时，已配对且在线的远程通道仍可用。手机界面上的 `http://127.0.0.1:8765/mcp` 只在手机上监听。
 
-传输是 Streamable HTTP，只接受 POST `/mcp`。请求头带 `Content-Type: application/json`、`Accept: application/json, text/event-stream`，以及打印出来的 Authorization。先 `initialize`，再 `tools/list`、`tools/call`。协议版本用 `docs/mcp.md` 里记下的那次。
-
-当前会话的 `search_tool` 看不到这些工具时，用 `curl` 向打印出来的地址发 POST。`$MCP` 和 `$TOKEN` 换成 `mcp.sh` 打印的两行。不要把凭据写进仓库、聊天记录或命令输出；统一入口与手机本地令牌是不同的凭据。
+有已连接的 MCP 工具时直接使用。否则用 `./scripts/mcp.sh call` 从标准输入提交一个带 `id` 的 JSON-RPC 请求；它在进程内部读取令牌、添加请求头，走已有统一网关，不启动服务，也不自动重做请求。先 `initialize`，核对返回的协议版本，再 `tools/list`、`tools/call`。
 
 ```bash
-curl -sS -X POST "$MCP" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"phone","version":"0"}}}'
+./scripts/mcp.sh call <<'JSON'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"phone","version":"1"}}}
+JSON
+./scripts/mcp.sh call <<'JSON'
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+JSON
 ```
+
+旧网关没有 `call` 时先按下文构建网关。`status`、`snapshot`、`watch`、`credentials` 的原始输出可能含令牌，不直接展示；也不要将令牌展开进 `curl -H` 等命令参数。传输、鉴权与手动接入说明见 `docs/mcp.md`。
 
 `./scripts/mcp.sh stop` 需要 adb 在线，关闭手机 MCP 与远程通道、移除转发并保留配对。没有这次使用或验证 MCP 的要求时，不要为了看看环境而启动它。
 
@@ -47,11 +48,11 @@ curl -sS -X POST "$MCP" \
 
 ## Shell
 
-用户明确要求 shell 或需要系统权限的操作时，先调 `station_shell_status`，再用 `station_shell_exec`。状态不可用时，按 `reason` 处理：安装、启动 Shizuku，或在手机工位权限页授权。应用已经获准时沿用，不重复索要授权；没有启动要求时不要擅自启动。远程请求本身不会弹授权框。
+用户明确要求 shell 或需要系统权限的操作时，优先 `./scripts/shell.sh '<手机命令>'`。脚本核实 Shizuku 与机型，协商 `station_shell_start` 后台任务，旧版才回退 `station_shell_exec`。直接调用 MCP 时先查 `station_shell_status`，生成并记录 32 位小写十六进制 `jobId` 后提交 `station_shell_start`，用 `station_operation_status` 查询。状态不可用时按 `reason` 处理；应用已经获准时沿用，没有启动要求时不擅自启动 Shizuku。
 
-`command` 是手机上的 `/system/bin/sh -c` 命令；工作目录是 `/`。`timeoutMs` 默认 10000、最多 60000，`maxOutputBytes` 是 stdout 和 stderr 合计保留的字节数，默认 32768、最多 65536。没有交互输入，不保留后台任务。检查 `exitCode`、`timedOut`、`outputTruncated` 和 `identity`；shell UID 为 2000，root UID 为 0。`station_shell_exec` 可能修改系统或删除文件，只执行用户要求的动作，不能用它绕过普通文件工具的范围去主动探索私有数据。
+`command` 是手机上的 `/system/bin/sh -c` 命令；工作目录是 `/`。`timeoutMs` 默认 10000、最多 60000，输出默认最多 32768 字节、上限 65536。后台任务回执不代表任意后台子进程能长期存活，也不提供交互终端。只有任务 `completed` 后才检查 `result` 中的 `exitCode`、`timedOut`、`outputTruncated`、`outputIncomplete` 和 `identity`；shell UID 为 2000，root UID 为 0。只执行用户要求的动作，不能用 shell 绕过普通文件工具的范围去主动探索私有数据。
 
-命令超时、服务停止、授权撤销或网络中断后，操作可能已经生效，先只读核实，不能自动重做。普通文件仍使用 `station_file_*` 工具；通过 adb 启动的 Shizuku 也没有其他应用 `/data/user/0` 私有数据的访问权。详细边界见 `docs/mcp.md` 的「Shizuku shell」。
+提交应答丢失、超时或重连后，只用原 `jobId` 查询（`shell.sh --job-status <编号>` 或 `station_operation_status`），不重新提交。`missing`、`result_unknown` 都不表示肯定没有执行，先核实实际结果。普通文件仍使用 `station_file_*`；通过 adb 启动的 Shizuku 也没有其他应用 `/data/user/0` 的访问权。详细边界见 `docs/mcp.md` 的「Shizuku shell」。
 
 ## 远程安装与 AI 更新
 
@@ -67,10 +68,8 @@ curl -sS -X POST "$MCP" \
 
 用户要求远程截屏、保持亮屏或手电筒时，先只读调用 `station_controls_status`，核实 PGT-AN20、各项可用状态及原因。保持亮屏复用 `station_stay_awake`；截图和手电筒需要已经启动并授权的 Shizuku，不自动申请权限或启动它。
 
-- 截屏：给 `station_screen_capture` 一个新的 UUID `requestId`。按返回的 path、size、targetVersion 分块读取 PNG，核对完整大小与 SHA-256 后保存到 Mac；下载完成后调用 `station_screen_capture_release` 清理同一编号的临时截图。单次最多 32 MiB。丢失应答时先查 `Download/手机工位/.captures/<UUID>.png`，不重拍、不复用编号。安全界面仍可能是黑屏。
+- 截屏：生成并记录 UUID `requestId`，去掉连字符作为 `jobId`，用 `station_screen_capture_start` 提交、`station_operation_status` 查询。任务完成后按结果的 path、size、targetVersion 分块读取 PNG，核对完整大小与 SHA-256 后保存到 Mac，再用 `station_screen_capture_release` 幂等清理同一编号。单次最多 32 MiB。丢失应答时先查原任务；任务记录缺失或结果未知时，用 `station_screen_capture_status` 查原 `requestId` 的现有 PNG，不重拍、不复用编号。仅旧版没有后台接口时才用 `station_screen_capture`。安全界面仍可能是黑屏。
 - 手电筒：`station_torch` 的 `on` 为 true 开灯、false 关灯。手机端独立的 Shizuku UserService 持续持灯；普通远程 shell 不保留后台进程，不能照搬 `torch.sh` 的后台命令。手机工位或 Shizuku 停止、升级后灯会灭，重连不自动重开。
 - 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。投屏、录屏和灯光跟随声音仍要求本机 adb。
 
 实现与验证见 `docs/remote-controls.md`。
-
-远程 shell 优先 `scripts/shell.sh`，新版会自动使用 `station_shell_start` 后台任务，旧版协商回同步接口。提交应答丢失后只查询原 jobId（`--job-status` 或 `station_operation_status`），不重新提交。新版远程截图使用 `station_screen_capture_start`；恢复时先查询任务，再读取已有 PNG，不重拍。

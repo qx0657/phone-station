@@ -66,6 +66,10 @@ Authorization: Bearer <mcp.sh 打印的令牌>
 
 调用方始终使用 `mcp.sh` 打印的统一网关地址和令牌。adb 转发消失时，已配对且在线的远程通道仍可继续提供 MCP。手机本地令牌重启后会换，本机网关令牌则保存在用户配置中。
 
+AI 和脚本可用 `scripts/mcp.sh call`，从标准输入提交一个带 `id` 的 JSON-RPC 2.0 请求。网关 CLI 从本机配置内部读取凭据，向已有 `/mcp` 发送请求，保留本地优先和远程接替逻辑；它不启动手机服务或刷新 adb，不要求配置远程中继。初始化与工具发现仍由调用方完成。标准输出只有 RPC 应答，需要继续检查 `error` 和工具 `isError`；传输失败、HTTP 重定向或应答编号不符会失败且不重发。原有 `remote-call` 仍固定走共享队列里的远程通道。
+
+`scripts/mcp.sh status --safe` 查询已运行网关的状态，不输出令牌，也不刷新 adb；网关未运行时返回失败。默认启动和普通 `status` 为手工接入保留授权头输出，内部 `snapshot/watch` 也可能含令牌，不能直接贴进聊天或日志。需要从 AI 启动服务时用 `scripts/mcp.sh >/dev/null`，随后用 `status --safe` 和 `call`。新版子命令需要重编网关，随包入口需更新 Mac App。
+
 ## 中继兼容要求
 
 中继地址是服务根地址，客户端在其后拼接 `/v1/phone/poll`、`/v1/phone/result` 和 `/v1/desktop/call`，三者均为带角色 Bearer 令牌的 HTTPS POST、JSON 请求。手机与电脑角色要分别鉴权；TLS 公钥必须匹配配置的 SPKI 指纹。本仓库包含 Mac 网关与 Android 客户端，中继服务端源码目前不在本仓库，不能仅把网关当作公网中继部署。

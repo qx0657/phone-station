@@ -83,7 +83,7 @@ refresh_local_route() {
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
-  print -r -- "用法: mcp.sh [status|profile|stop|desktop <https-endpoint> <SPKI-SHA256> [--stdin]|forget-desktop|pair <https-endpoint> <SPKI-SHA256> [--stdin]|unpair]"
+  print -r -- "用法: mcp.sh [call|status [--safe]|profile|stop|desktop <https-endpoint> <SPKI-SHA256> [--stdin]|forget-desktop|pair <https-endpoint> <SPKI-SHA256> [--stdin]|unpair]"
   print -r -- "打开本机 MCP 网关。它优先走 adb，必要时经已配对的远程通道。"
   print -r -- "远程通道默认未配置；中继地址可用自己的 HTTPS 域名、IP、端口和路径。"
   print -r -- "pair 需先有 adb；手机令牌和电脑令牌都会隐藏提示输入。"
@@ -91,10 +91,20 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "stop 关闭手机 MCP 与远程通道；unpair 清除两端远程凭据。"
   print -r -- "desktop 只配置此 Mac，隐藏输入电脑令牌；--stdin 读取一行。不需要 adb。"
   print -r -- "forget-desktop 只清除此 Mac 的远程配置，不修改手机。"
+  print -r -- "call 从标准输入接收一个带 id 的 JSON-RPC 请求；走已有统一网关，不打印令牌、不启动服务。"
+  print -r -- "status --safe 只读已有网关状态，不输出令牌，也不刷新 adb 转发。"
   exit 0
 fi
 
 find_gateway
+
+if [[ ${1:-} == call && $# == 1 ]]; then
+  exec "$GATEWAY_BIN" call
+fi
+
+if [[ ${1:-} == status && ${2:-} == --safe && $# == 2 ]]; then
+  exec "$GATEWAY_BIN" status-safe
+fi
 
 if [[ ${1:-} == profile && $# == 1 ]]; then
   "$GATEWAY_BIN" profile
@@ -330,11 +340,12 @@ for _ in {1..30}; do
   token=$(read_phone_token)
   if [[ -n $token ]]; then
     print -r -- "$token" | "$GATEWAY_BIN" local-token >/dev/null
-    body=$(curl -sS -m 3 -X POST "http://127.0.0.1:${GATEWAY_PORT}/mcp" \
-      -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' \
-      -H "Authorization: Bearer $("$GATEWAY_BIN" credentials | sed -n 's/^Authorization: Bearer //p')" \
-      -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"phone","version":"0"}}}' \
+    # Read the authorization header through stdin, never through curl argv.
+    body=$("$GATEWAY_BIN" credentials | sed -n '/^Authorization: Bearer /p' \
+      | curl -sS -m 3 -X POST "http://127.0.0.1:${GATEWAY_PORT}/mcp" \
+        -H @- -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' \
+        -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"phone","version":"0"}}}' \
       || true)
     if [[ $body == *手机工位* ]]; then
       "$GATEWAY_BIN" credentials

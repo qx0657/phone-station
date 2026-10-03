@@ -220,10 +220,26 @@ func main() {
 		err = printStatus()
 	case "status-json":
 		err = printJSONStatus()
+	case "status-safe":
+		var state statusReply
+		state, err = getStatus()
+		if err == nil {
+			state.Token = ""
+			state.Endpoint = publicAddress
+			err = json.NewEncoder(os.Stdout).Encode(state)
+		}
 	case "watch-status":
 		err = watchJSONStatus()
 	case "credentials":
 		err = printCredentials()
+	case "call":
+		var value config
+		value, err = loadConfig()
+		if err == nil {
+			err = runRPCCLI(value, os.Stdin, os.Stdout, func(ctx context.Context, value config, body []byte) (relayResponse, error) {
+				return gatewayViaHTTP(ctx, publicAddress, value, body, false)
+			})
+		}
 	case "remote-call":
 		var value config
 		value, err = loadConfig()
@@ -241,10 +257,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "phone-relay-gateway configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|credentials|remote-call")
+	fmt.Fprintln(os.Stderr, "phone-relay-gateway configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|status-safe|credentials|call|remote-call")
 }
 
-// Uses the pinned relay directly, without opening an adb route or printing credentials.
+// Uses the daemon's remote-only route, without opening adb or printing credentials.
 // The transport retains one operation ID across its own retries. The CLI never
 // submits a second logical operation after an unknown outcome.
 func runRemoteCLI(value config, input io.Reader, output io.Writer,
@@ -252,9 +268,14 @@ func runRemoteCLI(value config, input io.Reader, output io.Writer,
 	if value.RemoteURL == "" || value.RemotePin == "" {
 		return errors.New("尚未配置远程中继")
 	}
+	return runRPCCLI(value, input, output, call)
+}
+
+func runRPCCLI(value config, input io.Reader, output io.Writer,
+	call func(context.Context, config, []byte) (relayResponse, error)) error {
 	body, err := readBody(input, maxBody)
 	if err != nil {
-		return errors.New("无法读取远程请求或请求过大")
+		return errors.New("无法读取 MCP 请求或请求过大")
 	}
 	var request struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -269,13 +290,31 @@ func runRemoteCLI(value config, input io.Reader, output io.Writer,
 	defer cancel()
 	response, err := call(ctx, value, body)
 	if err != nil {
-		return fmt.Errorf("远程请求未确认；请核实结果，不要自动重做 (%v)", err)
+		return fmt.Errorf("MCP 请求未确认；请核实结果，不要自动重做 (%v)", err)
 	}
-	if response.Status != http.StatusOK || !json.Valid(response.Body) {
-		return errors.New("手机返回无效的远程响应；请核实结果")
+	var reply struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if response.Status != http.StatusOK || json.Unmarshal(response.Body, &reply) != nil ||
+		reply.JSONRPC != "2.0" || !sameRPCID(reply.ID, request.ID) || (len(reply.Result) == 0) == (len(reply.Error) == 0) {
+		return errors.New("手机返回无效或编号不匹配的 MCP 响应；请核实结果")
 	}
 	_, err = output.Write(append(response.Body, '\n'))
 	return err
+}
+
+func sameRPCID(left, right json.RawMessage) bool {
+	if !validRPCID(left) || !validRPCID(right) {
+		return false
+	}
+	var a, b string
+	if json.Unmarshal(left, &a) == nil && json.Unmarshal(right, &b) == nil {
+		return a == b
+	}
+	return bytes.Equal(bytes.TrimSpace(left), bytes.TrimSpace(right))
 }
 
 // All CLI processes use the daemon's queue; this never opens or starts adb.
@@ -297,15 +336,28 @@ func profileFingerprint(value config) string {
 	return hex.EncodeToString(digest[:])
 }
 func remoteViaHTTP(ctx context.Context, address string, value config, body []byte) (relayResponse, error) {
-	address = strings.TrimSuffix(address, "/mcp") + "/__remote-call"
+	return gatewayViaHTTP(ctx, address, value, body, true)
+}
+
+func gatewayViaHTTP(ctx context.Context, address string, value config, body []byte, remoteOnly bool) (relayResponse, error) {
+	if remoteOnly {
+		address = strings.TrimSuffix(address, "/mcp") + "/__remote-call"
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
 		return relayResponse{}, err
 	}
 	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Phone-Station-Remote-Profile", profileFingerprint(value))
-	response, err := (&http.Client{Timeout: 4 * time.Minute}).Do(request)
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	if remoteOnly {
+		request.Header.Set("X-Phone-Station-Remote-Profile", profileFingerprint(value))
+	}
+	// A redirect could replay a mutation or send the token to another endpoint.
+	client := &http.Client{Timeout: 4 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	response, err := client.Do(request)
 	if err != nil {
 		return relayResponse{}, err
 	}
