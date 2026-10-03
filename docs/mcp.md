@@ -76,6 +76,8 @@ AI 和脚本可用 `scripts/mcp.sh call`，从标准输入提交一个带 `id` �
 
 手机轮询请求为 `{"waitMs":2000}`，空闲时返回 `{"operationId":null}`；有操作时返回 `{"operationId":"<唯一ID>","payload":<MCP请求>}`。手机执行后向 result 提交 `{"operationId":"<同一ID>","response":{"status":<HTTP状态>,"body":<MCP结果>}}`。没有正文的通知结果可省略 `body`。电脑调用的请求为 `{"operationId":"<唯一ID>","payload":<MCP请求>}`，中继返回 `{"status":<HTTP状态>,"body":<MCP结果>}`。
 
+Mac 19 起，不在网络应答丢失时自动重发中继请求；429 仅在中继明确返回 `X-Phone-Station-Not-Queued: 1` 时按原编号退避。两端均不跟随中继重定向。可执行隔离验收及服务端持久化要求见 [中继合约](relay-contract.md)。
+
 相同操作 ID 的请求必须去重，并保留已派发操作的结果状态。手机结果提交可重传；已执行工具不能再执行一次。手机新轮询可接替旧等待轮询，不能重派正在运行的操作；电脑请求取消或超时后，已运行修改操作的结果不明时不能自动重做。中继与桌面网关正文上限为 18 MiB，手机本地 MCP 为 8 MiB。
 
 ## 界面
@@ -235,7 +237,7 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 
 `annotations` 里，读取类的 `readOnlyHint` 为 true。会改掉或删掉已有内容的工具，`destructiveHint` 为 true。`copy`、`create_directory`、`station_file_open`、`station_stay_awake` 和 `station_notify` 会写出新东西或改手机状态，但 `destructiveHint` 是 false。`station_clipboard_set` 会盖掉剪贴板，`destructiveHint` 为 true。
 
-`station_stay_awake` 只接受布尔值 `on`。true 把 `screen_off_timeout` 写成 2147483647，把 `stay_on_while_plugged_in` 写成 7。false 写成 60000 和 0。写完再读回，对不上就拒绝。
+`station_stay_awake` 只接受布尔值 `on`。true 把 `screen_off_timeout` 写成 2147483647，把 `stay_on_while_plugged_in` 写成 7。Android 60 起，false 恢复开启前持久保存的原设置，保留中途手动改过的字段。与 adb 脚本共用记录，写后读回核实；无记录的旧版常亮才回退到 60000/0。故障恢复及升级边界见 [亮屏原设置恢复](remote-controls.md#亮屏原设置恢复)。
 
 `station_notify` 要 `title` 和 `text`，不能是空的，分别最多 200 字和 4000 字。显示方式由手机 App「首页 → 通知 → 电脑提醒 → 手机 → 显示方式」统一决定：默认只显示最新一条，也可选择每条都显示。旧客户端传来的 `mode` 不再覆盖手机设置，工具列表也不再提供该输入；返回的 `mode` 是实际采用的 `replace` 或 `stack`。`agent` 只认 `Grok`、`Claude`、`Codex`，认出来时左侧换成对应图标。可选输入 `sound` 指定手机上的铃声文件或 content URI；省略时沿用应用的铃声选择。它交给和 `notify.sh` 同一个接收器，并等到铃声结果：`sound` 是 `played`、`silent` 或 `failed`。没有铃声、通知权限没开，或 15 秒内没有结果，工具失败。
 

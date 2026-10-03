@@ -22,6 +22,8 @@ JSON
 JSON
 ```
 
+Mac 19 起，可为独立 MCP 客户端签发 `status`、`files.read`、`files.write`、`shell` 权限令牌，管理入口为 `mcp.sh clients`，范围见 `docs/mcp-clients.md`。只有用户要求管理接入时才创建或撤销令牌；权限不足时说明缺少的权限，不自动改用主令牌。`mcp.sh call` 是本机主身份入口，不能用它验证受限客户端权限。
+
 旧网关没有 `call` 时先按下文构建网关。`status`、`snapshot`、`watch`、`credentials` 的原始输出可能含令牌，不直接展示；也不要将令牌展开进 `curl -H` 等命令参数。传输、鉴权与手动接入说明见 `docs/mcp.md`。
 
 `./scripts/mcp.sh stop` 需要 adb 在线，关闭手机 MCP 与远程通道、移除转发并保留配对。没有这次使用或验证 MCP 的要求时，不要为了看看环境而启动它。

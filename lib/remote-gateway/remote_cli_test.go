@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -40,6 +41,7 @@ func TestBusyRelayRetainsOperationID(t *testing.T) {
 		}
 		calls++
 		if calls == 1 {
+			w.Header().Set("X-Phone-Station-Not-Queued", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
@@ -141,5 +143,60 @@ func TestCLIResponseIDsPreserveTypePrecisionAndStringMeaning(t *testing.T) {
 		if sameRPCID(json.RawMessage(pair[0]), json.RawMessage(pair[1])) {
 			t.Fatalf("different/invalid IDs accepted: %v", pair)
 		}
+	}
+}
+
+func TestRelayLostReplyDoesNotResubmit(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		calls.Add(1) // Represents an accepted or completed mutation before EOF.
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		connection.Close()
+	}))
+	defer server.Close()
+	_, err := postRelayCall(context.Background(), server.Client(), server.URL, "test", []byte(`{"operationId":"one","payload":{}}`))
+	if err == nil || calls.Load() != 1 {
+		t.Fatal("unknown operation replayed", err, calls.Load())
+	}
+}
+func TestRelayUnconfirmedRejectionDoesNotRetry(t *testing.T) {
+	for _, status := range []int{429, 503} {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(status) }))
+		response, err := postRelayCall(context.Background(), server.Client(), server.URL, "test", []byte(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		server.Close()
+		if response.StatusCode != status || calls.Load() != 1 {
+			t.Fatal("unconfirmed rejection retried")
+		}
+	}
+}
+func TestRelayRedirectDoesNotResubmit(t *testing.T) {
+	var redirected atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirected.Add(1)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = rejectRelayRedirect
+	response, err := postRelayCall(context.Background(), client, server.URL, "test", []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != 307 || redirected.Load() != 0 {
+		t.Fatal("redirect resubmitted operation")
 	}
 }

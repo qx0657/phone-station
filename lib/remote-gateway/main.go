@@ -268,8 +268,8 @@ func usage() {
 }
 
 // Uses the daemon's remote-only route, without opening adb or printing credentials.
-// The transport retains one operation ID across its own retries. The CLI never
-// submits a second logical operation after an unknown outcome.
+// Retries require the relay to explicitly confirm that it has not queued the
+// operation. An unknown outcome is never resubmitted.
 func runRemoteCLI(value config, input io.Reader, output io.Writer,
 	call func(context.Context, config, []byte) (relayResponse, error)) error {
 	if value.RemoteURL == "" || value.RemotePin == "" {
@@ -1224,7 +1224,7 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 	if err != nil {
 		return relayResponse{}, err
 	}
-	client := &http.Client{Timeout: 4 * time.Minute, Transport: pinnedTransport(value.RemotePin)}
+	client := &http.Client{Timeout: 4 * time.Minute, Transport: pinnedTransport(value.RemotePin), CheckRedirect: rejectRelayRedirect}
 	response, err := postRelayCall(ctx, client, strings.TrimRight(value.RemoteURL, "/")+"/v1/desktop/call", token, requestBody)
 	if err != nil {
 		return relayResponse{}, err
@@ -1248,7 +1248,6 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 }
 
 func postRelayCall(ctx context.Context, client *http.Client, endpoint, token string, requestBody []byte) (*http.Response, error) {
-	networkFailures := 0
 	for attempt := 0; ; attempt++ {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
 		if err != nil {
@@ -1257,19 +1256,17 @@ func postRelayCall(ctx context.Context, client *http.Client, endpoint, token str
 		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("Content-Type", "application/json")
 		response, err := client.Do(request)
-		if err == nil && response.StatusCode != http.StatusTooManyRequests {
+		if err != nil {
+			// A lost reply may follow a completed side effect. External relay
+			// durability is not established here, so never assume same-ID replay is safe.
+			return nil, err
+		}
+		if response.StatusCode != http.StatusTooManyRequests || response.Header.Get("X-Phone-Station-Not-Queued") != "1" {
 			return response, nil
 		}
-		if err != nil {
-			networkFailures++
-			if networkFailures >= 3 || ctx.Err() != nil {
-				return nil, err
-			}
-		} else {
-			// A busy relay rejects before queuing. Retain this exact operation ID.
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-			_ = response.Body.Close()
-		}
+		// Only this explicit pre-acceptance rejection is retryable, with the same ID.
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		_ = response.Body.Close()
 		timer := time.NewTimer(time.Duration(min(attempt+1, 8)) * 250 * time.Millisecond)
 		select {
 		case <-ctx.Done():
@@ -1279,6 +1276,8 @@ func postRelayCall(ctx context.Context, client *http.Client, endpoint, token str
 		}
 	}
 }
+
+func rejectRelayRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 
 func pinnedTransport(pin string) *http.Transport {
 	expected, _ := hex.DecodeString(pin)

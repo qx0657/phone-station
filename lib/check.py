@@ -76,6 +76,7 @@ def main():
                 py_compile.compile(str(source), cfile=str(work / "syntax.pyc"), doraise=True)
         print("文档镜像、Skill 入口与脚本语法通过", flush=True)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "-tags", "relaycontract", "-run", "^TestRelayContractHarness$", "."])
         gateway = work / "phone-relay-gateway"
         run(["go", "-C", ROOT / "lib/remote-gateway", "build", "-o", gateway, "."])
         os.environ["PHONE_STATION_TEST_GATEWAY"] = str(gateway)

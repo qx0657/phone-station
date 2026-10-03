@@ -271,6 +271,7 @@ final class PhoneRelayClient implements Runnable {
             inFlight = connection;
             if (revision != retry.revision()) { throw new IOException("network changed before request"); }
             connection.setSSLSocketFactory(pinnedContext(pin).getSocketFactory());
+            connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(5_000);
             connection.setReadTimeout(readTimeoutMs);
