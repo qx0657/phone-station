@@ -267,11 +267,15 @@ final class McpLoopbackTest {
         out.flush();
         ByteArrayOutputStream all = new ByteArrayOutputStream();
         InputStream in = socket.getInputStream();
-        byte[] buffer = new byte[4096];
-        int n;
-        while ((n = in.read(buffer)) >= 0) {
-            all.write(buffer, 0, n);
+        while (!all.toString("US-ASCII").endsWith("\r\n\r\n")) {
+            int value = in.read();
+            if (value < 0) { throw new AssertionError("incomplete headers"); }
+            all.write(value);
         }
+        int length = Integer.parseInt(all.toString("US-ASCII").split("Content-Length: ")[1].split("\r\n")[0]);
+        byte[] response = in.readNBytes(length);
+        if (response.length != length) { throw new AssertionError("incomplete body"); }
+        all.write(response);
         socket.close();
         String text = all.toString("UTF-8");
         int split = text.indexOf("\r\n\r\n");

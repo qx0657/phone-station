@@ -3,6 +3,9 @@ package dev.phonestation.adbkeep;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.BufferedInputStream;
+import java.io.FilterInputStream;
+import java.net.SocketTimeoutException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -19,6 +22,9 @@ import java.util.concurrent.TimeUnit;
 
 /** 只听 127.0.0.1。一次连接处理一个 POST /mcp。 */
 final class McpHttp {
+    static final int HEADER_LIMIT = 65536;
+    static final int LINE_LIMIT = 8192;
+    static final int READ_TIMEOUT_MS = 20000;
     static final int BODY_LIMIT = 8 * 1024 * 1024;
 
     private final ServerSocket socket;
@@ -37,12 +43,12 @@ final class McpHttp {
             final String token,
             final FileOps files,
             final StationHost host,
-            final String version) {
+            final String version, final int timeoutMs) {
         this.socket = socket;
         thread = new Thread(new Runnable() {
             @Override
             public void run() {
-                acceptLoop(token, files, host, version);
+                acceptLoop(token, files, host, version, timeoutMs);
             }
         }, "station-mcp");
         thread.setDaemon(true);
@@ -51,10 +57,15 @@ final class McpHttp {
 
     static McpHttp open(int port, String token, FileOps files, StationHost host, String version)
             throws IOException {
+        return open(port, token, files, host, version, READ_TIMEOUT_MS);
+    }
+
+    static McpHttp open(int port, String token, FileOps files, StationHost host, String version, int timeoutMs)
+            throws IOException {
         ServerSocket server = new ServerSocket();
         server.setReuseAddress(true);
         server.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 8);
-        return new McpHttp(server, token, files, host, version);
+        return new McpHttp(server, token, files, host, version, timeoutMs);
     }
 
     int port() {
@@ -84,7 +95,7 @@ final class McpHttp {
         }
     }
 
-    private void acceptLoop(String token, FileOps files, StationHost host, String version) {
+    private void acceptLoop(String token, FileOps files, StationHost host, String version, int timeoutMs) {
         while (running) {
             Socket client;
             try {
@@ -95,14 +106,20 @@ final class McpHttp {
                 }
                 return;
             }
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
             synchronized (clients) {
                 clients.add(client);
             }
             try {
                 requests.execute(() -> {
                     try {
-                        client.setSoTimeout(20_000);
-                        serve(client, token, files, host, version);
+                        try {
+                            serve(client, token, files, host, version, deadline);
+                        } catch (HttpFailure invalid) {
+                            write(client.getOutputStream(), invalid.status, "{\"error\":\"请求头无效或过大\"}");
+                        } catch (SocketTimeoutException slow) {
+                            write(client.getOutputStream(), 408, "{\"error\":\"请求读取超时\"}");
+                        }
                     } catch (IOException ignored) {
                         // 对端提前断开时这一次请求作废。
                     } finally {
@@ -125,10 +142,10 @@ final class McpHttp {
     }
 
     private static void serve(
-            Socket client, String token, FileOps files, StationHost host, String version)
+            Socket client, String token, FileOps files, StationHost host, String version, long deadline)
             throws IOException {
-        InputStream input = client.getInputStream();
-        String requestLine = readLine(input);
+        InputStream input = new BufferedInputStream(new DeadlineInput(client, deadline), 4096);
+        String requestLine = readLine(input, LINE_LIMIT);
         if (requestLine == null || requestLine.isEmpty()) {
             return;
         }
@@ -141,13 +158,13 @@ final class McpHttp {
         }
         String authorization = null;
         int contentLength = -1;
-        int headerBytes = requestLine.length();
+        int headerBytes = requestLine.length() + 2;
         while (true) {
-            String line = readLine(input);
+            String line = readLine(input, Math.min(LINE_LIMIT, HEADER_LIMIT - headerBytes));
             if (line == null) {
                 return;
             }
-            headerBytes += line.length();
+            headerBytes += line.length() + 2;
             if (headerBytes > 65536) {
                 write(client.getOutputStream(), 400, "{\"error\":\"请求头太大\"}");
                 return;
@@ -156,24 +173,27 @@ final class McpHttp {
                 break;
             }
             int colon = line.indexOf(':');
-            if (colon <= 0) {
-                continue;
-            }
+            if (colon <= 0) { throw new HttpFailure(400); }
             String name = line.substring(0, colon).trim().toLowerCase(Locale.US);
             String value = line.substring(colon + 1).trim();
-            if ("authorization".equals(name) && authorization == null) {
+            if ("authorization".equals(name)) {
+                if (authorization != null) { throw new HttpFailure(400); }
                 authorization = value;
             } else if ("content-length".equals(name)) {
-                try {
-                    contentLength = Integer.parseInt(value);
-                } catch (NumberFormatException error) {
-                    contentLength = -1;
-                }
+                if (contentLength != -1 || !value.matches("[0-9]+")) { throw new HttpFailure(400); }
+                try { contentLength = Integer.parseInt(value); }
+                catch (NumberFormatException error) { throw new HttpFailure(413); }
+            } else if ("transfer-encoding".equals(name)) {
+                throw new HttpFailure(400);
             }
         }
         OutputStream output = client.getOutputStream();
         if (!"POST".equals(method) || !"/mcp".equals(target)) {
             write(output, 405, "{\"error\":\"只接受 POST /mcp\"}");
+            return;
+        }
+        if (!McpProtocol.authorized(authorization, token)) {
+            write(output, 401, "{\"error\":\"需要 Authorization: Bearer\"}");
             return;
         }
         if (contentLength < 0) {
@@ -190,19 +210,47 @@ final class McpHttp {
         write(output, reply.status, reply.body);
     }
 
-    private static String readLine(InputStream input) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+    private static final class HttpFailure extends IOException {
+        final int status;
+        HttpFailure(int status) { this.status = status; }
+    }
+
+    /** 绝对期限包括队列等待；持续滴入字节也不能延长期限。 */
+    private static final class DeadlineInput extends FilterInputStream {
+        final Socket client;
+        final long deadline;
+        DeadlineInput(Socket client, long deadline) throws IOException {
+            super(client.getInputStream());
+            this.client = client;
+            this.deadline = deadline;
+        }
+        private void remaining() throws IOException {
+            long nanos = deadline - System.nanoTime();
+            if (nanos <= 0) { throw new SocketTimeoutException(); }
+            client.setSoTimeout((int) Math.max(1, TimeUnit.NANOSECONDS.toMillis(nanos)));
+        }
+        @Override public int read() throws IOException { remaining(); return in.read(); }
+        @Override public int read(byte[] b, int off, int len) throws IOException {
+            remaining();
+            return in.read(b, off, len);
+        }
+    }
+
+    private static String readLine(InputStream input, int limit) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(256, Math.max(0, limit)));
         while (true) {
             int value = input.read();
             if (value < 0) {
-                return out.size() == 0 ? null : out.toString("UTF-8");
+                if (out.size() == 0) { return null; }
+                throw new HttpFailure(400);
             }
-            if (value == '\n') {
-                return out.toString("UTF-8");
+            if (value == '\r') {
+                if (input.read() != '\n') { throw new HttpFailure(400); }
+                return out.toString("US-ASCII");
             }
-            if (value != '\r') {
-                out.write(value);
-            }
+            if (value < 32 || value > 126) { throw new HttpFailure(400); }
+            if (out.size() >= limit - 2) { throw new HttpFailure(431); }
+            out.write(value);
         }
     }
 
@@ -234,6 +282,10 @@ final class McpHttp {
             reason = "Unauthorized";
         } else if (status == 405) {
             reason = "Method Not Allowed";
+        } else if (status == 408) {
+            reason = "Request Timeout";
+        } else if (status == 431) {
+            reason = "Request Header Fields Too Large";
         } else if (status == 413) {
             reason = "Payload Too Large";
         } else {

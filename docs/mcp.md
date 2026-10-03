@@ -56,7 +56,7 @@ Accept: application/json, text/event-stream
 Authorization: Bearer <mcp.sh 打印的令牌>
 ```
 
-当前 `initialize` 返回协议版本 `2025-03-26`，`serverInfo.name` 为「手机工位」，`serverInfo.version` 为手机 APK 的版本名。成功之后就可以 `tools/list` 和 `tools/call`；实际工具集合以这次的 `tools/list` 为准。没有 `Mcp-Session-Id`。没有 `id` 或 `id` 为 null 的通知回 HTTP 202。手机服务请求体上限 8 MiB；中继与桌面网关上限 18 MiB。别的路径或方法回 405，正文是「只接受 POST /mcp」。
+当前 `initialize` 返回协议版本 `2025-03-26`，`serverInfo.name` 为「手机工位」，`serverInfo.version` 为手机 APK 的版本名。成功之后就可以 `tools/list` 和 `tools/call`；实际工具集合以这次的 `tools/list` 为准。没有 `Mcp-Session-Id`。没有 `id` 或 `id` 为 null 的通知回 HTTP 202。手机服务在读取正文前鉴权；单行请求头上限 8 KiB、全部请求头上限 64 KiB，超过即时回 431。包括排队在内的请求读取绝对期限为 20 秒，超时回 408，逐字节发送不能续期；拒绝重复长度和分块编码。手机服务请求体上限 8 MiB；中继与桌面网关上限 18 MiB。别的路径或方法回 405，正文是「只接受 POST /mcp」。
 
 工具失败写在结果里，`isError` 为真，正文是 `{"error":"…"}`。JSON 解析失败才是协议错误，例如 `-32700`。
 
