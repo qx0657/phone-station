@@ -3,6 +3,10 @@ package dev.phonestation.adbkeep;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.nio.ByteBuffer;
@@ -345,7 +349,7 @@ final class FileOps {
             throw new FileFailure("需要文本");
         }
         Path path = resolve(input);
-        byte[] body = text.getBytes(StandardCharsets.UTF_8);
+        byte[] body = encodeLimited(text, StandardCharsets.UTF_8, TEXT_LIMIT);
         replaceWhole(path, body, version);
         return scanned(described(path), filesForScan(path));
     }
@@ -361,25 +365,23 @@ final class FileOps {
         requireVersion(path, version);
         Decoded decoded = decode(readLimited(path));
         String text = decoded.text;
-        StringBuilder out = new StringBuilder();
-        int from = 0;
+        LimitedBytes out = new LimitedBytes(TEXT_LIMIT);
+        out.write(decoded.bom, 0, decoded.bom.length);
         int count = 0;
-        while (from <= text.length()) {
-            int at = text.indexOf(find, from);
-            if (at < 0) {
-                break;
+        try (Writer writer = new OutputStreamWriter(out, decoded.charset)) {
+            int from = 0;
+            while (from <= text.length()) {
+                int at = text.indexOf(find, from);
+                if (at < 0) { break; }
+                writer.write(text, from, at - from);
+                writer.write(replacement);
+                from = at + find.length();
+                count++;
             }
-            out.append(text, from, at);
-            out.append(replacement);
-            from = at + find.length();
-            count++;
-        }
-        if (count == 0) {
-            throw new FileFailure("没有匹配");
-        }
-        out.append(text, from, text.length());
-        byte[] encoded = out.toString().getBytes(decoded.charset);
-        replaceWhole(path, concat(decoded.bom, encoded), version);
+            if (count == 0) { throw new FileFailure("没有匹配"); }
+            writer.write(text, from, text.length() - from);
+        } catch (IOException error) { throw io(error); }
+        replaceWhole(path, out.bytes(), version);
         Json described = described(path);
         described.put("replacements", count);
         return scanned(described, filesForScan(path));
@@ -392,7 +394,9 @@ final class FileOps {
         Path path = regular(input);
         requireVersion(path, version);
         Decoded decoded = decode(readLimited(path));
-        appendBytes(path, text.getBytes(decoded.charset));
+        byte[] extra = encodeLimited(text, decoded.charset, TEXT_LIMIT - attributes(path).size());
+        requireVersion(path, version);
+        appendBytes(path, extra);
         return scanned(described(path), filesForScan(path));
     }
 
@@ -856,16 +860,40 @@ final class FileOps {
         }
     }
 
+    private static final class LimitedBytes extends OutputStream {
+        private final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        private final long limit;
+        LimitedBytes(long limit) { this.limit = limit; }
+        @Override public void write(int value) { check(1); data.write(value); }
+        @Override public void write(byte[] bytes, int offset, int length) {
+            check(length);
+            data.write(bytes, offset, length);
+        }
+        private void check(int length) {
+            if ((long) data.size() + length > limit) {
+                throw new FileFailure("文本结果超过 8 MiB，用字节工具；原文件未修改");
+            }
+        }
+        byte[] bytes() { return data.toByteArray(); }
+    }
+
+    private static byte[] encodeLimited(String text, Charset charset, long budget) {
+        LimitedBytes bytes = new LimitedBytes(budget);
+        try (Writer writer = new OutputStreamWriter(bytes, charset)) { writer.write(text); }
+        catch (IOException error) { throw io(error); }
+        return bytes.bytes();
+    }
+
     private byte[] readLimited(Path path) {
-        long size = attributes(path).size();
-        if (size > TEXT_LIMIT) {
-            throw new FileFailure("文件太大，用字节工具");
-        }
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException error) {
-            throw io(error);
-        }
+        if (attributes(path).size() > TEXT_LIMIT) { throw new FileFailure("文件太大，用字节工具"); }
+        // 文件在初次 stat 后被外部增大，也不能让 readAllBytes 无限制分配。
+        LimitedBytes out = new LimitedBytes(TEXT_LIMIT);
+        try (InputStream input = Files.newInputStream(path, NOFOLLOW)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) { out.write(buffer, 0, count); }
+            return out.bytes();
+        } catch (IOException error) { throw io(error); }
     }
 
     private BasicFileAttributes attributes(Path path) {

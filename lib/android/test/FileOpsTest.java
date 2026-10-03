@@ -43,6 +43,23 @@ final class FileOpsTest {
             ops.appendText("note.txt", "!", replaced.get("targetVersion").string());
             expect("abbbc!", ops.readText("note.txt", 1, 10).get("text").string());
 
+            ops.writeText("expand.txt", "a".repeat(8193), null);
+            String expandVersion = ops.stat("expand.txt").get("targetVersion").string();
+            mustThrow(() -> ops.replaceText("expand.txt", "a", "b".repeat(2048), expandVersion), "超过 8 MiB");
+            expect(expandVersion, ops.stat("expand.txt").get("targetVersion").string());
+            mustThrow(() -> ops.writeText("oversized.txt", "中".repeat(3_000_000), null), "超过 8 MiB");
+            expect(false, Files.exists(home.resolve("oversized.txt")));
+            ops.writeText("boundary.txt", "a".repeat((int) FileOps.TEXT_LIMIT), null);
+            String boundary = ops.stat("boundary.txt").get("targetVersion").string();
+            mustThrow(() -> ops.appendText("boundary.txt", "中", boundary), "超过 8 MiB");
+            expect(FileOps.TEXT_LIMIT, Files.size(home.resolve("boundary.txt")));
+            // UTF-16 BOM 算进结果预算，保留原编码。
+            Files.write(home.resolve("utf16.txt"), new byte[] {(byte) 0xff, (byte) 0xfe, 65, 0});
+            String utf16 = ops.stat("utf16.txt").get("targetVersion").string();
+            mustThrow(() -> ops.replaceText("utf16.txt", "A", "中".repeat((int) FileOps.TEXT_LIMIT / 2), utf16), "超过 8 MiB");
+            ops.replaceText("utf16.txt", "A", "中文", utf16);
+            expect("FFFE2D4E8765", FileOps.toHex(Files.readAllBytes(home.resolve("utf16.txt"))));
+
             byte[] gbk = new byte[] {(byte) 0xd6, (byte) 0xd0};
             Files.write(home.resolve("gb.txt"), gbk);
             expect("中", ops.readText("gb.txt", 1, 5).get("text").string());
