@@ -7,6 +7,10 @@ struct ConnectionFrames {
     let format: Format
     private var buffer = Data()
 
+    init(format: Format) {
+        self.format = format
+    }
+
     mutating func append(_ bytes: Data) -> [String] {
         buffer.append(bytes)
         var frames: [String] = []
