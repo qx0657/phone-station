@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
     "ReconnectPolicy": ["Reconnect"],
     "AdbCommandLine": ["AdbCommandLine"],
+    "CommandSession": ["StationState", "StationRunner", "ClipboardProtocol", "AdbCommandLine", "CommandSession"],
     "RemoteRelayProfile": ["RemoteRelayProfile", "StationRunner"],
     "ClipboardSyncPolicy": ["ClipboardProtocol"],
     "ClipboardSession": ["ClipboardProtocol", "ClipboardSession"],

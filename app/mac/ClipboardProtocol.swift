@@ -191,7 +191,7 @@ enum ClipboardRPC {
         let priority: Int
         switch name {
         case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll", "station_notification_icon": priority = 1
-        case "station_device_status", "station_controls_status", "station_notification_status",
+        case "station_device_status", "station_controls_status", "station_shell_status", "station_notification_status",
              "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes": priority = 2
         default: priority = 0
         }

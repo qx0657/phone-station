@@ -102,6 +102,12 @@ python3 "$ROOT/lib/test_remote_ops.py"
   "$ROOT/app/mac/InstallTask.swift" "$ROOT/app/mac/InstallTaskTest.swift" \
   -o "$ROOT/build/.phone-station/install-task-test"
 "$ROOT/build/.phone-station/install-task-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/StationState.swift" "$ROOT/app/mac/StationRunner.swift" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/AdbCommandLine.swift" \
+  "$ROOT/app/mac/CommandSession.swift" "$ROOT/app/mac/CommandSessionTest.swift" \
+  -o "$ROOT/build/.phone-station/command-session-test"
+"$ROOT/build/.phone-station/command-session-test"
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"

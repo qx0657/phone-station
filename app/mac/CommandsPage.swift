@@ -7,7 +7,9 @@ struct CommandsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             StationRows.subpageHeader("adb 命令") { station.page = .main }
             VStack(alignment: .leading, spacing: 12) {
-                Text("点一行执行。铅笔用来修改。")
+                Text(station.commands.remoteRoute() == nil
+                     ? "点一行执行。铅笔用来修改。"
+                     : "远程连接可执行 shell 后的手机命令。铅笔用来修改。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -28,6 +30,9 @@ struct CommandsPage: View {
                 if let output = station.commands.commandOutput {
                     commandOutputCard(output)
                 }
+                if let pending = station.commands.pendingCommand {
+                    pendingCommandCard(pending)
+                }
                 StationRows.navigationRow("新建命令", symbol: "plus") { station.commands.beginNew() }
                     .elevatedGroup()
                 shellRow
@@ -35,10 +40,16 @@ struct CommandsPage: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear {
+            station.commands.monitoring = true
+            station.commands.refreshRemote()
+        }
+        .onDisappear { station.commands.monitoring = false }
     }
 
     private func commandRow(_ command: SavedAdbCommand) -> some View {
-        HStack(spacing: 0) {
+        let reason = station.commands.disabledReason(for: command)
+        return HStack(spacing: 0) {
             Button {
                 station.commands.run(command)
             } label: {
@@ -50,6 +61,12 @@ struct CommandsPage: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if let reason, station.feedback.activity == nil {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -57,8 +74,8 @@ struct CommandsPage: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressFadeStyle())
-            .disabled(!station.canOperate)
-            .opacity(station.canOperate ? 1 : 0.4)
+            .disabled(reason != nil)
+            .opacity(reason == nil ? 1 : 0.4)
             Button {
                 station.commands.beginEdit(command)
             } label: {
@@ -74,6 +91,30 @@ struct CommandsPage: View {
             .help("编辑\(command.name)")
         }
         .background { HoverWash(radius: 0) }
+    }
+
+    private func pendingCommandCard(_ pending: CommandSession.PendingCommand) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("「\(pending.name)」结果未确认")
+                .font(.body)
+            Text("查询原任务不会重新执行。结束跟进也不会停止手机上的命令。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(pending.jobID)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+            HStack {
+                Button("查询原任务") { station.commands.recoverCommand() }
+                    .disabled(!station.commands.canRecoverCommand)
+                Spacer()
+                Button("结束跟进") { station.commands.finishFollowingCommand() }
+                    .disabled(station.feedback.activity != nil)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(10)
+        .elevatedGroup()
     }
 
     private func commandOutputCard(_ output: CommandOutput) -> some View {
@@ -111,7 +152,7 @@ struct CommandsPage: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("在终端中打开 shell")
-                    Text("在「终端」里打开，序列号已经绑上")
+                    Text(station.commands.shellDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -129,8 +170,8 @@ struct CommandsPage: View {
         .buttonStyle(PressFadeStyle())
         .background { HoverWash(radius: 0) }
         .font(.body)
-        .disabled(!station.canOperate)
-        .opacity(station.canOperate ? 1 : 0.4)
+        .disabled(!station.commands.canOpenShell)
+        .opacity(station.commands.canOpenShell ? 1 : 0.4)
         .elevatedGroup()
     }
 }
@@ -181,7 +222,7 @@ struct CommandEditor: View {
                         }
                     }
                 }
-                Text("这些参数接在 adb -s 序列号 后面，不经过本机 shell。管道放在一对引号里，在手机上执行。")
+                Text("本地连接时，这些参数接在 adb -s 序列号 后面。远程可执行 shell 后的手机命令，需要 Shizuku 已启动并授权。管道放在一对引号里，在手机上执行。命令限时 15 秒，不提供交互输入。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

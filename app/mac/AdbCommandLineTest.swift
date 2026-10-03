@@ -9,6 +9,7 @@ enum AdbCommandLineTest {
         checkSerialRejected()
         checkEmpty()
         checkBackslash()
+        checkRemoteShell()
         checkBattery()
         precondition(StayAwakeReport.held("2147483647\r\n7\r\n"))
         for output in ["3600000\n7", "2147483647\n0", "2147483647", "null\n7", "2147483647\n7\nextra"] {
@@ -79,5 +80,23 @@ enum AdbCommandLineTest {
         precondition(BatteryReport.parse("status: 2\n") == nil)
         let scaled = BatteryReport.parse("level: 50\nscale: 200\nstatus: 2\n")
         precondition(scaled == BatteryReport.Reading(percent: 25, charging: true))
+    }
+
+    private static func checkRemoteShell() {
+        for (source, expected) in [
+            (#"shell "dumpsys window | grep mCurrentFocus""#, "dumpsys window | grep mCurrentFocus"),
+            ("shell input keyevent KEYCODE_WAKEUP", "input keyevent KEYCODE_WAKEUP"),
+            (#"shell "printf '%s\\n' \"$HOME\"; pwd""#, #"printf '%s\n' "$HOME"; pwd"#),
+            (#"shell echo hello\ world"#, "echo hello world")
+        ] {
+            let actual = try! AdbCommandLine.remoteShell(AdbCommandLine.validate(source))
+            precondition(actual == expected, "remote command text must match the phone shell text")
+        }
+        for source in ["shell", #"shell "  ""#, "shell -t top", "shell -T logcat", "shell -n ls", "install app.apk", "push a b", "exec-out screencap -p"] {
+            do {
+                _ = try AdbCommandLine.remoteShell(AdbCommandLine.validate(source))
+                preconditionFailure("unsupported remote adb command: \(source)")
+            } catch is AdbCommandLine.ParseError {} catch { preconditionFailure("unexpected error") }
+        }
     }
 }

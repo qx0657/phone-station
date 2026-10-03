@@ -2,26 +2,6 @@ import AppKit
 import Combine
 import Foundation
 
-enum StationPage {
-    case main
-    case connection
-    case commands
-    case editCommand
-    case more
-    case files
-    case about
-    case mcp
-    case remoteRelay
-    case clipboard
-    case notifications
-}
-
-@MainActor
-final class StationFeedback: ObservableObject {
-    @Published var activity: String?
-    @Published var notice: String?
-}
-
 /// 各页各自的状态在对应的 session 里。这里只负责把它们接上，并在页面之间跳转。
 @MainActor
 final class Station: ObservableObject {
@@ -150,6 +130,14 @@ final class Station: ObservableObject {
         torch.allow = { [weak self] in self?.canOperate ?? false }
         commands.allow = { [weak self] in self?.canOperate ?? false }
         commands.serial = { [weak self] in self?.link.serial }
+        commands.remoteRoute = { [weak self] in
+            guard let self, self.link.serial == nil, self.mcp.channel == "remote", self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
+        commands.recoveryRoute = { [weak self] in
+            guard let self, self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
         commands.openPage = { [weak self] page in self?.page = page }
         screen.onFinishedCapture = { [weak self] in self?.files.refresh() }
         link.onRefreshTorch = { [weak self] in self?.torch.refreshStatus() }
@@ -165,6 +153,9 @@ final class Station: ObservableObject {
             // RTT/status updates must not start another controls read each time.
             if !self.mcp.requestAvailable || (changed && self.remoteControls.monitoring) {
                 self.remoteControls.refresh()
+            }
+            if !self.mcp.requestAvailable || (changed && self.commands.monitoring) {
+                self.commands.refreshRemote()
             }
         }
         mcp.allowRemotePair = { [weak self] in self?.canOperate ?? false }

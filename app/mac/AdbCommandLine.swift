@@ -26,6 +26,22 @@ enum AdbCommandLine {
         return tokens
     }
 
+    /// adb joins the shell arguments with spaces before passing them to the phone's shell.
+    /// Preserve that command text; never interpret it in the Mac shell.
+    static func remoteShell(_ tokens: [String]) throws -> String {
+        guard tokens.first == "shell" else {
+            throw ParseError(message: "这条命令需要本地 adb 连接。")
+        }
+        let command = tokens.dropFirst().joined(separator: " ")
+        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ParseError(message: "交互式 shell 需要本地 adb 连接。")
+        }
+        guard !tokens[1].hasPrefix("-") else {
+            throw ParseError(message: "远程不支持 adb shell 选项，请只填写 shell 后的手机命令。")
+        }
+        return command
+    }
+
     static func tokenize(_ source: String) throws -> [String] {
         let characters = Array(normalize(source))
         var tokens: [String] = []
