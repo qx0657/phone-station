@@ -10,6 +10,8 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
@@ -19,6 +21,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import rikka.shizuku.Shizuku;
 
@@ -26,19 +29,35 @@ import rikka.shizuku.Shizuku;
 public final class PermissionActivity extends Activity {
     private static final int REQUEST_NOTIFY = 2;
     private static final int REQUEST_SHIZUKU = 3;
-    private static final String[][] STARTUP = {
-            {
-                    "com.hihonor.systemmanager",
-                    "com.hihonor.systemmanager.appcontrol.activity.StartupAppControlActivity"
-            },
+    private static final String[][] HONOR_STARTUP = {
+            // PGT-AN20 Android 15：普通入口可用，AppControl 入口要求系统签名权限。
             {
                     "com.hihonor.systemmanager",
                     "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+            },
+            {
+                    "com.hihonor.systemmanager",
+                    "com.hihonor.systemmanager.appcontrol.activity.StartupAppControlActivity"
             }
     };
 
     private StationChrome ui;
-    private LinearLayout rows;
+    private LinearLayout pending;
+    private LinearLayout allowed;
+    private LinearLayout allowedRows;
+    private LinearLayout manual;
+    private StationChrome.Link allowedLink;
+    private boolean expanded;
+    private boolean active;
+    private String shown;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable refresh = new Runnable() {
+        @Override public void run() {
+            if (!active) { return; }
+            render();
+            handler.postDelayed(this, 1_000L);
+        }
+    };
     private final Shizuku.OnBinderReceivedListener shizukuBinder = this::render;
     private final Shizuku.OnRequestPermissionResultListener shizukuPermission =
             (code, grantResult) -> render();
@@ -47,17 +66,25 @@ public final class PermissionActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ui = new StationChrome(this);
-        ui.back("权限");
-        LinearLayout card = ui.card();
-        rows = new LinearLayout(this);
-        rows.setOrientation(LinearLayout.VERTICAL);
-        card.addView(rows, matchWrap());
+        ui.back("权限与检查");
+        expanded = savedInstanceState != null && savedInstanceState.getBoolean("allowed_expanded");
+        pending = ui.card();
+        allowed = ui.card();
+        allowedLink = ui.statusLinkRow(allowed, R.drawable.ic_status_permission, "已满足的权限", view -> {
+            expanded = !expanded;
+            paintExpanded();
+        });
+        allowedRows = new LinearLayout(this);
+        allowedRows.setOrientation(LinearLayout.VERTICAL);
+        allowed.addView(allowedRows, matchWrap());
+        manual = ui.card();
         Shizuku.addBinderReceivedListenerSticky(shizukuBinder);
         Shizuku.addRequestPermissionResultListener(shizukuPermission);
     }
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         Shizuku.removeBinderReceivedListener(shizukuBinder);
         Shizuku.removeRequestPermissionResultListener(shizukuPermission);
         super.onDestroy();
@@ -67,7 +94,19 @@ public final class PermissionActivity extends Activity {
     protected void onResume() {
         super.onResume();
         AlertChannel.ensure(this);
-        render();
+        active = true;
+        handler.post(refresh);
+    }
+
+    @Override protected void onPause() {
+        active = false;
+        handler.removeCallbacks(refresh);
+        super.onPause();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("allowed_expanded", expanded);
+        super.onSaveInstanceState(state);
     }
 
     @Override
@@ -79,7 +118,6 @@ public final class PermissionActivity extends Activity {
     }
 
     private void render() {
-        rows.removeAllViews();
         PermissionProbe facts = PermissionProbe.read(this);
         PermissionCopy.Board board = PermissionCopy.present(
                 facts.canWrite,
@@ -90,15 +128,83 @@ public final class PermissionActivity extends Activity {
                 facts.alarm,
                 KeeperStore.alertPops(this),
                 ShizukuLink.read(this));
-        for (int i = 0; i < board.rows.length; i++) {
-            if (i > 0) {
-                ui.hairline(rows, 16);
+        Json issues = HealthStatus.attention(PhoneHealth.read(this).get("issues"));
+        Json extra = Json.arr();
+        boolean shizukuPending = false;
+        StringBuilder key = new StringBuilder(issues.emit());
+        for (PermissionCopy.Row row : board.rows) {
+            key.append(row.title).append(row.value).append(row.tone);
+            if ("Shizuku".equals(row.title) && row.tone == PermissionCopy.Tone.WAITING) {
+                shizukuPending = true;
             }
-            addRow(board.rows[i]);
+        }
+        if (key.toString().equals(shown)) { return; }
+        shown = key.toString();
+        for (Json issue : issues.array()) {
+            String id = issue.get("id").string();
+            if (id.startsWith("permission-") || ("shizuku".equals(id) && shizukuPending)) { continue; }
+            extra.add(issue);
+        }
+        int count = board.missing + extra.array().size();
+        pending.removeAllViews();
+        allowedRows.removeAllViews();
+        manual.removeAllViews();
+        ui.groupTitle(pending, count == 0 ? "权限已就绪" : "有 " + count + " 项需要处理");
+        ui.paragraph(pending, count == 0
+                ? "手机端权限已满足。Mac 接收状态可在剪贴板和通知页查看。"
+                : "先处理下面这些项目；返回后会自动更新检查结果。");
+        for (PermissionCopy.Row row : board.rows) {
+            if (row.tone == PermissionCopy.Tone.WAITING) {
+                ui.hairline(pending, 16);
+                addRow(pending, row);
+            } else if (row.tone == PermissionCopy.Tone.HELD) {
+                ui.hairline(allowedRows, 16);
+                addRow(allowedRows, row);
+            } else {
+                ui.groupTitle(manual, "后台运行");
+                ui.paragraph(manual, "自启动状态需到系统中手动确认。");
+                addRow(manual, row);
+            }
+        }
+        for (Json issue : extra.array()) {
+            ui.hairline(pending, 16);
+            ui.issueRow(pending, issue.get("title").string(), issue.get("detail").string(),
+                    view -> openIssue(issue));
+        }
+        int granted = board.rows.length - board.missing - 1;
+        allowed.setVisibility(granted == 0 ? View.GONE : View.VISIBLE);
+        allowedLink.value.setText(granted + " 项");
+        allowedLink.value.setTextColor(ui.muted());
+        ui.paintOn(allowedLink.mark, true);
+        paintExpanded();
+    }
+
+    private void paintExpanded() {
+        allowedRows.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        allowedLink.chevron.setRotation(expanded ? 270 : 90);
+        String label = "已满足的权限，" + allowedLink.value.getText() + "，" + (expanded ? "收起" : "展开");
+        allowedLink.row.setContentDescription(label);
+        allowedLink.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        if (Build.VERSION.SDK_INT >= 30) {
+            allowedLink.row.setStateDescription(expanded ? "已展开" : "已折叠");
         }
     }
 
-    private void addRow(PermissionCopy.Row row) {
+    private void openIssue(Json issue) {
+        if ("shizuku".equals(issue.get("id").string())) { openShizuku(); return; }
+        String destination = issue.get("destination").string();
+        if ("mcp".equals(destination)) {
+            startActivity(new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_PAGE, "mcp"));
+        } else if ("notifications".equals(destination)) {
+            startActivity(new Intent(this, NotificationActivity.class));
+        } else if ("remoteRelay".equals(destination)) {
+            startActivity(new Intent(this, RemoteRelayActivity.class));
+        } else {
+            startActivity(new Intent(this, ClipboardActivity.class));
+        }
+    }
+
+    private void addRow(LinearLayout parent, PermissionCopy.Row row) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setMinimumHeight(ui.dp(52));
@@ -137,9 +243,10 @@ public final class PermissionActivity extends Activity {
         }
         block.addView(line, matchWrap());
 
-        if (!row.hint.isEmpty()) {
+        String detail = row.tone == PermissionCopy.Tone.WAITING ? PermissionCopy.impact(row) + row.hint : row.hint;
+        if (!detail.isEmpty()) {
             TextView hint = ui.text(13);
-            hint.setText(row.hint);
+            hint.setText(detail);
             hint.setTextColor(ui.muted());
             hint.setIncludeFontPadding(false);
             hint.setLineSpacing(0f, 1.3f);
@@ -160,7 +267,7 @@ public final class PermissionActivity extends Activity {
             block.setClickable(true);
             block.setOnClickListener(view -> open(row.action));
         }
-        rows.addView(block, matchWrap());
+        parent.addView(block, matchWrap());
     }
 
     private void open(PermissionCopy.Action action) {
@@ -247,21 +354,29 @@ public final class PermissionActivity extends Activity {
     }
 
     private void openStartup() {
-        for (String[] target : STARTUP) {
-            Intent intent = new Intent();
-            intent.setClassName(target[0], target[1]);
-            if (start(intent)) {
-                return;
+        if ("HONOR".equalsIgnoreCase(Build.BRAND) || "HONOR".equalsIgnoreCase(Build.MANUFACTURER)) {
+            for (String[] target : HONOR_STARTUP) {
+                Intent intent = new Intent();
+                intent.setClassName(target[0], target[1]);
+                if (start(intent)) {
+                    return;
+                }
             }
         }
+        Intent details = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        details.setData(Uri.parse("package:" + getPackageName()));
+        if (start(details) || start(new Intent(Settings.ACTION_APPLICATION_SETTINGS))) {
+            return;
+        }
         Log.w(KeeperEngine.TAG, "startup settings unavailable");
+        Toast.makeText(this, "无法打开，请在系统设置中查找应用的后台运行或自启动设置。", Toast.LENGTH_LONG).show();
     }
 
     private boolean start(Intent intent) {
         try {
             startActivity(intent);
             return true;
-        } catch (ActivityNotFoundException error) {
+        } catch (ActivityNotFoundException | SecurityException error) {
             Log.w(KeeperEngine.TAG, "settings unavailable", error);
             return false;
         }

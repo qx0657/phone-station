@@ -26,11 +26,13 @@ if [[ -z $GO ]]; then
 fi
 "$GO" -C "$ROOT/lib/remote-gateway" test -race ./...
 "$GO" -C "$ROOT/lib/remote-gateway" build -trimpath \
-  -o "$ROOT/build/.phone-station/phone-relay-gateway" .
+  -o "$ROOT/build/.phone-station/.phone-relay-gateway-$$" .
+mv -f "$ROOT/build/.phone-station/.phone-relay-gateway-$$" "$ROOT/build/.phone-station/phone-relay-gateway"
 python3 "$ROOT/lib/test_mcp_pair.py"
 "$SWIFTC" -O -target "$TARGET" -sdk "$SDK" -framework Security \
-  -o "$ROOT/build/.phone-station/phone-relay-keychain" \
+  -o "$ROOT/build/.phone-station/.phone-relay-keychain-$$" \
   "$ROOT/lib/remote-gateway/keychain/main.swift"
+mv -f "$ROOT/build/.phone-station/.phone-relay-keychain-$$" "$ROOT/build/.phone-station/phone-relay-keychain"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 \
   -target "$TARGET" -sdk "$SDK" \
@@ -56,6 +58,29 @@ CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSyncPolicyTest.swift" \
   -o "$CLIPBOARD_TEST"
 "$CLIPBOARD_TEST"
+CLIPBOARD_SESSION_TEST="$ROOT/build/.phone-station/clipboard-session-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
+  "$ROOT/app/mac/ClipboardSessionTest.swift" -o "$CLIPBOARD_SESSION_TEST"
+"$CLIPBOARD_SESSION_TEST"
+HEALTH_TEST="$ROOT/build/.phone-station/device-health-session-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/DeviceHealthSession.swift" \
+  "$ROOT/app/mac/DeviceHealthSessionTest.swift" -o "$HEALTH_TEST"
+"$HEALTH_TEST"
+NOTIFICATION_TEST="$ROOT/build/.phone-station/notification-session-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  -framework UserNotifications \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/NotificationProtocol.swift" \
+  "$ROOT/app/mac/NotificationDelivery.swift" "$ROOT/app/mac/NotificationSession.swift" \
+  "$ROOT/app/mac/NotificationBanner.swift" \
+  "$ROOT/app/mac/NotificationSessionTest.swift" -o "$NOTIFICATION_TEST"
+"$NOTIFICATION_TEST"
+BANNER_TEST="$ROOT/build/.phone-station/notification-banner-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/NotificationProtocol.swift" "$ROOT/app/mac/NotificationBanner.swift" \
+  "$ROOT/app/mac/NotificationBannerTest.swift" -o "$BANNER_TEST"
+"$BANNER_TEST"
 python3 "$ROOT/lib/test_notify_mcp.py"
 python3 "$ROOT/lib/test_remote_ops.py"
 "$ROOT/lib/android/build.sh"
@@ -107,14 +132,14 @@ done
 "$SWIFTC" -parse-as-library -swift-version 5 \
   -target "$TARGET" -sdk "$SDK" \
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
-  -framework AVFoundation -framework ImageIO \
+  -framework AVFoundation -framework ImageIO -framework UserNotifications \
   "${test_sources[@]}" "$ROOT/app/mac/ConnectionStatusTest.swift" \
   -o "$CONNECTION_TEST"
 "$CONNECTION_TEST"
 "$SWIFTC" -parse-as-library -swift-version 5 -O \
   -target "$TARGET" -sdk "$SDK" \
   -framework SwiftUI -framework AppKit -framework ServiceManagement -framework QuartzCore \
-  -framework AVFoundation -framework ImageIO \
+  -framework AVFoundation -framework ImageIO -framework UserNotifications \
   "${sources[@]}" \
   -o "$CONTENTS/MacOS/PhoneStation"
 

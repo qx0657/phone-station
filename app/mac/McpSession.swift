@@ -11,6 +11,8 @@ final class McpSession: ObservableObject {
     @Published private(set) var gatewayReady = false
     @Published private(set) var localOnline = false
     @Published private(set) var remoteOnline = false
+    @Published private(set) var remoteChecking = false
+    @Published private(set) var remoteConfigured: Bool?
     @Published var configurePhone = false
     @Published var confirmingRemoteRemoval = false
     @Published private(set) var remoteProfile = RemoteRelayProfile()
@@ -19,13 +21,15 @@ final class McpSession: ObservableObject {
     @Published private(set) var remoteError: String?
 
     var onRemoteConnection: (Bool) -> Void = { _ in }
-    var onLocalRouteUnavailable: () -> Void = {}
+    var onRemoteChecking: (Bool) -> Void = { _ in }
     var allowRemotePair: () -> Bool = { false }
 
     private let feedback: StationFeedback
     private var generation = 0
     private var statusInFlight = false
     private var statusTimer: Timer?
+    private var statusStream: ConnectionStream?
+    private var streamedAt = Date.distantPast
     private var routeInFlight = false
     private var routeDirty = false
     private var lastRouteRefresh = Date.distantPast
@@ -34,15 +38,50 @@ final class McpSession: ObservableObject {
 
     init(feedback: StationFeedback) {
         self.feedback = feedback
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshStatus() }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, Date().timeIntervalSince(self.streamedAt) > 5 else { return }
+                self.refreshStatus()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         statusTimer = timer
     }
 
+    func startWatch() {
+        guard statusStream == nil else { return }
+        let stream = ConnectionStream(executable: URL(fileURLWithPath: "/bin/zsh"),
+                                      arguments: [StationRunner.script("mcp.sh").path, "watch"], format: .lines)
+        stream.onFrame = { [weak self] output in
+            guard let self else { return }
+            self.streamedAt = Date()
+            self.apply(output)
+        }
+        stream.onDisconnect = { [weak self] in
+            self?.streamedAt = .distantPast
+            self?.apply("off")
+            self?.refreshStatus()
+        }
+        statusStream = stream
+        stream.start()
+        refreshStatus()
+    }
+
+    var remoteStatusLabel: String {
+        if remoteOnline { return "已连接" }
+        if remoteChecking { return "确认连接中" }
+        if remoteConfigured == false { return "未配置" }
+        if !gatewayReady { return "网关未启动" }
+        return "未连通 · 自动检测"
+    }
+
     var summary: String {
-        listening ? (channel == "remote" ? "远程中继" : "本地 adb") : (gatewayReady ? "等待手机" : "未启动")
+        remoteChecking && !listening ? "确认连接中" : listening ? (channel == "remote" ? "远程中继" : "本地 adb") : (gatewayReady ? "等待手机" : "未启动")
+    }
+
+    func stopWatch() {
+        statusStream?.stop(); statusStream = nil
+        statusTimer?.invalidate(); statusTimer = nil
     }
 
     func noteSerial(_ serial: String?) {
@@ -80,7 +119,6 @@ final class McpSession: ObservableObject {
                 guard ticket == self.generation else { return }
                 self.feedback.activity = nil
                 if result.succeeded {
-                    self.apply(result.output)
                     self.feedback.notice = "MCP服务已打开。"
                     self.refreshStatus()
                 } else {
@@ -211,11 +249,12 @@ final class McpSession: ObservableObject {
         guard !statusInFlight else { return }
         statusInFlight = true
         let ticket = generation
+        let startedAt = Date()
         Task.detached(priority: .utility) {
             let result = StationRunner.scriptResult("mcp.sh", ["snapshot"], timeout: 2)
             await MainActor.run {
                 self.statusInFlight = false
-                guard ticket == self.generation else { return }
+                guard ticket == self.generation, self.streamedAt <= startedAt else { return }
                 if result.succeeded {
                     self.apply(result.output)
                 } else {
@@ -227,19 +266,20 @@ final class McpSession: ObservableObject {
 
     private func apply(_ output: String) {
         let status = McpStatus(output)
-        endpoint = status.endpoint
-        token = status.token
-        channel = status.channel
-        listening = status.listening
-        gatewayReady = status.gatewayReady
-        localOnline = status.localOnline ?? (status.channel == "local")
-        remoteOnline = status.remoteConnected
+        if endpoint != status.endpoint { endpoint = status.endpoint }
+        if token != status.token { token = status.token }
+        if channel != status.channel { channel = status.channel }
+        if listening != status.listening { listening = status.listening }
+        if gatewayReady != status.gatewayReady { gatewayReady = status.gatewayReady }
+        let local = status.localOnline ?? (status.channel == "local")
+        if localOnline != local { localOnline = local }
+        if remoteOnline != status.remoteConnected { remoteOnline = status.remoteConnected }
+        if remoteChecking != status.remoteChecking { remoteChecking = status.remoteChecking }
+        if remoteConfigured != status.remoteConfigured { remoteConfigured = status.remoteConfigured }
         // 启动脚本只返回访问地址和令牌，接着读 status 才有通道探测结果。
         if !status.listening || !status.channel.isEmpty {
             onRemoteConnection(status.remoteConnected)
-            if status.channel == "remote" && status.localOnline == false {
-                onLocalRouteUnavailable()
-            }
+            onRemoteChecking(status.remoteChecking)
         }
     }
 }

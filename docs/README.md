@@ -10,7 +10,7 @@
 | [mcp.md](mcp.md) | `scripts/mcp.sh` | 手机工位 MCP、Mac 统一网关、可配置远程中继、两端配置界面、鉴权与路径边界，以及 PGT-AN20 上读到和读不到的地方 |
 | [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku shell、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
 | [clipboard.md](clipboard.md) | 两端「共享剪贴板」页与 `station_clipboard_*` | Shizuku 后台读取、双向交换、回传和冲突处理、重连基线、敏感内容及文字范围 |
-| [notify.md](notify.md) | `scripts/notify.sh` | 为什么不走通知音量。下拉通知和铃声默认都由手机上的「手机工位」完成，通知本身不发声，铃声走媒体音量；「提醒弹出」开着时会在屏幕上弹出。`--agent` 在右侧放 Grok、Claude 或 Codex 的图标。`--shell` 仍用原来的 shell 通知，并把铃声转成 PCM，`--stack` 另发一条。全局 hook 的事件和安装位置 |
+| [notify.md](notify.md) | 两端通知设置与 `scripts/notify.sh` | 手机所选应用的新通知同步到 Mac：系统通知使用权、白名单、短期接收队列与断线基线。电脑提醒发到手机：下拉通知与铃声、媒体音量、`--agent` 图标、`--shell` PCM 及全局 hook |
 | [torch.md](torch.md) | `scripts/torch.sh` | 为什么不能写灯节点。闪光灯要留在手机上的进程里；跟随声音采的是系统混音 |
 | [screenshot-cleanup.md](screenshot-cleanup.md) | 图库截图 | 哪些截图可以删。界面类和重复张的像素阈值。张数是 2026-09-29 这台 PGT-AN20 上的 |
 | [adb-keep.md](adb-keep.md) | `lib/android/`、`scripts/android.sh` | 手机上的「手机工位」。为什么无线调试会自己关，以及何时写回去。界面上的已连接合并 adb 心跳和远程通道；adb 断开后靠写成 0 或 15 秒过期复位，远程在线时仍显示已连接。权限页列出读得到的授权，其中 Shizuku 要服务在跑才能授权；自启动读不到。Shizuku 启动后活到重启，重启后要无线调试开着才能再拉起。开机自启还要在荣耀的应用启动管理里允许 |

@@ -61,8 +61,10 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 
 ## 已验证设备上的命令差异
 
+手机通知同步与电脑会话提醒分开：手机「首页 → 通知」的「手机通知 → Mac」使用用户授予的系统通知使用权，按手机端勾选的包名白名单过滤，默认关闭且不选应用。不要自动授权或替用户选应用。`station_notification_status` 只读且不返回正文；`station_notification_configure` 改开关；`station_notification_poll` 是 Mac 接收会话，会读取白名单内的新通知并更新心跳，不当只读探测、不自动重放。首次、断线或配置变化后不补发旧通知。电脑提醒的显示和铃声在同页「电脑提醒 → 手机」中。长说明与验证在 `docs/notify.md`。
+
 - 震动服务是 `cmd vibrator_manager`，没有 `cmd vibrator`。间隔用 `waveform -a -r 0`，停顿那一步幅度为 0。
-- `cmd notification post` 的通知对象是 `sound=null`，不能当提示音。PGT-AN20 上它的 `shell_cmd` 通道仍挂着系统通知音。`notify.sh` 默认让手机上的「手机工位」发一条无声的下拉通知，同一条原地更新；`--shell` 仍用原来的 shell 通知。铃声仍走媒体音量。`tinyplay` 打不开声卡，也不能播 ogg。
+- `cmd notification post` 的通知对象是 `sound=null`，不能当提示音。PGT-AN20 上它的 `shell_cmd` 通道仍挂着系统通知音。`notify.sh` 默认让手机上的「手机工位」发无声的下拉通知，覆盖最新一条或逐条保留由手机「首页 → 通知 → 电脑提醒 → 手机 → 显示方式」统一决定，旧的 `mode` 或 `--stack` 不再覆盖手机设置；`--shell` 仍用原来的 shell 通知与 `--stack` 参数。铃声仍走媒体音量。`tinyplay` 打不开声卡，也不能播 ogg。
 - 震动模式下通知音量流被静音。`notify.sh` 默认让手机上的「手机工位」用 `USAGE_MEDIA` 播放「通知」里选的铃声；没选过就用系统通知铃声，选了静音则不播。下拉通知本身不发声。`--shell` 仍把铃声转成 PCM。改壳上的播放时编辑 `lib/notify-sound/` 里的源码，再跑 `lib/notify-sound/build.sh`。不要手改 `lib/notify-sound.dex`，也不要把 R8 的 jar 放进仓库。
 - 系统提示不允许截屏的界面，`screencap` 和 scrcpy 都是黑的。不要加绕过 `FLAG_SECURE` 的脚本，也不要改系统框架。
 - 闪光灯的灯节点 shell 写不了，`settings put secure flashlight_enabled` 也点不亮。`torch.sh` 用 `CameraManager`，调用进程退出后灯会灭，所以开着要留一个 `app_process`。档数读 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL`，这台后置是 4 档；`torch.sh` 不要把 4 写死成唯一合法范围。跟随声音时不要按拍 `setTorchMode(false)`：这会拆掉闪光灯会话，高通相机服务连续开关大约一分钟后会自己退出。短暂停顿保持上一档，安静大约 0.8 秒才关灯。`turnOnTorchWithStrengthLevel` 失败，或相机编号暂时失效时，不要退出监听进程，重新找闪光灯再试。见 `docs/torch.md`。

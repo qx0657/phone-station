@@ -4,7 +4,7 @@ package dev.phonestation.adbkeep;
  * 权限页每一行的字。没有 Android 依赖，构建时在电脑上跑测试。
  *
  * <p>读得到、又该开着却没开的，算进主界面的「还有 N 项」。自启动系统不让读，单独一行，不计入。
- * Shizuku 用于 shell 和剪贴板后台读取，不计入普通文件和提醒需要的权限。
+ * Shizuku 用于 shell 和剪贴板后台读取，不可用时同样计入首页待处理项。
  */
 final class PermissionCopy {
     enum Tone {
@@ -74,6 +74,19 @@ final class PermissionCopy {
 
     private PermissionCopy() {}
 
+    static String impact(Row row) {
+        switch (row.title) {
+            case "写入系统设置": return "无线调试控制、自动保持和保持亮屏不可用。";
+            case "所有文件访问": return "手机文件访问不可用。";
+            case "通知": return "不弹出".equals(row.value)
+                    ? "电脑提醒无法弹出横幅。" : "手机无法显示会话提醒和运行状态通知。";
+            case "电池优化": return "后台连接和同步可能被系统中断。";
+            case "精确闹钟": return "无线调试的后台自动保持可能延迟。";
+            case "Shizuku": return "共享剪贴板和远程 shell 不可用。";
+            default: return "";
+        }
+    }
+
     static Board present(
             boolean canWrite,
             boolean notifications,
@@ -123,12 +136,12 @@ final class PermissionCopy {
             case GRANTED:
                 return granted("Shizuku", "已授权");
             case DENIED:
-                return noted("Shizuku", "未授权", "点这一行，在 Shizuku 里允许。", Action.SHIZUKU);
+                return missing("Shizuku", "未授权", "点这一行，在 Shizuku 里允许。", Action.SHIZUKU);
             case STOPPED:
-                return noted("Shizuku", "没在跑", "在 Shizuku 里启动。重启后要再启动一次。", Action.SHIZUKU);
+                return missing("Shizuku", "未启动", "在 Shizuku 里启动。重启后要再启动一次。", Action.SHIZUKU);
             case ABSENT:
             default:
-                return noted("Shizuku", "未安装", "先安装 Shizuku。", Action.NONE);
+                return missing("Shizuku", "未安装", "先安装 Shizuku。", Action.NONE);
         }
     }
 

@@ -39,7 +39,11 @@ curl -sS -X POST "$MCP" \
 
 读取手机当前文字用 `station_clipboard_get`；后台读取需要已经运行并授权的 Shizuku。它不返回标记为敏感的文字，锁屏时返回 `kind: locked`。`station_clipboard_state` 只读设置与内存预览。写入仍用 `station_clipboard_set`，需要用户明确要求。
 
-用户要两端自动同步时，Mac 菜单栏与手机侧栏都有「共享剪贴板」页。共享和自动同步是两个开关；首次连接和重连只建立基线，后续复制才同步。`station_clipboard_configure` 改设置，`station_clipboard_exchange` 是客户端交换并可能写手机的工具，不把它当只读探测，也不自动重放。文字最多 100000 个 UTF-16 单元；敏感或非文字内容不作为自动覆盖的目标。长说明在 `docs/clipboard.md`。
+用户要两端自动同步时，Mac 菜单栏与手机首页都有「共享剪贴板」页。新安装默认开启，开启共享时自动双向同步；另有默认关闭的「同步 Mac 图片到相册」，仅将新复制的 Mac 图片保存到手机相册并更新媒体库，不覆盖手机剪贴板。图片被跳过不显示暂停；旧版暂停状态可用「恢复自动同步」。界面不显示正文。MCP 可显式配置 automatic，仅开启 shared 时默认同时启用 automatic；首次连接、长时间断线和服务重启只建立基线，后续复制才同步。短暂切换先用 `station_clipboard_state` 的 `refresh: true` 只读核对版本，再恢复符合条件的新复制；结果未知的旧交换不重放。`station_clipboard_configure` 改设置，`station_clipboard_exchange` 是客户端交换并可能写手机的工具，不把它当只读探测，也不自动重放。文字最多 100000 个 UTF-16 单元；敏感或非文字内容不作为自动覆盖的目标。长说明在 `docs/clipboard.md`。
+
+## 手机通知
+
+手机所选应用通知同步到 Mac，入口是手机「首页 → 通知 → 手机通知 → Mac」和 Mac 首页「手机通知」。`station_notification_status` 只读状态和已选数量，不返回内容；配置工具仅改同步开关，应用白名单只能在手机上选，系统通知使用权与 Mac 显示权限由用户手动授予。`station_notification_poll` 是 Mac 专用的正文接收与心跳，非只读，不作为探测、不自动重放。默认关闭、默认不选应用，不自动授权或替用户勾选。细节见 `docs/notify.md`。
 
 ## Shell
 

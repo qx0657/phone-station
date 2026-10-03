@@ -107,6 +107,15 @@ final class McpProtocol {
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
+        if ("station_notification_status".equals(name)) { return host.notificationStatus(); }
+        if ("station_notification_configure".equals(name)) {
+            return host.notificationConfigure(Json.obj().put("enabled", requiredBool(args, "enabled")));
+        }
+        if ("station_notification_poll".equals(name)) { return host.notificationPoll(args); }
+        if ("station_notification_icon".equals(name)) {
+            Json pkg = args.get("packageName");
+            return host.notificationIcon(pkg == null || pkg.isNull() ? "" : pkg.string());
+        }
         if ("station_file_access_policy".equals(name)) {
             return files.policy();
         }
@@ -211,13 +220,6 @@ final class McpProtocol {
             return host(host).stayAwake(requiredBool(args, "on"));
         }
         if ("station_notify".equals(name)) {
-            String mode = optional(args, "mode");
-            if (mode == null || mode.isEmpty()) {
-                mode = "replace";
-            }
-            if (!"replace".equals(mode) && !"stack".equals(mode)) {
-                throw new IllegalArgumentException("方式是 replace 或 stack");
-            }
             String title = required(args, "title");
             String text = required(args, "text");
             if (title.length() > 200) {
@@ -226,11 +228,12 @@ final class McpProtocol {
             if (text.length() > 4000) {
                 throw new IllegalArgumentException("内容太长");
             }
-            AlertNote note = AlertNote.parse(title, text, mode, optional(args, "agent"), 0, 0);
-            if (note == null) {
+            if (title.isEmpty() || text.isEmpty()) {
                 throw new IllegalArgumentException("标题和内容不能是空的");
             }
-            return host(host).notify(note.title, note.text, note.stack, note.agent, optional(args, "sound"));
+            // 旧客户端传来的 mode 不再决定显示方式，统一由手机设置决定。
+            return host(host).notify(title, text, AlertNote.knownAgent(optional(args, "agent")),
+                    optional(args, "sound"));
         }
         if ("station_clipboard_set".equals(name)) {
             String text = required(args, "text");
@@ -243,7 +246,7 @@ final class McpProtocol {
             return host(host).clipboard(text);
         }
         if ("station_clipboard_get".equals(name)) { return host(host).clipboardGet(); }
-        if ("station_clipboard_state".equals(name)) { return host(host).clipboardState(); }
+        if ("station_clipboard_state".equals(name)) { return host(host).clipboardState(args); }
         if ("station_clipboard_configure".equals(name)) { return host(host).clipboardConfigure(args); }
         if ("station_clipboard_exchange".equals(name)) { return host(host).clipboardExchange(args); }
         if ("station_file_open".equals(name)) {
@@ -466,14 +469,13 @@ final class McpProtocol {
                         .put("maxOutputBytes", integer("stdout 和 stderr 合计保留的字节数；默认 32768。", 1, 65536)))));
         tools.add(tool(
                 "station_notify",
-                "发一条会话提醒。下拉通知和铃声与 notify.sh 相同：通知本身不发声，铃声走媒体音量。mode 省略时是 replace，原地更新同一条。stack 另发一条。agent 只认 Grok、Claude、Codex。",
+                "发一条会话提醒。显示最新一条或逐条保留，由手机工位的设置 → 通知 → 显示方式决定。通知本身不发声，铃声走媒体音量。agent 只认 Grok、Claude、Codex。",
                 false,
                 false,
                 schema(new String[] {"title", "text"}, Json.obj()
                         .put("title", text("标题。不能是空的，最多 200 字。"))
                         .put("text", text("内容。不能是空的，最多 4000 字。"))
-                        .put("mode", text("replace 或 stack。省略时是 replace。"))
-                        .put("agent", text("Grok、Claude 或 Codex。省略或认不出就没有右侧图标。"))
+                        .put("agent", text("Grok、Claude 或 Codex。省略或认不出时左侧仍是手机工位。"))
                         .put("sound", text("可选的手机铃声文件路径或 content URI；省略时沿用应用里的铃声选择。")))));
         tools.add(tool(
                 "station_clipboard_set",
@@ -483,24 +485,37 @@ final class McpProtocol {
                 schema(new String[] {"text"}, Json.obj().put("text", text("要放进去的文字。")))));
         tools.add(tool("station_clipboard_get", "读取手机当前文字剪贴板。后台读取需要已启动并授权的 Shizuku；敏感内容与锁屏时不返回文字。",
                 true, false, schema(new String[] {}, Json.obj())));
-        tools.add(tool("station_clipboard_state", "读取剪贴板共享与自动同步设置、内存中的两端预览和 Mac 在线状态。",
-                true, false, schema(new String[] {}, Json.obj())));
+        tools.add(tool("station_clipboard_state", "读取共享设置、两端预览和 Mac 在线状态。refresh 为 true 时只读刷新手机当前内容，不更新 Mac 版本也不写剪贴板。",
+                true, false, schema(new String[] {}, Json.obj().put("refresh", bool("只读刷新手机当前内容。")))));
         tools.add(tool("station_clipboard_configure", "开启或关闭剪贴板共享及自动双向同步。关闭共享会清除内存预览并停止后台剪贴板服务。",
                 false, false, schema(new String[] {}, Json.obj().put("shared", bool("是否共享。"))
-                        .put("automatic", bool("是否自动双向同步。")))));
+                        .put("automatic", bool("是否自动双向同步。"))
+                        .put("images", bool("是否将新复制的 Mac 图片保存到手机相册，默认关闭。")))));
         tools.add(tool("station_clipboard_exchange", "手机工位 Mac 客户端的剪贴板交换：共享关闭时不读；自动同步开启且版本一致时可写手机剪贴板。首次连接只建立基线。",
                 false, true, schema(new String[] {}, Json.obj()
                         .put("clientId", text("Mac 本次运行的客户端标识。"))
                         .put("macVersion", text("Mac 剪贴板变化标识。"))
-                        .put("macKind", text("text、empty、unsupported、sensitive、oversize。"))
+                        .put("macKind", text("text、image、empty、unsupported、sensitive、oversize。"))
                         .put("macText", text("macKind 为 text 时的文字，最多 100000 字。"))
-                        .put("phoneVersion", text("上次收到的手机版本，首次连接或重连时省略。")))));
+                        .put("macImage", text("macKind 为 image 时可提供 PNG Base64，最多 4 MB。仅图片同步开启且新复制时保存到相册；不回传图片。"))
+                        .put("phoneVersion", text("上次收到的手机版本，首次连接或长时间断线时省略。"))
+                        .put("resume", bool("只读核对后恢复 30 秒内的新复制；未知结果的旧请求不得重放。")))));
         tools.add(tool(
                 "station_file_open",
                 "用系统查看器打开一个已有的普通文件。打不开时在下拉栏留一条，点一下打开。不改文件。",
                 false,
                 false,
                 schema(new String[] {"path"}, Json.obj().put("path", text("文件。")))));
+        tools.add(tool("station_notification_status", "只读：手机通知同步开关、通知使用权、监听状态、已选应用数量和 Mac 在线状态。不返回通知内容，也不建立接收会话。",
+                true, false, schema(new String[] {}, Json.obj())));
+        tools.add(tool("station_notification_icon", "只读：返回已选择应用的 96 像素 PNG 图标，不读取通知正文。需要已开启同步并授予通知使用权；未选择的应用返回 available: false。省略包名时返回第一个已选应用，供横幅预览。",
+                true, false, schema(new String[] {}, Json.obj().put("packageName", text("手机端已选择的应用包名；预览时可省略。")))));
+        tools.add(tool("station_notification_configure", "开启或关闭手机通知到 Mac 的同步。应用白名单只能在手机设置中选择；不授予系统通知使用权。关闭或改变选择会清除待收内容。",
+                false, false, schema(new String[] {"enabled"}, Json.obj().put("enabled", bool("是否同步手机通知。")))));
+        tools.add(tool("station_notification_poll", "Mac 客户端接收已选应用的新通知。只返回在线接收会话中的短期内容；首次连接、断线和设置变化只建立基线，不补发旧通知。会更新接收会话，不作为只读探测，也不自动重放。",
+                false, false, schema(new String[] {"clientId"}, Json.obj()
+                        .put("clientId", text("Mac 本次运行的客户端标识，最多 128 字。"))
+                        .put("cursor", text("上次成功处理的 cursor；首次或断线后省略。")))));
         return tools;
     }
 

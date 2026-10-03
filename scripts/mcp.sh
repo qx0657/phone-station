@@ -107,6 +107,10 @@ if [[ ${1:-} == snapshot && $# == 1 ]]; then
   exit 0
 fi
 
+if [[ ${1:-} == watch && $# == 1 ]]; then
+  exec "$GATEWAY_BIN" watch-status
+fi
+
 if [[ ${1:-} == desktop ]]; then
   if (( $# != 3 && $# != 4 )) || [[ $# == 4 && $4 != --stdin ]]; then
     print -u2 -- "用法: mcp.sh desktop <https-endpoint> <SPKI-SHA256> [--stdin]"

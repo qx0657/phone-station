@@ -12,8 +12,8 @@ final class HostLink {
     static final String SETTING = "phonestation_host_ms";
     static final String TRANSPORT_SETTING = "phonestation_host_transport";
 
-    /** 超过这么久没有新的写入，就不再算连着。电脑大约每 5 秒写一次。 */
-    static final long FRESH_MS = 15_000L;
+    /** 超过这么久没有新的写入，就不再算连着。电脑大约每 2 秒写一次。 */
+    static final long FRESH_MS = 6_000L;
 
     private HostLink() {}
 

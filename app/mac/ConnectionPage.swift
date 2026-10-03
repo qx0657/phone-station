@@ -17,6 +17,15 @@ struct ConnectionPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                VStack(spacing: 0) {
+                    StationRows.connectionRow(station.link.transport == "USB 连接" ? "USB 调试" : "adb 无线调试",
+                        symbol: station.link.transport == "USB 连接" ? "cable.connector" : "wifi",
+                        status: station.link.adbStatusLabel, online: station.link.serial != nil,
+                        checking: station.link.serial == nil && (station.link.isChecking || station.link.isReconnecting))
+                    StationRows.groupDivider.padding(.horizontal, 10)
+                    StationRows.connectionRow("远程连接", symbol: "network", status: station.mcp.remoteStatusLabel,
+                        online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
+                }.elevatedGroup()
                 Text(station.link.remoteConnected && station.link.serial == nil
                      ? "远程连接已可用，文件等 MCP 功能可以继续使用。投屏和 adb 操作需要接入 USB，或回到同一 Wi-Fi。"
                      : "无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")

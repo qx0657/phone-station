@@ -15,6 +15,7 @@ final class McpLoopbackTest {
     public static void main(String[] args) throws Exception {
         Path home = Files.createTempDirectory("station-mcp-http");
         final boolean[] stayed = new boolean[] {false};
+        final boolean[] stackPreference = new boolean[] {false};
         final int[] shellCalls = new int[] {0};
         CountDownLatch shellEntered = new CountDownLatch(1);
         CountDownLatch shellRelease = new CountDownLatch(1);
@@ -31,9 +32,10 @@ final class McpLoopbackTest {
             }
 
             @Override
-            public Json notify(String title, String text, boolean stack, String agent, String sound) {
+            public Json notify(String title, String text, String agent, String sound) {
                 return Json.obj().put("posted", true).put("title", title)
-                        .put("stack", stack).put("soundArg", sound == null ? "" : sound);
+                        .put("mode", stackPreference[0] ? "stack" : "replace")
+                        .put("soundArg", sound == null ? "" : sound);
             }
 
             @Override
@@ -41,9 +43,13 @@ final class McpLoopbackTest {
                 return Json.obj().put("copied", true).put("characters", text.length());
             }
             public Json clipboardGet() { return Json.obj().put("kind", "text").put("text", "phone"); }
-            public Json clipboardState() { return Json.obj().put("shared", false).put("automatic", true); }
+            public Json clipboardState(Json args) { return Json.obj().put("shared", false).put("automatic", true); }
             public Json clipboardConfigure(Json args) { return args; }
             public Json clipboardExchange(Json args) { return Json.obj().put("phoneVersion", "v1").put("appliedMac", false); }
+            public Json notificationStatus() { return Json.obj().put("enabled", false); }
+            public Json notificationConfigure(Json args) { return args; }
+            public Json notificationPoll(Json args) { return Json.obj().put("cursor", "v1").put("events", Json.arr()); }
+            public Json notificationIcon(String pkg) { return Json.obj().put("available", false).put("packageName", pkg); }
 
             @Override
             public Json open(String path) {
@@ -99,9 +105,16 @@ final class McpLoopbackTest {
             expect(true, tools[1].contains("station_clipboard_state"));
             expect(true, tools[1].contains("station_clipboard_configure"));
             expect(true, tools[1].contains("station_clipboard_exchange"));
+            expect(true, tools[1].contains("station_notification_status"));
+            expect(true, tools[1].contains("station_notification_icon"));
+            expect(true, tools[1].contains("station_notification_configure"));
+            expect(true, tools[1].contains("station_notification_poll"));
             expect(true, tools[1].contains("station_file_open"));
             Json listed = Json.parse(tools[1]).get("result").get("tools");
             for (Json tool : listed.array()) {
+                if ("station_notify".equals(tool.get("name").string())) {
+                    expect(false, tool.get("inputSchema").get("properties").has("mode"));
+                }
                 if ("station_shell_exec".equals(tool.get("name").string())) {
                     expect(false, tool.get("annotations").get("readOnlyHint").boolValue());
                     expect(true, tool.get("annotations").get("destructiveHint").boolValue());
@@ -110,6 +123,12 @@ final class McpLoopbackTest {
             expect(true, tools[1].contains("station_shell_exec"));
             expect(true, tools[1].contains("station_shell_status"));
             expect(true, tools[1].contains("destructiveHint"));
+
+            expect(true, call(http.port(), "station_notification_status", "{}")[1].contains("enabled"));
+            expect(true, call(http.port(), "station_notification_icon", "{\"packageName\":\"chat\"}")[1].contains("chat"));
+            expect(false, call(http.port(), "station_notification_poll", "{\"clientId\":\"mac\"}")[1].contains("isError"));
+            expect(true, call(http.port(), "station_notification_configure", "{}")[1].contains("isError"));
+            expect(false, call(http.port(), "station_notification_configure", "{\"enabled\":true}")[1].contains("isError"));
 
             String[] wrote = call(http.port(), "station_file_write_text",
                     "{\"path\":\"note.txt\",\"text\":\"手机\\n\"}");
@@ -133,10 +152,17 @@ final class McpLoopbackTest {
             String[] reminded = call(http.port(), "station_notify",
                     "{\"title\":\"标题\",\"text\":\"内容\",\"agent\":\"Grok\"}");
             expect(true, reminded[1].contains("标题"));
+            expect(true, reminded[1].contains("replace"));
+            stackPreference[0] = true;
+            String[] legacyReplace = call(http.port(), "station_notify",
+                    "{\"title\":\"标题\",\"text\":\"内容\",\"mode\":\"replace\"}");
+            expect(true, legacyReplace[1].contains("stack"));
+            stackPreference[0] = false;
             String[] customSound = call(http.port(), "station_notify",
                     "{\"title\":\"标题\",\"text\":\"内容\",\"mode\":\"stack\",\"sound\":\"/system/media/Bell.ogg\"}");
             expect(true, customSound[1].contains("/system/media/Bell.ogg"));
-            expect(true, customSound[1].contains("stack"));
+            expect(true, customSound[1].contains("replace"));
+            expect(false, customSound[1].contains("stack"));
             String[] status = call(http.port(), "station_device_status", "{}");
             expect(true, status[1].contains("batteryPercent"));
 

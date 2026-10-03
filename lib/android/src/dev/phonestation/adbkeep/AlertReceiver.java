@@ -8,9 +8,10 @@ import android.content.BroadcastReceiver.PendingResult;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.drawable.Icon;
 import android.os.Build;
+import android.os.Bundle;
 import android.provider.Settings;
+import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
 /** 电脑经 adb 发来的会话提醒。常驻状态那条不动。 */
@@ -30,7 +31,7 @@ public final class AlertReceiver extends BroadcastReceiver {
         AlertNote note = AlertNote.parse(
                 intent.getStringExtra("title"),
                 intent.getStringExtra("text"),
-                intent.getStringExtra("mode"),
+                KeeperStore.alertStacks(context) ? "stack" : "replace",
                 intent.getStringExtra("agent"),
                 System.currentTimeMillis(),
                 System.nanoTime());
@@ -71,18 +72,24 @@ public final class AlertReceiver extends BroadcastReceiver {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = new Notification.Builder(
                 context, AlertChannel.id(KeeperStore.alertPops(context)))
-                .setSmallIcon(R.drawable.ic_stat_station)
+                .setSmallIcon(smallIcon(note.agent))
                 .setContentTitle(note.title)
                 .setContentText(note.text)
                 .setStyle(new Notification.BigTextStyle().bigText(note.text))
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)
                 .setContentIntent(pending);
-        int large = largeIcon(note.agent);
-        if (large != 0) {
-            builder.setLargeIcon(Icon.createWithResource(context, large));
+        if (!note.stack) {
+            for (StatusBarNotification active : manager.getActiveNotifications()) {
+                if (AlertNote.isStacked(active.getTag(), active.getId())) {
+                    manager.cancel(active.getTag(), active.getId());
+                }
+            }
         }
         manager.notify(note.tag, note.id, builder.build());
+        Bundle extras = new Bundle();
+        extras.putString("mode", note.stack ? "stack" : "replace");
+        setResultExtras(extras);
         Log.i(KeeperEngine.TAG, note.stack ? "alert stack" : "alert replace");
         if (silent) {
             Log.i(KeeperEngine.TAG, "alert sound silent");
@@ -104,7 +111,8 @@ public final class AlertReceiver extends BroadcastReceiver {
         }, "alert-sound").start();
     }
 
-    private static int largeIcon(String agent) {
+    /** 左侧图标就是 small icon。认得出 Agent 时用它的彩色图标，否则仍是手机工位。 */
+    private static int smallIcon(String agent) {
         if ("Grok".equals(agent)) {
             return R.drawable.ic_agent_grok;
         }
@@ -114,6 +122,6 @@ public final class AlertReceiver extends BroadcastReceiver {
         if ("Codex".equals(agent)) {
             return R.drawable.ic_agent_codex;
         }
-        return 0;
+        return R.drawable.ic_stat_station;
     }
 }

@@ -62,4 +62,8 @@ final class AlertNote {
     static String stackTag(long millis, long nanos) {
         return "alert-" + millis + "-" + Long.toUnsignedString(nanos);
     }
+
+    static boolean isStacked(String tag, int id) {
+        return id == STACK_ID && tag != null && tag.startsWith("alert-");
+    }
 }

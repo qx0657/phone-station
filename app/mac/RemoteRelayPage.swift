@@ -16,9 +16,9 @@ struct RemoteRelayPage: View {
                         HStack {
                             Text("此 Mac").font(.system(size: 13, weight: .medium))
                             Spacer()
-                            Text(mcp.remoteProfileLoading ? "正在读取…" : mcp.remoteOnline ? "已连接" : mcp.remoteProfile.configured ? "已配置 · 未连通" : "未配置")
+                            Text(mcp.remoteProfileLoading ? "正在读取…" : mcp.remoteConfigured == nil && !mcp.remoteProfile.configured ? "未配置" : mcp.remoteStatusLabel)
                                 .font(.system(size: 12))
-                                .foregroundStyle(mcp.remoteOnline ? StationPalette.connected : Color.secondary)
+                                .foregroundStyle(mcp.remoteOnline ? StationPalette.connected : mcp.remoteChecking ? StationPalette.caution : Color.secondary)
                         }
                         Text("通过互联网使用手机的 MCP 工具。两端填写相同的地址和指纹，各自使用不同的令牌。")
                             .font(.caption).foregroundStyle(.secondary)

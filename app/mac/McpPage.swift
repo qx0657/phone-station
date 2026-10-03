@@ -8,7 +8,7 @@ struct McpPage: View {
             StationRows.subpageHeader("MCP 服务") { station.page = .main }
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(station.mcp.listening ? "手机工具已可用" : station.mcp.gatewayReady ? "正在等待手机" : "连接手机的 MCP 工具")
+                    Text(station.mcp.listening ? "手机工具已可用" : station.mcp.remoteChecking ? "正在确认手机连接" : station.mcp.gatewayReady ? "正在等待手机" : "连接手机的 MCP 工具")
                         .font(.system(size: 15, weight: .semibold))
                     Text("读改普通文件、查看状态、使用剪贴板。本地和远程通道提供同一套手机工具。")
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -18,8 +18,9 @@ struct McpPage: View {
                     channelRow("本地 adb", symbol: "cable.connector", online: station.mcp.localOnline,
                                selected: station.mcp.channel == "local")
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    channelRow("远程中继", symbol: "network", online: station.mcp.remoteOnline,
-                               selected: station.mcp.channel == "remote")
+                    StationRows.connectionRow("远程中继", symbol: "network",
+                        status: station.mcp.remoteOnline && station.mcp.channel == "remote" ? "正在使用" : station.mcp.remoteStatusLabel,
+                        online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
                 }.elevatedGroup()
                 if station.mcp.listening {
                     VStack(alignment: .leading, spacing: 8) {
@@ -46,7 +47,7 @@ struct McpPage: View {
                     }
                 } else {
                     Button("连接 MCP 服务") { station.mcp.start() }
-                        .buttonStyle(.borderedProminent).disabled(station.feedback.activity != nil)
+                        .buttonStyle(.borderedProminent).disabled(station.feedback.activity != nil || station.mcp.remoteChecking)
                 }
                 StationRows.navigationRow("远程中继", symbol: "network",
                     detail: station.mcp.remoteOnline ? "已连接 · 查看或修改配置" : "设置服务器地址、指纹和令牌") {

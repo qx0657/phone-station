@@ -1,14 +1,14 @@
 import Foundation
 import OSLog
 
-private enum Link: Sendable {
+enum Link: Sendable {
     case checking
     case connected
     case unverified
     case offline
 }
 
-private struct LinkReading: Sendable {
+struct LinkReading: Sendable {
     var name: String
     var detail: String
     var transport: String = ""
@@ -28,6 +28,8 @@ final class LinkSession: ObservableObject {
     @Published private(set) var stayAwake = false
     @Published private(set) var isReconnecting = false
     @Published private(set) var remoteConnected = false
+    @Published private(set) var remoteChecking = false
+    @Published private var link: Link = .checking
     @Published private var willReconnect = false
 
     var onMenuIcon: (@MainActor (Bool) -> Void)?
@@ -36,11 +38,19 @@ final class LinkSession: ObservableObject {
     var onSerial: (String?) -> Void = { _ in }
 
     private let feedback: StationFeedback
-    private var link: Link = .checking
+    private let reader: @Sendable (String?) -> LinkReading
+    private let heartbeat: @Sendable () -> Void
     /// 已经确认是 PGT-AN20 的序列号。菜单栏复查时序列号没变就不再读型号。
     private var trustedSerial: String?
     private var linkWatch: Task<Void, Never>?
-    private static let linkWatchInterval: UInt64 = 2_000_000_000
+    private static let linkWatchInterval: UInt64 = 1_000_000_000
+    private var deviceStream: ConnectionStream?
+    private var probeInFlight = false
+    private var probeAgain = false
+    private var controlsRequested = false
+    private var heartbeatInFlight = false
+    private var lastHeartbeat = Date.distantPast
+    private var tidying = false
     private var pairedDeviceName = ""
     private var decision = ReconnectDecision()
     private var connectIsManual = false
@@ -49,9 +59,14 @@ final class LinkSession: ObservableObject {
     private let logger = Logger(subsystem: "com.qx0657.phonestation", category: "link")
     private var statusRevision = 0
     private var controlEpoch = 0
+    private var connectionEpoch = 0
 
-    init(feedback: StationFeedback) {
+    init(feedback: StationFeedback,
+         reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) },
+         heartbeat: @escaping @Sendable () -> Void = { _ = StationRunner.scriptResult("host-state.sh", ["mark"], timeout: 3) }) {
         self.feedback = feedback
+        self.reader = reader
+        self.heartbeat = heartbeat
     }
 
     var isConnected: Bool { link == .connected || remoteConnected }
@@ -60,6 +75,7 @@ final class LinkSession: ObservableObject {
     var statusLabel: String {
         if isConnected { return "已连接" }
         if isReconnecting { return "正在重新连接" }
+        if remoteChecking { return "确认连接中" }
         switch link {
         case .checking: return "检查中"
         case .connected: return "已连接"
@@ -86,7 +102,7 @@ final class LinkSession: ObservableObject {
         case .checking:
             return ""
         case .connected, .unverified:
-            return transport
+            return transport + (remoteConnected ? " · 远程连接" : "")
         case .offline:
             if decision.holdOffline {
                 return "已断开无线。再点「连接手机」，之后才会自动重连。"
@@ -100,11 +116,20 @@ final class LinkSession: ObservableObject {
     var statusTone: StationTone {
         if isConnected { return .ready }
         if isReconnecting { return .caution }
+        if remoteChecking { return .caution }
         switch link {
         case .connected: return .ready
         case .unverified: return .caution
         case .checking, .offline: return .neutral
         }
+    }
+
+    var adbStatusLabel: String {
+        if serial != nil { return "已连接" }
+        if isReconnecting || connectIsManual { return "重新连接中" }
+        if link == .checking { return "检查中" }
+        if link == .unverified { return "未验证" }
+        return decision.holdOffline ? "已断开" : "未连接"
     }
 
     /// 只合并显示状态；adb 操作仍须持有已验证的序列号。
@@ -114,19 +139,22 @@ final class LinkSession: ObservableObject {
         onMenuIcon?(isConnected)
     }
 
-    /// A dead wireless MCP route must not leave adb-only actions enabled while
-    /// adb devices still reports the old TCP session as online.
-    func noteLocalRouteUnavailable() {
-        guard let serial, Self.transportLabel(serial) == "无线连接" else { return }
-        statusRevision += 1
-        accept(statusRevision, name: "手机未连接", detail: "", link: .offline,
-               readingControls: false, reconnectable: true)
+    func noteRemoteChecking(_ checking: Bool) {
+        guard remoteChecking != checking else { return }
+        remoteChecking = checking
+        onMenuIcon?(isConnected)
     }
 
-    /// 面板关着时菜单栏图标也要跟着变。上一次查完隔 2 秒再查。
-    /// 这次检查不读息屏、闪光灯和电量，那几项仍在打开面板时读。
+    /// adb 列表事件立即触发复查，另每秒验证实际应答，避免僵死 TCP 会话仍显示在线。
     func startWatch() {
         guard linkWatch == nil else { return }
+        if let adb = StationRunner.executable("adb") {
+            let stream = ConnectionStream(executable: adb, arguments: ["track-devices", "-l"], format: .adb)
+            stream.onFrame = { [weak self] listing in self?.devicesChanged(listing) }
+            stream.onDisconnect = { [weak self] in self?.devicesChanged("") }
+            deviceStream = stream
+            stream.start()
+        }
         linkWatch = Task { @MainActor in
             while !Task.isCancelled {
                 await self.probe(readingControls: false)
@@ -137,15 +165,46 @@ final class LinkSession: ObservableObject {
     }
 
     func probe(readingControls: Bool) async {
+        controlsRequested = controlsRequested || readingControls
+        if probeInFlight { probeAgain = true; return }
+        probeInFlight = true
+        repeat {
+            probeAgain = false
+            let controls = controlsRequested
+            controlsRequested = false
+            statusRevision += 1
+            let revision = statusRevision
+            let trusted = trustedSerial
+            let reader = self.reader
+            let reading = await Task.detached(priority: .utility) { reader(trusted) }.value
+            accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
+                   link: reading.link, serial: reading.serial, readingControls: controls,
+                   reconnectable: reading.reconnectable)
+        } while probeAgain
+        probeInFlight = false
+    }
+
+    func stopWatch() {
+        linkWatch?.cancel(); linkWatch = nil
+        deviceStream?.stop(); deviceStream = nil
+    }
+
+    func devicesChanged(_ listing: String) {
+        let devices = AdbDevice.parse(listing)
         statusRevision += 1
-        let revision = statusRevision
-        let trusted = trustedSerial
-        let reading = await Task.detached(priority: .utility) {
-            Self.readLink(trustedSerial: trusted)
-        }.value
-        accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
-               link: reading.link, serial: reading.serial, readingControls: readingControls,
-               reconnectable: reading.reconnectable)
+        // Drop the capability immediately. A pending shell result belongs to the old list.
+        if let serial, !devices.contains(where: { $0.serial == serial && $0.state == "device" }) {
+            accept(statusRevision, name: "手机未连接", detail: "正在检查连接…", link: .offline,
+                   readingControls: false, reconnectable: false)
+        }
+        if devices.filter({ $0.state == "device" }).count > 1, !tidying {
+            tidying = true
+            Task.detached(priority: .utility) {
+                _ = StationRunner.scriptResult("connect.sh", timeout: 15)
+                await MainActor.run { self.tidying = false }
+            }
+        }
+        Task { await self.probe(readingControls: false) }
     }
 
     func connect() {
@@ -221,27 +280,34 @@ final class LinkSession: ObservableObject {
             let detail = devices.timedOut ? "adb 检查超时，请重试。" : StationText.reason(devices.output, fallback: "无法读取 adb 设备列表。")
             return LinkReading(name: "设备检查失败", detail: detail, link: .offline)
         }
-        let lines = devices.output.split(separator: "\n").dropFirst().map(String.init)
-        let online = lines.compactMap { line -> String? in
-            let parts = line.split(whereSeparator: \.isWhitespace)
-            return parts.count >= 2 && parts[1] == "device" ? String(parts[0]) : nil
-        }
+        let listed = AdbDevice.parse(devices.output)
+        var online = listed.filter { $0.state == "device" }.map(\.serial)
         if online.count > 1 {
-            return LinkReading(name: "检测到多台设备", detail: "请只保留一台在线设备；多余的无线连接可以在连接页断开。", link: .offline)
+            let identities = online.map { serial -> String in
+                let result = StationRunner.capture(adb, ["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 2)
+                let identity = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                return result.succeeded && !identity.isEmpty && identity != "unknown" ? identity : serial
+            }
+            guard Set(identities).count == 1 else {
+                return LinkReading(name: "检测到多台设备", detail: "请只保留一台在线设备；多余的无线连接可以在连接页断开。", link: .offline)
+            }
+            online.sort { left, right in
+                let a = transportLabel(left) == "USB 连接" ? 0 : left.contains(where: \.isWhitespace) ? 2 : 1
+                let b = transportLabel(right) == "USB 连接" ? 0 : right.contains(where: \.isWhitespace) ? 2 : 1
+                return a < b
+            }
         }
         guard let only = online.first else {
-            let unauthorized = lines.contains { $0.contains("unauthorized") }
+            let unauthorized = listed.contains { $0.state == "unauthorized" || $0.state == "authorizing" }
             let detail = unauthorized ? "请在手机上允许 USB 调试。" : "接入 USB，或在手机上开启无线调试后再连接。"
             return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline,
                                reconnectable: !unauthorized)
         }
         if let trustedSerial, only == trustedSerial {
-            if transportLabel(only) == "无线连接" {
-                let alive = StationRunner.capture(adb, ["-s", only, "shell", "true"], timeout: 2)
-                if !alive.succeeded {
-                    return LinkReading(name: "手机未连接", detail: "无线连接已中断。", link: .offline,
-                                       reconnectable: true)
-                }
+            let alive = StationRunner.capture(adb, ["-s", only, "shell", "true"], timeout: 2)
+            if !alive.succeeded {
+                return LinkReading(name: "手机未连接", detail: "调试连接已中断。", link: .offline,
+                                   reconnectable: true)
             }
             return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
         }
@@ -272,8 +338,10 @@ final class LinkSession: ObservableObject {
         if link != newLink { link = newLink }
         let serialChanged = serial != newSerial
         if serialChanged {
+            connectionEpoch += 1
             serial = newSerial
             battery = nil
+            lastHeartbeat = .distantPast
         }
         if newLink == .connected, let newSerial {
             trustedSerial = newSerial
@@ -282,13 +350,11 @@ final class LinkSession: ObservableObject {
             trustedSerial = nil
         }
         if let newSerial {
-            if readingControls, feedback.activity == nil {
+            if (readingControls || serialChanged), feedback.activity == nil {
                 refreshStayAwake(serial: newSerial)
                 onRefreshTorch()
             }
-            Task.detached(priority: .utility) {
-                _ = StationRunner.scriptResult("host-state.sh", ["mark"], timeout: 8)
-            }
+            markHeartbeat()
         } else if stayAwake {
             stayAwake = false
         }
@@ -298,13 +364,13 @@ final class LinkSession: ObservableObject {
     }
 
     private func refreshStayAwake(serial: String) {
-        let revision = statusRevision
         let epoch = controlEpoch
+        let connection = connectionEpoch
         Task.detached(priority: .utility) {
             let awake = Self.stayAwakeEnabled(serial)
             let reading = Self.readBattery(serial)
             await MainActor.run {
-                guard revision == self.statusRevision, epoch == self.controlEpoch,
+                guard epoch == self.controlEpoch, connection == self.connectionEpoch,
                       self.feedback.activity == nil, self.serial == serial else { return }
                 self.stayAwake = awake
                 self.battery = reading
@@ -329,6 +395,16 @@ final class LinkSession: ObservableObject {
     private func bumpControls() -> Int {
         controlEpoch += 1
         return controlEpoch
+    }
+
+    private func markHeartbeat() {
+        guard !heartbeatInFlight, Date().timeIntervalSince(lastHeartbeat) >= 2 else { return }
+        heartbeatInFlight = true
+        lastHeartbeat = Date()
+        Task.detached(priority: .utility) {
+            self.heartbeat()
+            await MainActor.run { self.heartbeatInFlight = false }
+        }
     }
 
     private func considerReconnect(reconnectable: Bool) {

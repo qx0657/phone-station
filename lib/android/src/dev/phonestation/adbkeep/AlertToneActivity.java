@@ -31,7 +31,7 @@ public final class AlertToneActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ui = new StationChrome(this);
-        ui.back("铃声");
+        ui.back("电脑提醒铃声");
         LinearLayout card = ui.card();
         rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);

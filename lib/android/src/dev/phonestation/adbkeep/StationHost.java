@@ -6,17 +6,25 @@ interface StationHost {
 
     Json stayAwake(boolean on);
 
-    Json notify(String title, String text, boolean stack, String agent, String sound);
+    Json notify(String title, String text, String agent, String sound);
 
     Json clipboard(String text);
 
     Json clipboardGet();
 
-    Json clipboardState();
+    Json clipboardState(Json args);
 
     Json clipboardConfigure(Json args);
 
     Json clipboardExchange(Json args);
+
+    Json notificationStatus();
+
+    Json notificationConfigure(Json args);
+
+    Json notificationPoll(Json args);
+
+    Json notificationIcon(String packageName);
 
     Json open(String path);
 

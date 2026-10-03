@@ -11,6 +11,7 @@ final class KeeperStore {
     private static final String LAST_HANDLE = "last_handle";
     private static final String ALERT_POPUP = "alert_popup";
     private static final String ALERT_SOUND = "alert_sound";
+    private static final String ALERT_STACK = "alert_stack";
     /** 用户要 MCP 开着。进程被杀掉之后仍留着，开机再拉起。明确关掉才写成 false。 */
     private static final String MCP = "mcp";
 
@@ -57,6 +58,15 @@ final class KeeperStore {
         prefs(context).edit().putBoolean(ALERT_POPUP, popup).commit();
     }
 
+    /** 会话提醒是否逐条保留。默认只显示最新一条，由手机设置统一决定。 */
+    static boolean alertStacks(Context context) {
+        return prefs(context).getBoolean(ALERT_STACK, false);
+    }
+
+    static void setAlertStacks(Context context, boolean stack) {
+        prefs(context).edit().putBoolean(ALERT_STACK, stack).commit();
+    }
+
     /**
      * 会话提醒的铃声。没存过是 {@code null}，跟随系统通知铃声。
      * {@link AlertSoundPlan#SILENT_TOKEN} 是静音。其余是铃声地址。
@@ -70,7 +80,7 @@ final class KeeperStore {
     }
 
     static boolean mcpEnabled(Context context) {
-        return prefs(context).getBoolean(MCP, false);
+        return prefs(context).getBoolean(MCP, SharedClipboard.shared(context));
     }
 
     static void setMcpEnabled(Context context, boolean enabled) {

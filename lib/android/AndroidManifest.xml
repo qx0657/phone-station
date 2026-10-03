@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.phonestation.adbkeep"
-    android:versionCode="42"
-    android:versionName="42">
+    android:versionCode="57"
+    android:versionName="57">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
 
@@ -19,6 +19,13 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -55,6 +62,17 @@
             android:name=".NotificationActivity"
             android:exported="false"
             android:theme="@style/Theme.PhoneStation" />
+
+        <activity android:name=".NotificationAppsActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.PhoneStation" />
+
+        <service android:name=".PhoneNotificationListener" android:exported="true"
+            android:label="手机工位 · 手机通知同步"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <activity
             android:name=".AlertToneActivity"

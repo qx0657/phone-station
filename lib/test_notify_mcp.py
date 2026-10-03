@@ -21,6 +21,7 @@ class NotifyMcpTest(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.outcome = "played"
+        self.display_mode = "replace"
         self.drop = False
         self.preflight = True
         test = self
@@ -44,7 +45,7 @@ class NotifyMcpTest(unittest.TestCase):
                     }}] if test.preflight else []}
                 else:
                     result = {"content": [{"type": "text", "text": json.dumps({
-                        "posted": True, "sound": test.outcome,
+                        "posted": True, "sound": test.outcome, "mode": test.display_mode,
                     })}]}
                 body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
                 self.send_response(200)
@@ -72,9 +73,23 @@ class NotifyMcpTest(unittest.TestCase):
         title = '标题 `不会执行` $(也不会执行) "引号"'
         self.assertEqual(0, self.send(title, "内容\n第二行", "stack", "Codex", "/system/media/Bell.ogg"))
         args = self.calls[-1]["params"]["arguments"]
-        self.assertEqual({"title": title, "text": "内容\n第二行", "mode": "stack",
+        self.assertEqual({"title": title, "text": "内容\n第二行",
                           "agent": "Codex", "sound": "/system/media/Bell.ogg"}, args)
         self.assertEqual(1, sum(call["method"] == "tools/call" for call in self.calls))
+
+    def test_status_uses_phone_display_mode(self):
+        for phone_mode, legacy_mode, message in [
+            ("stack", "replace", "通知已发出"),
+            ("replace", "stack", "通知已更新"),
+        ]:
+            with self.subTest(phone_mode=phone_mode):
+                self.display_mode = phone_mode
+                output = io.StringIO()
+                with patch.object(notify_mcp, "gateway", return_value=(self.endpoint, "Bearer test")):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(output):
+                        self.assertEqual(0, notify_mcp.send("标题", "内容", legacy_mode, "", ""))
+                self.assertIn(message, output.getvalue())
+                self.assertNotIn("mode", self.calls[-1]["params"]["arguments"])
 
     def test_only_preflight_failure_allows_adb_fallback(self):
         self.preflight = False

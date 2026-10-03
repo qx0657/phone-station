@@ -1,12 +1,11 @@
 package dev.phonestation.adbkeep;
 
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -16,16 +15,17 @@ import java.util.concurrent.Executors;
 public final class ClipboardActivity extends Activity {
     private StationChrome ui;
     private StationChrome.Control shared;
-    private StationChrome.Control automatic;
-    private TextView phone;
-    private TextView mac;
+    private StationChrome.Control images;
     private TextView status;
     private TextView message;
-    private Button copy;
-    private String macText;
+    private TextView session;
+    private Button resolve;
+    private Button resume;
+    private String resolution = "permissions";
     private boolean painting;
     private boolean active;
-    private boolean busy;
+    private boolean loading;
+    private boolean saving;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Runnable refresh = new Runnable() {
@@ -38,84 +38,83 @@ public final class ClipboardActivity extends Activity {
         LinearLayout settings = ui.card();
         shared = ui.switchRow(settings, R.drawable.ic_status_clipboard, "共享剪贴板");
         shared.toggle.setOnCheckedChangeListener((button, on) -> {
-            if (!painting) {
-                configure(Json.obj().put("shared", on));
-            }
+            if (!painting) { configure(Json.obj().put("shared", on)); }
         });
-        automatic = ui.switchRow(settings, R.drawable.ic_status_clipboard, "自动双向同步");
-        automatic.toggle.setOnCheckedChangeListener((button, on) -> {
-            if (!painting) { configure(Json.obj().put("automatic", on)); }
+        ui.paragraph(settings, "复制文字或链接，自动同步到另一端。");
+        images = ui.switchRow(settings, R.drawable.ic_status_clipboard, "同步 Mac 图片到相册");
+        images.toggle.setOnCheckedChangeListener((button, on) -> {
+            if (!painting) { configure(Json.obj().put("images", on)); }
         });
-        status = ui.paragraph(settings, "正在读取状态…");
-        LinearLayout local = ui.card();
-        ui.groupTitle(local, "手机剪贴板");
-        phone = preview(local);
-        LinearLayout desktop = ui.card();
-        ui.groupTitle(desktop, "Mac 剪贴板");
-        mac = preview(desktop);
-        copy = ui.action(desktop, "复制到手机剪贴板", true, view -> {
-            if (macText == null) { return; }
-            ClipboardManager board = getSystemService(ClipboardManager.class);
-            if (board != null) {
-                board.setPrimaryClip(ClipData.newPlainText("手机工位", macText));
-                message.setText("已复制到手机，可切换到其他应用粘贴");
-                load();
-            }
+        ui.paragraph(settings, "默认关闭。开启后，新复制的 Mac 图片保存到相册的「手机工位」，成功后显示无声通知，点通知查看图片；每张最多 4 MB / 3200 万像素。");
+        LinearLayout sync = ui.card();
+        ui.groupTitle(sync, "同步状态");
+        status = ui.paragraph(sync, "正在核对同步状态…");
+        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        session = ui.valueRow(sync, "Mac 会话");
+        session.setText("正在核对");
+        resolve = ui.action(sync, "查看处理方法", false, view -> {
+            Class<?> target = "mcp".equals(resolution) ? MainActivity.class : PermissionActivity.class;
+            startActivity(new Intent(this, target));
         });
-        message = ui.paragraph(desktop, "");
+        resolve.setVisibility(View.GONE);
+        resume = ui.action(sync, "恢复自动同步", true,
+                view -> configure(Json.obj().put("automatic", true)));
+        resume.setVisibility(View.GONE);
+        message = ui.paragraph(sync, "");
+        message.setVisibility(View.GONE);
+        message.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout help = ui.card();
-        ui.paragraph(help, "支持文字和链接。自动同步开启后，在任意应用复制文字即可同步。锁屏、图片、文件和标记为敏感的内容会跳过。两端内容只保留在内存中。");
+        ui.groupTitle(help, "怎么用");
+        ui.paragraph(help, "在任意应用复制，再到另一端粘贴。首次连接后，请重新复制一次。");
+        ui.paragraph(help, "Mac 手机工位需保持运行并连接 MCP 服务；手机需启动并授权 Shizuku。本地连接和远程通道都可同步，无需打开投屏。");
         ui.linkRow(help, R.drawable.ic_status_permission, "查看 Shizuku 权限",
                 view -> startActivity(new Intent(this, PermissionActivity.class)));
-        ui.paragraph(help, "Mac 需运行手机工位并连接 MCP 服务；本地无线 adb 和远程中继都可用。关闭自动同步仍可预览和手动复制；关闭共享后停止读取。");
+        ui.paragraph(help, "图片开关关闭时安静跳过，文字同步继续；文件与敏感内容仍跳过，锁屏时暂停。图片保存到相册，不覆盖手机剪贴板。文字仅保留在内存中，不显示正文、不保存历史；关闭共享后停止读取。");
     }
     @Override protected void onResume() { super.onResume(); active = true; handler.post(refresh); }
     @Override protected void onPause() { active = false; handler.removeCallbacks(refresh); super.onPause(); }
     @Override protected void onDestroy() { worker.shutdownNow(); super.onDestroy(); }
-    private TextView preview(LinearLayout parent) {
-        TextView text = ui.text(16);
-        text.setText("等待剪贴板…");
-        text.setTextIsSelectable(true);
-        text.setMaxLines(8);
-        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        text.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(16));
-        parent.addView(text, new LinearLayout.LayoutParams(-1, -2));
-        return text;
-    }
     private void load() {
-        if (busy || !active) { return; }
-        busy = true;
+        if (loading || saving || !active) { return; }
+        loading = true;
         worker.execute(() -> {
-            Json state = SharedClipboard.exchange(this, Json.obj());
+            // Display session metadata already held in memory; opening this page never reads clipboard text.
+            Json state = SharedClipboard.status(this);
             handler.post(() -> {
-                busy = false;
-                if (!active || isFinishing()) { return; }
+                loading = false;
+                if (!active || isFinishing() || saving) { return; }
                 boolean enabled = state.get("shared").boolValue();
+                boolean automatic = state.get("automatic").boolValue();
                 painting = true;
                 shared.toggle.setChecked(enabled);
-                automatic.toggle.setChecked(state.get("automatic").boolValue());
-                automatic.setEnabled(enabled);
+                boolean imageEnabled = state.get("images").boolValue();
+                images.toggle.setChecked(imageEnabled);
                 painting = false;
                 ui.paintOn(shared.mark, enabled);
-                ui.paintOn(automatic.mark, enabled && state.get("automatic").boolValue());
-                Json error = state.get("error");
-                boolean online = state.get("macOnline").boolValue();
-                status.setText(!enabled ? "共享已关闭" : error != null ? error.string()
-                        : online ? (state.get("automatic").boolValue() ? "Mac 已连接 · 自动同步中" : "Mac 已连接 · 手动共享")
-                        : "等待 Mac 手机工位连接 MCP 服务");
-                Json own = state.get("phone");
-                Json peer = state.get("mac");
-                phone.setText(!enabled ? "开启共享后显示" : error != null ? "请先启动并授权 Shizuku" : previewText(own));
-                mac.setText(!enabled ? "开启共享后显示" : !online ? "Mac 未连接，连接后显示当前内容" : previewText(peer));
-                macText = enabled && online && peer != null && !peer.isNull() && "text".equals(peer.get("kind").string())
-                        ? peer.get("text").string() : null;
-                copy.setEnabled(macText != null);
+                ui.paintOn(images.mark, imageEnabled);
+                Json availability = state.get("availability");
+                String reason = availability.get("reason").string();
+                resolution = availability.get("action").string();
+                String title = availability.get("status").string();
+                status.setText(title + (reason.isEmpty() ? "" : "\n" + reason));
+                boolean needsAction = "permissions".equals(resolution) || "mcp".equals(resolution);
+                status.setTextColor(enabled && needsAction ? ui.waiting()
+                        : enabled && automatic && availability.get("ready").boolValue() ? ui.held() : ui.muted());
+                session.setText(!enabled ? "已停止" : state.get("macOnline").boolValue() ? "已连接" : "等待连接");
+                session.setTextColor(enabled && state.get("macOnline").boolValue() ? ui.held() : ui.muted());
+                resolve.setVisibility(needsAction ? View.VISIBLE : View.GONE);
+                resolve.setText("mcp".equals(resolution) ? "前往首页启用 MCP" : "查看 Shizuku 权限");
+                resume.setVisibility(enabled && !automatic ? View.VISIBLE : View.GONE);
             });
         });
     }
     private void configure(Json args) {
+        if (saving) { return; }
+        saving = true;
         shared.setEnabled(false);
-        automatic.setEnabled(false);
+        images.setEnabled(false);
+        resume.setEnabled(false);
+        message.setVisibility(View.GONE);
         worker.execute(() -> {
             String failure = null;
             try {
@@ -127,22 +126,14 @@ public final class ClipboardActivity extends Activity {
             } catch (RuntimeException error) { failure = error.getMessage(); }
             final String error = failure;
             handler.post(() -> {
-                if (!active) { return; }
+                saving = false;
                 shared.setEnabled(true);
-                if (error != null) { message.setText(error); }
+                images.setEnabled(true);
+                resume.setEnabled(true);
+                if (!active) { return; }
+                if (error != null) { message.setText(error); message.setVisibility(View.VISIBLE); }
                 load();
             });
         });
-    }
-    private String previewText(Json clip) {
-        if (clip == null || clip.isNull()) { return "等待剪贴板…"; }
-        switch (clip.get("kind").string()) {
-            case "text": return clip.get("text").string().isEmpty() ? "空文字" : clip.get("text").string();
-            case "sensitive": return "敏感内容已跳过";
-            case "unsupported": return "当前是图片或文件，仅支持文字";
-            case "oversize": return "文字超过 100000 字，已跳过";
-            case "locked": return "手机已锁定，解锁后继续";
-            default: return "剪贴板为空";
-        }
     }
 }

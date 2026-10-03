@@ -1,11 +1,11 @@
 #!/bin/zsh
 # 说明见仓库根目录 README.md，编译见 docs/notify.md
-# 播放手机当前的通知铃声，并在下拉栏里更新同一条通知。
+# 播放手机当前的通知铃声，通知显示方式由手机设置决定。
 # 震动/静音模式下系统会把通知音量关掉，所以默认由「手机工位」用媒体音量播放。
 # 默认先走已在线的 MCP 网关，本地 adb 和远程中继都可以；网关不可用时再走 adb。
-# 下拉通知也由这个应用发出，不发声、不震动。连续调用改同一条的标题和内容。
+# 下拉通知也由这个应用发出，不发声、不震动。
 # --shell 改回原来的方式：shell 发通知，并把铃声转成 PCM。转好的文件没变就直接播。
-# --stack 每次另发一条，原来的留着，也不覆盖上面那一条。
+# --stack 仅在 --shell 路径中每次另发一条。
 # 用法: notify.sh [--title 标题] [--text 内容] [--sound 音频文件] [--agent 名称] [--stack] [--shell]
 set -euo pipefail
 DIR=${0:A:h}
@@ -21,13 +21,13 @@ while (( $# )); do
   case $1 in
     -h|--help)
       print -r -- "用法: notify.sh [--title 标题] [--text 内容] [--sound 音频文件] [--agent 名称] [--stack] [--shell]"
-      print -r -- "播放系统设置里的通知铃声，并在下拉栏里更新同一条通知。"
+      print -r -- "播放手机选择的通知铃声，并在下拉栏里发一条通知。"
       print -r -- "不写标题时是「手机工位」，不写内容时是「有一条提醒」。"
-      print -r -- "不写 --sound 时用系统设置里的通知铃声。"
-      print -r -- "连续调用会改这一条的文字，不会在下拉里叠成多条。"
+      print -r -- "不写 --sound 时用手机工位「通知」里选的铃声；没选过就跟随系统。"
+      print -r -- "显示最新一条还是每条都显示，在手机工位「设置 → 通知 → 显示方式」里选择。"
       print -r -- "--agent 在通知右侧放这个 Agent 的图标，可以是 Grok、Claude、Codex。不写就不放。"
       print -r -- "再跑一次不带 --agent，会把右侧那张图去掉。"
-      print -r -- "--stack 每次另发一条，原来的留着，也不覆盖上面那一条。"
+      print -r -- "--stack 仅配合 --shell 时每次另发一条；应用路径统一遵循手机设置。"
       print -r -- "下拉通知和铃声默认都由手机上的「手机工位」完成。铃声走媒体音量。"
       print -r -- "默认优先走已在线的 MCP 网关，只有远程通道也能发送；网关不可用时再连接 adb。"
       print -r -- "--shell 改回原来的方式：用 shell 发一条，应用名写成「手机工位」，铃声转成 PCM。这条没有右侧图标。"
@@ -153,12 +153,11 @@ if [[ "$poster" == app ]]; then
 set -eu
 title=$1
 text=$2
-mode=${3:-replace}
-agent=${4-}
-sound=${5-}
+agent=${3-}
+sound=${4-}
 set -- am broadcast -f 0x10000000 -n dev.phonestation.adbkeep/.AlertReceiver \
   -a dev.phonestation.adbkeep.ALERT \
-  --es title "$title" --es text "$text" --es mode "$mode" --es agent "$agent"
+  --es title "$title" --es text "$text" --es agent "$agent"
 if [ -n "$sound" ]; then
   set -- "$@" --es sound "$sound"
 fi
@@ -167,19 +166,11 @@ code=${result##*result=}
 code=${code%%[!0-9-]*}
 case $code in
   1)
-    if [ "$mode" = stack ]; then
-      echo "通知已发出" >&2
-    else
-      echo "通知已更新" >&2
-    fi
+    echo "通知已发出" >&2
     echo played
     ;;
   2)
-    if [ "$mode" = stack ]; then
-      echo "通知已发出" >&2
-    else
-      echo "通知已更新" >&2
-    fi
+    echo "通知已发出" >&2
     echo "铃声没有播放。" >&2
     exit 1
     ;;
@@ -188,11 +179,7 @@ case $code in
     exit 1
     ;;
   4)
-    if [ "$mode" = stack ]; then
-      echo "通知已发出" >&2
-    else
-      echo "通知已更新" >&2
-    fi
+    echo "通知已发出" >&2
     echo "铃声已静音。" >&2
     ;;
   *)
@@ -204,7 +191,7 @@ esac
 EOF
 )
   set +e
-  out=$(run_device "$app_script" "$title" "$text" "$mode" "$agent" "$sound")
+  out=$(run_device "$app_script" "$title" "$text" "$agent" "$sound")
   rc=$?
   set -e
   if (( rc == 0 )); then

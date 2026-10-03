@@ -20,7 +20,7 @@ Authorization: Bearer <本机网关令牌>
 
 本地派发前先做 `ping`，转发还接受 TCP 但手机已经不可达时，实际操作直接走可用远程通道。检测到本地断线会取消仍在等响应的本地请求；`ping`、`initialize`、`tools/list` 和明确列入白名单的只读工具可以自动转到远程重试。读取手机剪贴板的 `station_clipboard_get` 与客户端交换都不在重放白名单中；具体工具不能仅凭 `readOnlyHint` 判断是否会重试。文件修改、通知、剪贴板、打开文件、保持亮屏和未知工具均不自动重放，结果不明时报告需要核实。已取消的旧探测也不能把通道重新报成在线。
 
-`./scripts/mcp.sh stop` 需要 adb 在线，通过 `McpControlReceiver` 关闭手机 MCP 与远程开关，再移除转发；配对资料会保留。`./scripts/mcp.sh status` 不启动服务，也不跑 `connect.sh`，只刷新已有 adb 转发信息并报告网关探测到的通道。读取手机服务开关、刷新转发和读取令牌的 adb 命令各有 2 秒超时。菜单栏每秒通过内部 `snapshot` 命令读取网关 JSON 状态；adb 转发与令牌另行在后台刷新，其他操作进行中也会继续刷新连接显示。远程在线时，首页和菜单栏图标也显示已连接，只有远程可用时标明「远程连接」并禁用 adb 操作。手机首页与常驻通知同样把实际远程连接计入已连接，开关打开或已配对本身不算。
+`./scripts/mcp.sh stop` 需要 adb 在线，通过 `McpControlReceiver` 关闭手机 MCP 与远程开关，再移除转发；配对资料会保留。`./scripts/mcp.sh status` 不启动服务，也不跑 `connect.sh`，只刷新已有 adb 转发信息并报告网关探测到的通道。读取手机服务开关、刷新转发和读取令牌的 adb 命令各有 2 秒超时。菜单栏通过内部 `watch` 命令持续接收网关的鉴权 NDJSON 状态流（每 100 毫秒检查状态差异），流中断自动重连，并用 `snapshot` 兜底；adb 转发与令牌另行在后台刷新，其他操作进行中也会继续刷新连接显示。远程在线时，首页和菜单栏图标也显示已连接，只有远程可用时标明「远程连接」并禁用 adb 操作。手机首页与常驻通知同样把实际远程连接计入已连接，开关打开或已配对本身不算。两端远程状态只把最近 6 秒的成功应答作为已确认连接；远程业务占用通道、暂时无法新探测时显示「确认连接中」，不会取消或重放正在执行的操作。adb 连接由列表事件与实际 shell 应答单独判断，本地 MCP 关闭不会导致误报 adb 断线。
 
 远程中继由用户配置，默认没有服务器地址或凭据。手机「远程中继设置」与 Mac「MCP 服务 → 远程中继」可独立保存资料，不需要 adb。两端使用同一 HTTPS 地址和 SPKI 指纹，分别保存手机、电脑两枚不同令牌。手机点「保存并连接」，Mac 点「保存 Mac 配置」。地址与指纹回填，令牌隐藏且不回填。Mac 勾选「同时配置手机」可通过 adb 一次配置两端；这条流程以及 `pair`、`unpair` 才要求 adb 在线。也可以使用脚本：
 
@@ -42,7 +42,7 @@ Authorization: Bearer <本机网关令牌>
 
 新安装不预设中继，升级保留用户已有配置。更换地址或凭据会使 Mac 丢弃旧通道的在线状态，重新探测；旧请求的迟到响应不能把新通道报成在线。手机退出旧轮询并启用新配置，每个客户端固定自己的地址与凭据，已经执行的操作结果不会发给另一台服务器。Mac 每次配对使用独立的钥匙串条目，旧请求不会读到新服务器的令牌；没有配对版本标记的旧配置仍从原钥匙串条目读取。配置写入加文件锁，避免后台刷新 adb 令牌覆盖新配对。
 
-首页「MCP 服务」下的「远程通道」是状态入口，显示未配置、已关闭、连接中或已连接，点击进入远程中继页。远程通道的开关在配置页上方，未配置时禁用，保存资料后可独立开关；打开远程通道时也会打开 MCP 服务。远程客户端用 HTTPS 长轮询该中继，再在手机进程内调用同一个 `McpProtocol`，所以文件权限与本地 MCP 相同。远程访问依赖中继已部署、Mac 网关已连接；任一尚未就绪时仍走原 adb 通道。中继能读取转发的请求和结果，应使用自己部署或信任的服务。
+首页「MCP 服务」下的「远程通道」是状态入口，显示未配置、已关闭、连接中、确认连接中、连接失败重试或认证失败，点击进入远程中继页。远程通道的开关在配置页上方，未配置时禁用，保存资料后可独立开关；打开远程通道时也会打开 MCP 服务。远程客户端用 HTTPS 长轮询该中继，再在手机进程内调用同一个 `McpProtocol`，所以文件权限与本地 MCP 相同。远程访问依赖中继已部署、Mac 网关已连接；任一尚未就绪时仍走原 adb 通道。中继能读取转发的请求和结果，应使用自己部署或信任的服务。
 
 手机监听默认网络变化，Wi-Fi 与蜂窝切换、或 VPN 底层网络改变时请求结束旧长轮询、唤醒退避并使用新的默认网络重连。手机轮询请求带 `waitMs=2000`，没有操作时中继在 2 秒后返回空闲响应，读取超时为 5 秒；旧蜂窝网络仍可用、关闭连接未能立即唤醒读取时，也不再等待原来的 25 秒空闲轮询。已执行操作只重传同一操作 ID 的结果，不再执行工具。中继允许同一已认证手机接替旧的等待轮询，避免旧 Wi-Fi TCP 未关闭时阻塞新网络；接替不重派已运行操作。需要远程已配对、开关开启，且蜂窝或其他默认网络能访问中继。没有可用网络时无法完成切换。
 
@@ -187,6 +187,8 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 | `station_shell_status` | Shizuku 的运行、授权、执行身份和不可用原因；不启动服务 |
 | `station_clipboard_get` | 读手机当前文字剪贴板；后台读取需要 Shizuku，锁屏或敏感内容不返回文字 |
 | `station_clipboard_state` | 读共享设置、内存中的预览和 Mac 在线状态，不发起系统剪贴板读取 |
+| `station_notification_status` | 读手机通知同步、系统授权、监听状态、已选应用数量和 Mac 在线状态；不返回正文，不建立接收会话 |
+| `station_notification_icon` | 读已选应用的 96×96 PNG 图标，最多 64 KiB；须已开启同步并授权，未选应用返回 `available: false`；省略 `packageName` 时读取第一个已选应用供预览 |
 | `station_file_list` | 列出一个目录的直接内容。`path` 空着表示内部存储根 |
 | `station_file_stat` | 类型、字节大小、修改时间，以及 `targetVersion` |
 | `station_file_read_text` | 按行读文本，换行原样保留。默认 200 行，最多 2000 行 |
@@ -215,14 +217,16 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 | `station_stay_awake` | 保持亮屏的开或关。`on` 为 true 或 false，数值和 `stay-awake.sh` 相同 |
 | `station_notify` | 发一条会话提醒。下拉通知和铃声与 `notify.sh` 相同 |
 | `station_clipboard_set` | 把一段文字放进剪贴板，盖掉原来的内容 |
-| `station_clipboard_configure` | 开关共享与自动同步；关闭共享清除内存预览并停止剪贴板后台服务 |
-| `station_clipboard_exchange` | Mac 客户端双向交换；自动模式可写手机剪贴板，标为非只读且具有破坏性 |
+| `station_clipboard_configure` | 配置共享、自动同步与默认关闭的 images；仅启用 shared 时同时启用 automatic，显式 automatic 优先；关闭共享清除内存状态并停止剪贴板后台服务 |
+| `station_clipboard_exchange` | Mac 客户端双向文字交换；图片开关开启后可将新 Mac 图片保存到手机相册；自动模式可写手机剪贴板，标为非只读且具有破坏性 |
+| `station_notification_configure` | 开关手机通知同步；应用白名单只在手机设置页选择，不授予系统通知使用权 |
+| `station_notification_poll` | Mac 的通知接收与会话心跳；只返回已选应用的在线新通知，非只读，不自动重放，见 [notify.md](notify.md#手机通知同步到-mac) |
 
 `annotations` 里，读取类的 `readOnlyHint` 为 true。会改掉或删掉已有内容的工具，`destructiveHint` 为 true。`copy`、`create_directory`、`station_file_open`、`station_stay_awake` 和 `station_notify` 会写出新东西或改手机状态，但 `destructiveHint` 是 false。`station_clipboard_set` 会盖掉剪贴板，`destructiveHint` 为 true。
 
 `station_stay_awake` 只接受布尔值 `on`。true 把 `screen_off_timeout` 写成 2147483647，把 `stay_on_while_plugged_in` 写成 7。false 写成 60000 和 0。写完再读回，对不上就拒绝。
 
-`station_notify` 要 `title` 和 `text`，不能是空的，分别最多 200 字和 4000 字。`mode` 省略时是 `replace`，原地更新同一条；`stack` 另发一条。`agent` 只认 `Grok`、`Claude`、`Codex`。可选输入 `sound` 指定手机上的铃声文件或 content URI；省略时沿用应用的铃声选择。它交给和 `notify.sh` 同一个接收器，并等到铃声结果：`sound` 是 `played`、`silent` 或 `failed`。没有铃声、通知权限没开，或 15 秒内没有结果，工具失败。
+`station_notify` 要 `title` 和 `text`，不能是空的，分别最多 200 字和 4000 字。显示方式由手机 App「首页 → 通知 → 电脑提醒 → 手机 → 显示方式」统一决定：默认只显示最新一条，也可选择每条都显示。旧客户端传来的 `mode` 不再覆盖手机设置，工具列表也不再提供该输入；返回的 `mode` 是实际采用的 `replace` 或 `stack`。`agent` 只认 `Grok`、`Claude`、`Codex`，认出来时左侧换成对应图标。可选输入 `sound` 指定手机上的铃声文件或 content URI；省略时沿用应用的铃声选择。它交给和 `notify.sh` 同一个接收器，并等到铃声结果：`sound` 是 `played`、`silent` 或 `failed`。没有铃声、通知权限没开，或 15 秒内没有结果，工具失败。
 
 `station_clipboard_set` 的 `text` 不能是空的，最多 100000 个 UTF-16 单元。它沿用应用自己的写入权限，不要求共享开关或 Shizuku；后台读取和共享交换使用专用 Shizuku 服务。
 
@@ -312,3 +316,13 @@ Home 是 `/storage/emulated/0`。`path` 空着就是这里。相对路径从这�
 - 经公网中继验证 stdout、stderr、退出码 7，以及 9000 字节输出只保留 127 字节后仍正常退出。300 毫秒超时返回 `timedOut: true`，再次以 `kill -0` 只读确认同组 sleep 子进程已不存在。
 - 本机统一网关完成 `sleep 3; id`，健康探测不再被长命令挡住。Android 构建与测试通过，Mac 网关测试通过；测试覆盖未授权错误、无效参数、无 Bearer 拒绝、长工具调用期间 ping 响应，以及 shell 执行不自动重放。
 - 没有重启手机或关闭无线调试来验证 Shizuku 的重启行为。
+
+### 44 版连接状态验证
+
+2026-10-02，连接状态与同一工作目录中的剪贴板恢复修改一起构建。`go test -race ./...`、Mac 全量构建及 `ConnectionStatusTest`、Android 全量构建及 `RelayConnectionTest` 通过。新增测试覆盖鉴权状态流的首次快照与变化推送、忙碌远程通道的确认过期与应答恢复、分段/空 adb 帧、带空格的 mDNS 序列号、断线事件后的旧探测失效，以及远程失败不会清掉有效 adb 序列号。
+
+PGT-AN20 经已有中继完成保留数据升级到 44，安装任务 `34b8a1604c8f40e1858a2f6377bf80f7` 返回 `verified: true`、`completed: true`，后台服务与主页自动恢复。当次 APK SHA-256 为 `819244e395c7ad26bcaf99e96c09e8c9106e2f65da2ef471f63e5a3ce5df228e`。只读远程调用返回版本 44、`connectionType=无线连接 · 远程连接`、`remoteConnected=true`、`remoteChecking=false`。Mac 安装并启动新版网关后，状态快照为本地和远程均在线、远程已确认。原配对保留，没有切换 Wi-Fi 或调试开关来制造断线；本段不把隔离测试的时序当作实机断网延迟。
+
+手机首页浅色实机画面已检查；Mac 首页、连接页与 MCP 页分别检查浅色/深色 `NSHostingView` 原生渲染，使用当时实际连接数据，图片位于忽略的 `.impeccable/review/mac44-*.png`。Mac 渲染窗口未激活，灰色系统控件不能单独证明禁用；电脑 UI 工具未能绑定菜单栏应用，操作边界由状态测试覆盖。连接页分别列出 adb 与远程状态，首页并列显示已确认的连接类型。
+
+Mac 构建时网关和钥匙串助手先输出到独立暂存文件，再原子替换；覆盖原 Mach-O 文件后出现过配对测试进程被 SIGKILL，暂存替换后的全量构建通过。更新已安装 App 时仍需退出旧 App 与网关、保留旧目录，再替换并重新启动网关。

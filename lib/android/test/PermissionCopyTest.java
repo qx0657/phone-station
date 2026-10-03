@@ -69,22 +69,22 @@ final class PermissionCopyTest {
         }
         PermissionCopy.Board shizukuDenied = PermissionCopy.present(
                 true, true, true, true, true, true, true, PermissionCopy.ShizukuState.DENIED);
-        expectSummary(shizukuDenied, 0, "已允许", PermissionCopy.Tone.HELD);
+        expectSummary(shizukuDenied, 1, "还有 1 项", PermissionCopy.Tone.WAITING);
         expectRow(
                 shizukuDenied,
                 "Shizuku",
                 "未授权",
                 "点这一行，在 Shizuku 里允许。",
-                PermissionCopy.Tone.NEUTRAL,
+                PermissionCopy.Tone.WAITING,
                 PermissionCopy.Action.SHIZUKU);
         PermissionCopy.Board shizukuStopped = PermissionCopy.present(
                 true, true, true, true, true, true, true, PermissionCopy.ShizukuState.STOPPED);
         expectRow(
                 shizukuStopped,
                 "Shizuku",
-                "没在跑",
+                "未启动",
                 "在 Shizuku 里启动。重启后要再启动一次。",
-                PermissionCopy.Tone.NEUTRAL,
+                PermissionCopy.Tone.WAITING,
                 PermissionCopy.Action.SHIZUKU);
         PermissionCopy.Board shizukuAbsent = PermissionCopy.present(
                 true, true, true, true, true, true, true, PermissionCopy.ShizukuState.ABSENT);
@@ -93,11 +93,11 @@ final class PermissionCopyTest {
                 "Shizuku",
                 "未安装",
                 "先安装 Shizuku。",
-                PermissionCopy.Tone.NEUTRAL,
+                PermissionCopy.Tone.WAITING,
                 PermissionCopy.Action.NONE);
         PermissionCopy.Board shizukuAside = PermissionCopy.present(
                 true, true, true, false, true, true, true, PermissionCopy.ShizukuState.ABSENT);
-        expectSummary(shizukuAside, 1, "还有 1 项", PermissionCopy.Tone.WAITING);
+        expectSummary(shizukuAside, 2, "还有 2 项", PermissionCopy.Tone.WAITING);
         PermissionCopy.Board quiet = PermissionCopy.present(true, true, false, true, true, true, false);
         expectSummary(quiet, 0, "已允许", PermissionCopy.Tone.HELD);
         expectRow(quiet, "通知", "已允许", "", PermissionCopy.Tone.HELD, PermissionCopy.Action.NONE);

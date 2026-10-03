@@ -13,6 +13,7 @@ enum StationPage {
     case mcp
     case remoteRelay
     case clipboard
+    case notifications
 }
 
 @MainActor
@@ -34,6 +35,8 @@ final class Station: ObservableObject {
     let mcp: McpSession
     let setup: SetupSession
     let clipboard: ClipboardSession
+    let notifications: NotificationSession
+    let health: DeviceHealthSession
     @Published var page: StationPage = .main
     private var subscriptions = Set<AnyCancellable>()
 
@@ -49,6 +52,8 @@ final class Station: ObservableObject {
         mcp = McpSession(feedback: feedback)
         setup = SetupSession(feedback: feedback)
         clipboard = ClipboardSession()
+        notifications = NotificationSession()
+        health = DeviceHealthSession()
         wire()
         watch(feedback)
         watch(link)
@@ -60,6 +65,8 @@ final class Station: ObservableObject {
         watch(mcp)
         watch(setup)
         watch(clipboard)
+        watch(notifications)
+        watch(health)
     }
 
     private func watch<Object: ObservableObject>(_ object: Object) {
@@ -84,6 +91,7 @@ final class Station: ObservableObject {
             login.note = nil
         }
         files.refresh()
+        health.refresh()
         Task { await link.probe(readingControls: true) }
     }
 
@@ -105,7 +113,15 @@ final class Station: ObservableObject {
     }
 
     private func wire() {
+        health.route = { [weak self] in
+            guard let self, self.mcp.listening else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
         clipboard.route = { [weak self] in
+            guard let self, self.mcp.listening else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
+        notifications.route = { [weak self] in
             guard let self, self.mcp.listening else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
@@ -127,8 +143,8 @@ final class Station: ObservableObject {
             self?.link.noteRemoteConnection(connected)
         }
         mcp.allowRemotePair = { [weak self] in self?.canOperate ?? false }
-        mcp.onLocalRouteUnavailable = { [weak self] in
-            self?.link.noteLocalRouteUnavailable()
+        mcp.onRemoteChecking = { [weak self] checking in
+            self?.link.noteRemoteChecking(checking)
         }
         torch.onQuit = {
             NSApplication.shared.terminate(nil)

@@ -29,8 +29,9 @@ public final class RemoteRelayActivity extends Activity {
     private boolean busy;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable connectionChanged = this::paintStatus;
     private final Runnable refresh = new Runnable() {
-        public void run() { paintStatus(); handler.postDelayed(this, 2_000); }
+        public void run() { paintStatus(); handler.postDelayed(this, 1_000); }
     };
 
     @Override public void onCreate(Bundle state) {
@@ -48,6 +49,7 @@ public final class RemoteRelayActivity extends Activity {
             paintStatus();
         });
         status = ui.valueRow(overview, "连接状态");
+        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         ui.paragraph(overview, "让电脑通过互联网使用这台手机的 MCP 工具。手机主动连接中继，Wi-Fi 和移动网络都可使用。");
         LinearLayout form = ui.card();
         ui.groupTitle(form, "中继配置");
@@ -76,8 +78,12 @@ public final class RemoteRelayActivity extends Activity {
         paintStatus();
     }
 
-    @Override protected void onResume() { super.onResume(); handler.post(refresh); }
-    @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onResume() {
+        super.onResume(); StationConnectionEvents.add(connectionChanged); handler.post(refresh);
+    }
+    @Override protected void onPause() {
+        StationConnectionEvents.remove(connectionChanged); handler.removeCallbacks(refresh); super.onPause();
+    }
     @Override protected void onStop() { token.setText(""); super.onStop(); }
     @Override protected void onDestroy() { worker.shutdown(); super.onDestroy(); }
 
@@ -89,8 +95,9 @@ public final class RemoteRelayActivity extends Activity {
         updatingRemote = false;
         remote.setEnabled(configured && !busy);
         ui.paintOn(remote.mark, remote.toggle.isChecked());
-        status.setText(!configured ? "未配置" : !RemoteStore.enabled(this) ? "已关闭" : online ? "已连接" : "连接中");
-        status.setTextColor(online ? ui.held() : ui.muted());
+        String label = PhoneRelayClient.connectionLabel(this);
+        if (!label.contentEquals(status.getText())) { status.setText(label); }
+        status.setTextColor(online ? ui.held() : PhoneRelayClient.checking() ? ui.waiting() : ui.muted());
     }
 
     private void showMessage(String value, boolean error) {

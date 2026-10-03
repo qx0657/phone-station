@@ -8,7 +8,8 @@ struct ClipboardClip: Codable, Equatable {
         switch kind {
         case "text": return text?.isEmpty == false ? text! : "空文字"
         case "sensitive": return "敏感内容已跳过"
-        case "unsupported": return "当前是图片或文件，仅支持文字"
+        case "unsupported": return "当前内容已跳过"
+        case "image": return "Mac 图片"
         case "oversize": return "文字超过 100000 字，已跳过"
         case "locked": return "手机已锁定，解锁后继续"
         default: return "剪贴板为空"
@@ -24,16 +25,75 @@ struct ClipboardSnapshot: Decodable {
     var macOnline: Bool
     var appliedMac: Bool?
     var error: String?
+    var recoverySupported: Bool? = nil
+    var sessionId: String? = nil
+    var availability: ClipboardAvailability? = nil
+    var images: Bool? = nil
+    var imagesSupported: Bool? = nil
+    var savedImage: Bool? = nil
+    var imageError: String? = nil
+}
+
+struct ClipboardAvailability: Decodable {
+    var status: String
+    var reason: String
+    var action: String
+    var ready: Bool
+}
+
+struct ClipboardLocalState {
+    var count: Int
+    var clip: ClipboardClip
+}
+
+/// A failed request is never replayed. Only a later copy can resume against a fresh phone version.
+struct ClipboardRecovery {
+    static let window: TimeInterval = 30
+    enum Decision: Equatable { case baseline, sendNewCopy, receivePhoneCopy }
+    private struct Checkpoint {
+        var phoneVersion: String
+        var sessionId: String?
+        var macCount: Int
+        var time: TimeInterval
+    }
+    private var checkpoint: Checkpoint?
+    private var attemptedCount: Int?
+    private(set) var recovering = false
+
+    mutating func sent(count: Int) { attemptedCount = count }
+    mutating func interrupted() { recovering = checkpoint != nil }
+    mutating func reset() { checkpoint = nil; attemptedCount = nil; recovering = false }
+    mutating func succeeded(_ snapshot: ClipboardSnapshot, count: Int, now: TimeInterval) {
+        guard snapshot.shared, snapshot.automatic, snapshot.error == nil,
+              snapshot.phone?.kind == "text" || snapshot.phone?.kind == "empty" else { reset(); return }
+        checkpoint = Checkpoint(phoneVersion: snapshot.phoneVersion, sessionId: snapshot.sessionId, macCount: count, time: now)
+        attemptedCount = count
+        recovering = false
+    }
+    func decision(_ snapshot: ClipboardSnapshot, local: ClipboardLocalState, now: TimeInterval) -> Decision {
+        guard recovering, let checkpoint, let attemptedCount,
+              now >= checkpoint.time, now - checkpoint.time < Self.window,
+              snapshot.recoverySupported == true, snapshot.shared, snapshot.automatic, snapshot.error == nil,
+              snapshot.sessionId == checkpoint.sessionId,
+              snapshot.phone?.kind == "text" || snapshot.phone?.kind == "empty" else { return .baseline }
+        if snapshot.phoneVersion == checkpoint.phoneVersion,
+           local.count > attemptedCount, local.clip.kind == "text" { return .sendNewCopy }
+        if snapshot.phoneVersion != checkpoint.phoneVersion, local.count == checkpoint.macCount,
+           local.clip.kind == "text" || local.clip.kind == "empty" { return .receivePhoneCopy }
+        return .baseline
+    }
 }
 
 /// Never apply a reply over a newer local copy or replay clipboard data after reconnecting.
 struct ClipboardSyncPolicy {
     private(set) var phoneVersion: String?
-    mutating func disconnect() { phoneVersion = nil }
+    private var sessionId: String?
+    mutating func disconnect() { phoneVersion = nil; sessionId = nil }
     mutating func receive(_ snapshot: ClipboardSnapshot, sentCount: Int, currentCount: Int,
                           current: ClipboardClip, baseline: Bool) -> String? {
-        defer { phoneVersion = snapshot.phoneVersion }
+        defer { phoneVersion = snapshot.phoneVersion; sessionId = snapshot.sessionId }
         guard !baseline, snapshot.shared, snapshot.automatic, snapshot.error == nil,
+              sessionId == snapshot.sessionId,
               let prior = phoneVersion, prior != snapshot.phoneVersion,
               sentCount == currentCount, snapshot.appliedMac != true,
               current.kind == "text" || current.kind == "empty",
@@ -49,12 +109,15 @@ enum ClipboardRPC {
         var errorDescription: String? { message }
     }
     static func call(endpoint: String, token: String, name: String, arguments: [String: Any]) async throws -> Data {
+        try await call(endpoint: endpoint, token: token, name: name, arguments: arguments, timeout: 8)
+    }
+    static func call(endpoint: String, token: String, name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> Data {
         guard let url = URL(string: endpoint), url.host == "127.0.0.1", url.path == "/mcp", !token.isEmpty else {
             throw Failure(message: "请先连接 MCP 服务")
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 8
+        request.timeoutInterval = timeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")

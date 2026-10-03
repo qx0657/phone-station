@@ -5,7 +5,7 @@ description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或�
 
 # 安装全局任务提醒
 
-事件表、下拉通知的标题和内容、右侧按 Agent 放的图标、Agent 名怎么判断，以及铃声为什么在脱离的进程里播，以 `docs/notify.md` 的「全局 hook」为准。
+事件表、下拉通知的标题和内容、左侧按 Agent 放的图标、Agent 名怎么判断，以及铃声为什么在脱离的进程里播，以 `docs/notify.md` 的「全局 hook」为准。
 
 只有用户要求安装或换电脑接上时才运行安装脚本。只有用户要求卸下时才运行 `--remove`。单次响一声、这一轮结束响一声，或只要震动，用 README「会话提醒」里的命令。
 

@@ -59,7 +59,7 @@ def rpc(endpoint: str, auth: str, rid: int, method: str, params: dict) -> dict:
     return reply["result"]
 
 
-def send(title: str, text: str, mode: str, agent: str, sound: str) -> int:
+def send(title: str, text: str, _legacy_mode: str, agent: str, sound: str) -> int:
     route = gateway()
     if route is None:
         return UNAVAILABLE
@@ -79,7 +79,8 @@ def send(title: str, text: str, mode: str, agent: str, sound: str) -> int:
     except (OSError, ValueError, KeyError, TypeError):
         return UNAVAILABLE
 
-    args = {"title": title, "text": text, "mode": mode, "agent": agent}
+    # 显示方式由手机设置决定；保留旧入口的参数位置，但不再发送 mode。
+    args = {"title": title, "text": text, "agent": agent}
     if sound:
         args["sound"] = sound
     try:
@@ -90,7 +91,7 @@ def send(title: str, text: str, mode: str, agent: str, sound: str) -> int:
         if result.get("isError") or detail.get("posted") is not True:
             print(detail.get("error", "通知没有发出。"), file=sys.stderr)
             return 1
-        print("通知已发出" if mode == "stack" else "通知已更新", file=sys.stderr)
+        print("通知已更新" if detail.get("mode") == "replace" else "通知已发出", file=sys.stderr)
         outcome = detail.get("sound")
         if outcome == "played":
             print("played")

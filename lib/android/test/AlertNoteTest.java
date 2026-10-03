@@ -23,6 +23,14 @@ final class AlertNoteTest {
         if (tag.equals(AlertNote.stackTag(10L, 21L)) || tag.equals(AlertNote.REPLACE_TAG)) {
             throw new AssertionError("stack tag");
         }
+        if (!AlertNote.isStacked(stack.tag, stack.id)
+                || AlertNote.isStacked(replace.tag, replace.id)
+                || AlertNote.isStacked(stack.tag, AlertNote.REPLACE_ID)
+                || AlertNote.isStacked(null, AlertNote.STACK_ID)
+                || AlertNote.isStacked("file-open", AlertNote.STACK_ID)
+                || AlertNote.isStacked("keep", 1)) {
+            throw new AssertionError("clear only stacked reminders");
+        }
         AlertNote claude = AlertNote.parse("标题", "内容", "replace", "Claude", 1L, 2L);
         AlertNote unnamed = AlertNote.parse("标题", "内容", "replace", null, 1L, 2L);
         AlertNote other = AlertNote.parse("标题", "内容", "replace", "chatgpt", 1L, 2L);

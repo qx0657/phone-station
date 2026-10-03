@@ -31,6 +31,20 @@ enum StationPalette {
 }
 
 enum StationRows {
+    static func connectionRow(_ title: String, symbol: String, status: String, online: Bool, checking: Bool = false) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).frame(width: 18).foregroundStyle(.secondary).accessibilityHidden(true)
+            Text(title).font(.subheadline)
+            Spacer(minLength: 8)
+            if checking { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+            Text(status).font(.system(size: 12, weight: online ? .medium : .regular))
+                .foregroundStyle(online ? StationPalette.connected : checking ? StationPalette.caution : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(.horizontal, 12).padding(.vertical, 11)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.updatesFrequently)
+    }
+
     static var groupDivider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.08))

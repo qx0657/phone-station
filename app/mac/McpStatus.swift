@@ -8,22 +8,30 @@ struct McpStatus {
     let remoteConnected: Bool
     let localOnline: Bool?
     let gatewayReady: Bool
+    let remoteConfigured: Bool?
+    let remoteChecking: Bool
 
     var listening: Bool { !endpoint.isEmpty }
 
     init(_ output: String) {
         if let data = output.data(using: .utf8),
            let value = try? JSONDecoder().decode(Snapshot.self, from: data) {
-            let available = value.ready && (value.mode == "local" || value.mode == "remote")
+            let remoteVerified = value.remoteOnline && (value.remoteVerified ?? true)
+            let available = value.ready && ((value.mode == "local" && value.localOnline)
+                || (value.mode == "remote" && remoteVerified))
             gatewayReady = value.ready
             endpoint = available ? (value.endpoint ?? "") : ""
             token = available ? (value.token ?? "") : ""
             channel = available ? value.mode : ""
-            remoteConnected = available && value.remoteOnline
+            remoteConnected = value.ready && value.remoteOnline && (value.remoteVerified ?? true)
+            remoteConfigured = value.remoteConfigured
+            remoteChecking = value.ready && (value.remoteChecking ?? false)
             localOnline = value.ready ? value.localOnline : nil
             return
         }
         localOnline = nil
+        remoteConfigured = nil
+        remoteChecking = false
         gatewayReady = output.contains("http://")
         let lines = output.split(separator: "\n").map(String.init)
         let fields = lines.first { $0.hasPrefix("channel=") }?.split(separator: " ") ?? []
@@ -50,5 +58,8 @@ struct McpStatus {
         var remoteOnline: Bool
         var endpoint: String?
         var token: String?
+        var remoteConfigured: Bool?
+        var remoteVerified: Bool?
+        var remoteChecking: Bool?
     }
 }

@@ -35,6 +35,7 @@ const (
 	probeEvery    = time.Second
 	remoteEvery   = 2 * time.Second
 	localTimeout  = time.Second
+	remoteFresh   = 6 * time.Second
 )
 
 type config struct {
@@ -57,6 +58,8 @@ type health struct {
 	lastModeChange   time.Time
 	remoteForFailure bool
 	remoteProfile    string
+	remoteCheckedAt  time.Time
+	remoteBusy       bool
 	localRevision    uint64
 	localRequests    map[uint64]context.CancelFunc
 	nextRequest      uint64
@@ -106,6 +109,8 @@ func main() {
 		err = printStatus()
 	case "status-json":
 		err = printJSONStatus()
+	case "watch-status":
+		err = watchJSONStatus()
 	case "credentials":
 		err = printCredentials()
 	case "remote-call":
@@ -488,22 +493,16 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMCPError(w, nil, http.StatusInternalServerError, "网关配置不可用")
 		return
 	}
-	if r.URL.Path == "/__status" && r.Method == http.MethodGet {
+	if (r.URL.Path == "/__status" || r.URL.Path == "/__events") && r.Method == http.MethodGet {
 		if !authorized(r, value.GatewayToken) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		g.state.mu.RLock()
-		out := statusReply{
-			Ready:        value.GatewayToken != "",
-			Mode:         g.state.mode,
-			LocalOnline:  g.state.localOnline,
-			RemoteOnline: g.state.remoteOnline,
-			LocalRTTMs:   durationMs(g.state.localRTT),
-			RemoteRTTMs:  durationMs(g.state.remoteRTT),
+		if r.URL.Path == "/__events" {
+			g.streamStatus(w, r, value)
+		} else {
+			writeJSON(w, http.StatusOK, g.snapshot(value))
 		}
-		g.state.mu.RUnlock()
-		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	if r.Method != http.MethodPost || r.URL.Path != "/mcp" {
@@ -571,6 +570,7 @@ func (g *gateway) config() (config, error) {
 		g.state.mu.Lock()
 		if g.state.remoteProfile != "" && g.state.remoteProfile != key {
 			g.state.remoteOnline, g.state.remoteRTT = false, 0
+			g.state.remoteCheckedAt = time.Time{}
 			g.state.localSlowSamples, g.state.localGoodSamples = 0, 0
 			g.state.selectMode(false)
 		}
@@ -627,6 +627,7 @@ func (g *gateway) noteRemote(value config, result probeResult) {
 		return
 	}
 	g.state.remoteOnline, g.state.remoteRTT = result.ok, result.rtt
+	g.state.remoteCheckedAt = time.Now()
 	g.state.selectMode(false)
 }
 
@@ -716,6 +717,8 @@ func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 		return probeResult{}, false
 	}
 	defer g.remoteMu.Unlock()
+	g.setRemoteBusy(true)
+	defer g.setRemoteBusy(false)
 	// Publish before releasing the relay lock, so a late probe cannot overwrite
 	// the health of a business call that has already completed successfully.
 	defer func() {
@@ -822,7 +825,7 @@ func safeToReplay(body []byte) bool {
 		return true
 	case "tools/call":
 		switch request.Params.Name {
-		case "station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status",
+		case "station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
 			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
 			"station_file_search", "station_file_search_text":
 			return true
@@ -834,6 +837,8 @@ func safeToReplay(body []byte) bool {
 func (g *gateway) proxyRemote(parent context.Context, w http.ResponseWriter, body []byte, value config) {
 	g.remoteMu.Lock()
 	defer g.remoteMu.Unlock()
+	g.setRemoteBusy(true)
+	defer g.setRemoteBusy(false)
 	ctx, cancel := context.WithTimeout(parent, 4*time.Minute)
 	defer cancel()
 	start := time.Now()
@@ -947,14 +952,102 @@ func pinnedTransport(pin string) *http.Transport {
 }
 
 type statusReply struct {
-	Ready        bool   `json:"ready"`
-	Mode         string `json:"mode"`
-	LocalOnline  bool   `json:"localOnline"`
-	RemoteOnline bool   `json:"remoteOnline"`
-	LocalRTTMs   int64  `json:"localRttMs"`
-	RemoteRTTMs  int64  `json:"remoteRttMs"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	Token        string `json:"token,omitempty"`
+	Ready            bool   `json:"ready"`
+	Mode             string `json:"mode"`
+	LocalOnline      bool   `json:"localOnline"`
+	RemoteOnline     bool   `json:"remoteOnline"`
+	RemoteConfigured bool   `json:"remoteConfigured"`
+	RemoteVerified   bool   `json:"remoteVerified"`
+	RemoteChecking   bool   `json:"remoteChecking"`
+	LocalRTTMs       int64  `json:"localRttMs"`
+	RemoteRTTMs      int64  `json:"remoteRttMs"`
+	Endpoint         string `json:"endpoint,omitempty"`
+	Token            string `json:"token,omitempty"`
+}
+
+func (g *gateway) setRemoteBusy(busy bool) {
+	g.state.mu.Lock()
+	g.state.remoteBusy = busy
+	g.state.mu.Unlock()
+}
+
+func (g *gateway) snapshot(value config) statusReply {
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+	s := &g.state
+	configured := value.RemoteURL != "" && value.RemotePin != ""
+	verified := s.remoteOnline && (s.remoteCheckedAt.IsZero() || time.Since(s.remoteCheckedAt) <= remoteFresh)
+	return statusReply{
+		Ready: value.GatewayToken != "", Mode: s.mode,
+		LocalOnline: s.localOnline, RemoteOnline: s.remoteOnline,
+		RemoteConfigured: configured, RemoteVerified: configured && verified,
+		RemoteChecking: configured && (s.remoteCheckedAt.IsZero() || (s.remoteBusy && !verified)),
+		LocalRTTMs:     durationMs(s.localRTT), RemoteRTTMs: durationMs(s.remoteRTT),
+	}
+}
+
+// Publish transitions through one authenticated connection, including freshness
+// expiry while a long operation prevents another ping. No credentials on the wire.
+func (g *gateway) streamStatus(w http.ResponseWriter, r *http.Request, value config) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-store")
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	previous := statusReply{}
+	first := true
+	for {
+		current, err := g.config()
+		if err != nil || current.GatewayToken != value.GatewayToken {
+			return
+		}
+		next := g.snapshot(current)
+		if first || next != previous {
+			if json.NewEncoder(w).Encode(next) != nil {
+				return
+			}
+			flusher.Flush()
+			previous, first = next, false
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func watchJSONStatus() error {
+	value, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	request, _ := http.NewRequest(http.MethodGet, "http://"+listenAddress+"/__events", nil)
+	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: time.Second}}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return errors.New("status stream unavailable")
+	}
+	decoder, encoder := json.NewDecoder(response.Body), json.NewEncoder(os.Stdout)
+	for {
+		var status statusReply
+		if err := decoder.Decode(&status); err != nil {
+			return err
+		}
+		status.Endpoint, status.Token = publicAddress, value.GatewayToken
+		if err := encoder.Encode(status); err != nil {
+			return err
+		}
+	}
 }
 
 func printJSONStatus() error {

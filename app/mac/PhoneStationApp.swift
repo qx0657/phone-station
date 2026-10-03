@@ -35,6 +35,11 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         schedulePlacementLog()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        station.link.stopWatch()
+        station.mcp.stopWatch()
+    }
+
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else {
@@ -61,7 +66,14 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         panel.contentSize = NSSize(width: 360, height: 420)
         panel.contentViewController = host
         popover = panel
+        NotificationBannerCenter.shared.onOpen = { [weak self] in
+            guard let self, let button = self.statusItem?.button, let popover = self.popover else { return }
+            self.station.page = .notifications
+            if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
         station.link.startWatch()
+        station.mcp.startWatch()
     }
 
     private func applyMenuBar(connected: Bool) {
@@ -71,7 +83,8 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
             button.image = menuBarImage(connected: connected)
             logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.link.statusLabel, privacy: .public)")
         }
-        let tip = "手机工位：\(station.link.statusLabel)"
+        let line = station.link.connectionLine
+        let tip = "手机工位：\(station.link.statusLabel)" + (line.isEmpty ? "" : "\n\(line)")
         if button.toolTip != tip {
             button.toolTip = tip
         }

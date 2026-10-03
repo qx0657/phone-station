@@ -86,6 +86,7 @@ final class StationNotifications {
             Service service = live();
             if (service != null) {
                 update(service);
+                scheduleHostExpiry(service);
             }
         });
     }
@@ -462,7 +463,8 @@ final class StationNotifications {
                 mcp,
                 KeeperStore.isEnabled(context),
                 keeper.headline,
-                host.connectionType);
+                host.connectionType,
+                host.remoteChecking);
     }
 
     private static void watch(Context context) {
@@ -478,6 +480,8 @@ final class StationNotifications {
         };
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor("adb_wifi_enabled"), false, settingObserver);
+        context.getApplicationContext().getContentResolver().registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, settingObserver);
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(HostLink.SETTING), false, settingObserver);
         context.getApplicationContext().getContentResolver().registerContentObserver(
@@ -500,9 +504,10 @@ final class StationNotifications {
         handler().removeCallbacks(expireHost);
         long marked = Settings.Global.getLong(context.getContentResolver(), HostLink.SETTING, 0L);
         long now = System.currentTimeMillis();
-        if (HostLink.linked(marked, now)) {
-            handler().postDelayed(expireHost, Math.max(1L, marked + HostLink.FRESH_MS + 1L - now));
-        }
+        long delay = HostLink.linked(marked, now) ? Math.max(1L, marked + HostLink.FRESH_MS + 1L - now) : -1L;
+        long remote = PhoneRelayClient.expiresIn();
+        if (remote >= 0L) { delay = delay < 0L ? remote : Math.min(delay, remote); }
+        if (delay >= 0L) { handler().postDelayed(expireHost, delay); }
     }
 
     private static void unwatchIfIdle(Context context) {

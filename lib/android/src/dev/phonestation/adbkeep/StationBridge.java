@@ -64,6 +64,9 @@ final class StationBridge implements StationHost {
                 .put("connected", host.linked)
                 .put("connectionType", host.connectionType)
                 .put("remoteConnected", host.remoteConnected)
+                .put("remoteChecking", host.remoteChecking)
+                .put("remoteState", PhoneRelayClient.connectionLabel(context))
+                .put("health", PhoneHealth.read(context))
                 .put("batteryPercent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
                 .put("charging", battery.isCharging())
                 .put("ringer", ringer(audio.getRingerMode()))
@@ -102,13 +105,12 @@ final class StationBridge implements StationHost {
     }
 
     @Override
-    public Json notify(String title, String text, boolean stack, String agent, String sound) {
+    public Json notify(String title, String text, String agent, String sound) {
         Intent intent = new Intent(AlertNote.ACTION);
         intent.setClass(context, AlertReceiver.class);
         intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
         intent.putExtra("title", title);
         intent.putExtra("text", text);
-        intent.putExtra("mode", stack ? "stack" : "replace");
         if (sound != null && !sound.isEmpty()) {
             intent.putExtra("sound", sound);
         }
@@ -116,6 +118,7 @@ final class StationBridge implements StationHost {
             intent.putExtra("agent", agent);
         }
         final int[] code = new int[] {0};
+        final String[] mode = new String[] {""};
         final CountDownLatch done = new CountDownLatch(1);
         Bundle options = null;
         if (Build.VERSION.SDK_INT >= 34) {
@@ -129,6 +132,10 @@ final class StationBridge implements StationHost {
                     @Override
                     public void onReceive(Context ignored, Intent result) {
                         code[0] = getResultCode();
+                        Bundle extras = getResultExtras(false);
+                        if (extras != null) {
+                            mode[0] = extras.getString("mode", "");
+                        }
                         done.countDown();
                     }
                 },
@@ -147,7 +154,7 @@ final class StationBridge implements StationHost {
         Json out = Json.obj()
                 .put("title", title)
                 .put("text", text)
-                .put("mode", stack ? "stack" : "replace")
+                .put("mode", mode[0])
                 .put("agent", agent == null ? "" : agent);
         if (code[0] == AlertSoundPlan.PLAYED) {
             return out.put("posted", true).put("sound", "played");
@@ -175,9 +182,13 @@ final class StationBridge implements StationHost {
     }
 
     @Override public Json clipboardGet() { return SharedClipboard.readPhone(context); }
-    @Override public Json clipboardState() { return SharedClipboard.status(context); }
+    @Override public Json clipboardState(Json args) { return SharedClipboard.status(context, args); }
     @Override public Json clipboardConfigure(Json args) { return SharedClipboard.configure(context, args); }
     @Override public Json clipboardExchange(Json args) { return SharedClipboard.exchange(context, args); }
+    @Override public Json notificationStatus() { return PhoneNotifications.status(context); }
+    @Override public Json notificationConfigure(Json args) { return PhoneNotifications.configure(context, args); }
+    @Override public Json notificationPoll(Json args) { return PhoneNotifications.poll(context, args); }
+    @Override public Json notificationIcon(String packageName) { return NotificationAppIcon.read(context, packageName); }
 
     @Override
     public Json open(String input) {

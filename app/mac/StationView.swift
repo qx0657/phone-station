@@ -27,6 +27,8 @@ struct StationView: View {
                 RemoteRelayPage(station: station, mcp: station.mcp)
             case .clipboard:
                 ClipboardPage(station: station, clipboard: station.clipboard)
+            case .notifications:
+                NotificationPage(station: station, notifications: station.notifications)
             }
         }
         .frame(width: 360, alignment: .leading)

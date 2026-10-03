@@ -4,6 +4,7 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.SystemClock;
 import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
@@ -30,7 +31,7 @@ final class PhoneRelayClient implements Runnable {
     private static final int BODY_LIMIT = 18 * 1024 * 1024;
     private static final long RESULT_WINDOW_MS = 180_000L;
     private static volatile PhoneRelayClient activeClient;
-    private volatile boolean connected;
+    private final RelayConnection state = new RelayConnection();
 
     private final Context context;
     private final String version;
@@ -49,7 +50,24 @@ final class PhoneRelayClient implements Runnable {
 
     static boolean connected() {
         PhoneRelayClient client = activeClient;
-        return client != null && !client.stopped.get() && client.connected;
+        return client != null && !client.stopped.get() && client.state.connected(SystemClock.elapsedRealtime());
+    }
+
+    static boolean checking() {
+        PhoneRelayClient client = activeClient;
+        return client != null && !client.stopped.get() && client.state.checking(SystemClock.elapsedRealtime());
+    }
+
+    static String connectionLabel(Context context) {
+        if (!RemoteStore.configured(context)) { return "未配置"; }
+        if (!RemoteStore.enabled(context)) { return "已关闭"; }
+        PhoneRelayClient client = activeClient;
+        return client == null || client.stopped.get() ? "连接中" : client.state.label(SystemClock.elapsedRealtime());
+    }
+
+    static long expiresIn() {
+        PhoneRelayClient client = activeClient;
+        return client == null || client.stopped.get() ? -1L : client.state.expiresIn(SystemClock.elapsedRealtime());
     }
 
     PhoneRelayClient(Context context, String version) {
@@ -109,7 +127,9 @@ final class PhoneRelayClient implements Runnable {
                 if (stopped.get()) { break; }
                 deliver(operation.string(), next.get("payload").emit());
             } catch (Exception error) {
-                setConnected(false);
+                setWaiting(error instanceof RelayHttpFailure && (((RelayHttpFailure) error).status == 401
+                        || ((RelayHttpFailure) error).status == 403)
+                        ? "认证失败 · 请检查令牌" : "连接失败 · 重试中");
                 if (!stopped.get()) {
                     Log.w(TAG, "relay connection failed: " + error.getClass().getSimpleName());
                     retry.pause(backoff, revision);
@@ -163,7 +183,7 @@ final class PhoneRelayClient implements Runnable {
         if (stopped.get()) { return; }
         synchronized (retry) {
             retry.changed();
-            setConnected(false);
+            setWaiting("连接中");
         }
         StationNotifications.connectionChanged();
         HttpsURLConnection connection = inFlight;
@@ -176,13 +196,19 @@ final class PhoneRelayClient implements Runnable {
     }
 
     private void setConnected(boolean value) {
-        boolean next = value && !stopped.get();
-        if (connected == next) {
-            return;
-        }
-        connected = next;
+        if (!value || stopped.get()) { setWaiting("连接失败 · 重试中"); return; }
+        long now = SystemClock.elapsedRealtime();
+        String previous = state.label(now);
+        state.confirmed(now);
+        if (previous.equals(state.label(now))) { return; }
         // 旧客户端退出时不能清掉新客户端的状态。通知始终重读当前客户端。
         StationNotifications.connectionChanged();
+    }
+
+    private void setWaiting(String phase) {
+        String previous = state.label(SystemClock.elapsedRealtime());
+        state.waiting(phase);
+        if (!previous.equals(phase)) { StationNotifications.connectionChanged(); }
     }
 
     private void deliver(String operationID, String payload) throws Exception {
@@ -263,7 +289,11 @@ final class PhoneRelayClient implements Runnable {
             if (status < 200 || status >= 300) {
                 throw new RelayHttpFailure(status);
             }
-            return Json.parse(new String(response, StandardCharsets.UTF_8));
+            Json reply = Json.parse(new String(response, StandardCharsets.UTF_8));
+            synchronized (retry) {
+                if (revision == retry.revision()) { setConnected(true); }
+            }
+            return reply;
         } finally {
             inFlight = null;
             if (connection != null) {

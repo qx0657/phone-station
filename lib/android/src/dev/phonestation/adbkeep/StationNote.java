@@ -15,14 +15,15 @@ final class StationNote {
     final String expandedDetail;
 
     private StationNote(boolean linked, boolean wirelessOn, boolean mcpOn, boolean keeperOn,
-            String connectionType, String attention) {
-        title = linked ? "电脑已连接" : (wirelessOn || mcpOn ? "等待电脑连接" : "电脑未连接");
+            String connectionType, String attention, boolean checking) {
+        title = linked ? "电脑已连接" : checking ? "确认电脑连接中" : (wirelessOn || mcpOn ? "等待电脑连接" : "电脑未连接");
         connection = linked ? compactTransport(connectionType) : "";
         wirelessState = wirelessOn ? "开" : "关";
         mcpState = mcpOn ? "开" : "关";
         keeperState = keeperOn ? "开" : "关";
         expandedDetail = attention;
         text = linked ? (connection.isEmpty() ? "连接正常" : connection)
+                : checking ? "正在等待远程应答"
                 : !attention.isEmpty() ? attention
                 : wirelessOn ? "无线调试已就绪"
                 : mcpOn ? "MCP 服务已就绪"
@@ -31,9 +32,14 @@ final class StationNote {
 
     static StationNote present(boolean linked, boolean wirelessOn, boolean mcpOn, boolean keeperOn,
             String keeperHeadline, String connectionType) {
+        return present(linked, wirelessOn, mcpOn, keeperOn, keeperHeadline, connectionType, false);
+    }
+
+    static StationNote present(boolean linked, boolean wirelessOn, boolean mcpOn, boolean keeperOn,
+            String keeperHeadline, String connectionType, boolean checking) {
         // 调试的恢复问题不能覆盖真实的 USB 或远程连接状态。
         String attention = keeperOn ? attention(keeperHeadline) : "";
-        return new StationNote(linked, wirelessOn, mcpOn, keeperOn, connectionType, attention);
+        return new StationNote(linked, wirelessOn, mcpOn, keeperOn, connectionType, attention, checking);
     }
 
     String wakeKey() {

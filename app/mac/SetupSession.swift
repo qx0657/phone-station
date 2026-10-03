@@ -12,6 +12,24 @@ final class SetupSession: ObservableObject {
         self.feedback = feedback
     }
 
+    func openPermissions(serial: String?) {
+        guard let serial, let adb = StationRunner.executable("adb") else {
+            feedback.notice = "请在手机首页打开「权限」，按提示启动或授权 Shizuku。"
+            return
+        }
+        guard feedback.activity == nil else { return }
+        feedback.activity = "正在打开手机权限页…"
+        Task.detached(priority: .userInitiated) {
+            let result = StationRunner.capture(adb, ["-s", serial, "shell", "am", "start", "-n",
+                "dev.phonestation.adbkeep/.MainActivity", "--es", "dev.phonestation.adbkeep.PAGE", "permissions"], timeout: 10)
+            await MainActor.run {
+                self.feedback.activity = nil
+                self.feedback.notice = result.succeeded ? "已打开手机权限页，请在手机上按提示处理。"
+                    : "手机权限页未能打开，请从手机首页进入「权限」。"
+            }
+        }
+    }
+
     func pair() {
         guard feedback.activity == nil else { return }
         let code = pairCode.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-02T14:08:40.796796Z",
+  "generatedAt": "2026-10-03T04:27:32.903956Z",
   "title": "Design System: 手机工位",
   "extensions": {
     "colorMeta": {
@@ -157,6 +157,18 @@
       "mac-address": {
         "displayName": "Mac 地址",
         "purpose": "原生等宽 MCP 接入地址。"
+      },
+      "mac-banner-app": {
+        "displayName": "Mac 横幅应用名",
+        "purpose": "medium 应用名与「· 手机」来源，单行次要文字色。"
+      },
+      "mac-banner-title": {
+        "displayName": "Mac 横幅标题",
+        "purpose": "semibold 通知标题，最多两行；空标题使用应用名。"
+      },
+      "mac-banner-body": {
+        "displayName": "Mac 横幅正文",
+        "purpose": "regular 通知正文，最多三行；空正文不保留正文行。"
       }
     },
     "shadows": [
@@ -164,6 +176,11 @@
         "name": "android-light-card-elevation",
         "value": "dp(1) + density × 0.5 (native View.elevation)",
         "purpose": "StationChrome.card() 仅在浅色外观设置；平台负责阴影绘制。"
+      },
+      {
+        "name": "mac-notification-banner-window",
+        "value": "NSPanel.hasShadow = true (native macOS)",
+        "purpose": "非激活横幅窗口使用系统阴影，没有自定义阴影参数；离屏布局截图未验证实际合成效果。"
       }
     ],
     "motion": [
@@ -176,6 +193,11 @@
         "name": "mac-hover-wash",
         "value": "0.12s Core Animation easeOut",
         "purpose": "HoverWashView 背景色进入与离开。"
+      },
+      {
+        "name": "mac-notification-banner-enter",
+        "value": "0.18s native NSAnimationContext; 12pt horizontal offset",
+        "purpose": "新横幅从右侧进入；accessibilityDisplayShouldReduceMotion 开启时跳过。"
       }
     ],
     "native": {
@@ -190,7 +212,8 @@
       },
       "systemDefaults": [
         "Android textColorPrimary、EditText 底线、次按钮和 ripple 由当前主题提供。",
-        "macOS 系统字体、语义文字色、按钮强调色、roundedBorder、开关和对话框由 OS 提供。"
+        "macOS 系统字体、语义文字色、按钮强调色、roundedBorder、开关和对话框由 OS 提供。",
+        "通知横幅沿用 SwiftUI 语义文字色与 NSPanel 系统阴影；macOS 26+ 使用 Apple 原生 NSGlassEffectView clear 窗口根，macOS 13–25 保留 NSVisualEffectView popover 回退。"
       ],
       "sources": [
         "lib/android/res/values/colors.xml",
@@ -206,9 +229,15 @@
         "app/mac/RemoteRelayPage.swift",
         "app/mac/ConnectionPage.swift",
         "lib/android/src/dev/phonestation/adbkeep/ClipboardActivity.java",
-        "app/mac/ClipboardPage.swift"
+        "app/mac/ClipboardPage.swift",
+        "lib/android/src/dev/phonestation/adbkeep/NotificationAppIcon.java",
+        "app/mac/NotificationBanner.swift",
+        "app/mac/NotificationProtocol.swift",
+        "app/mac/NotificationSession.swift",
+        "app/mac/NotificationPage.swift",
+        "app/mac/NotificationDelivery.swift"
       ],
-      "scope": "提取已实现首页、连接/MCP、远程配置与共享剪贴板的共用原生组件；没有新的视觉世界或品牌假设。",
+      "scope": "提取已实现首页、连接/MCP、远程配置、共享剪贴板与手机通知应用图标横幅的共用原生组件；局部扩展既有视觉世界，没有新的品牌假设。",
       "representation": "原生组件用文字与源码引用记录。没有 HTML/CSS 预览、浏览器像素、合成色阶或未实现状态。",
       "verification": {
         "record": "docs/mcp.md#两端配置界面与独立配置验证",
@@ -241,6 +270,101 @@
           "resolved": [
             "关闭共享后自动同步整行禁用并变暗。"
           ]
+        },
+        "notificationBanners": {
+          "record": "docs/notify.md#构建与验证",
+          "date": "2026-10-03",
+          "installedVersions": {
+            "android": "48",
+            "macos": "0.1.0 (6)"
+          },
+          "installation": "两端版本已安装；Mac 签名和安装后的可执行文件匹配，手机通知使用权与微信选择保留。",
+          "iconInterface": "实际 MCP 图标接口读取微信成功；未选择的包被拒绝，不返回图标。",
+          "macos": "逐张核对浅色、深色、长文本、缺图横幅及浅色/深色设置页的离屏 NSHostingView 原生渲染；真实微信图标来自当前手机。",
+          "reviewImages": [
+            ".impeccable/review/mac-banner-light.png",
+            ".impeccable/review/mac-banner-dark.png",
+            ".impeccable/review/mac-banner-long.png",
+            ".impeccable/review/mac-banner-fallback.png",
+            ".impeccable/review/mac-notifications-6-light.png",
+            ".impeccable/review/mac-notifications-6-dark.png"
+          ],
+          "disposition": "recapture",
+          "reviewer": "Fresh reviewer glass_finish_review_10 的 disposition 为 recapture，独立跨应用桌面验收未关闭。",
+          "limitations": "同背景的真实 AppKit child-panel 受控合成证明旧 9 材质与新 clear 根的差异，不能证明独立浮窗跨应用桌面的实际效果；CUA 原生窗口捕获排除其他独立窗口，Preview 整个桌面截图显示工具隐私遮罩，证据无效。",
+          "pending": "Mac 0.1.0 (11) 已安装、启动并完成代码与签名核对；独立跨应用桌面验收仍未关闭，需要有效桌面证据与用户实机验收。",
+          "glassRefinement": {
+            "installedVersions": {
+              "android": "48",
+              "macos": "0.1.0 (7)"
+            },
+            "record": "docs/notify.md#mac-7-版玻璃与圆角",
+            "trigger": "用户 6 版实机预览截图显示圆角外露白矩形，随后要求 Apple 原生液态玻璃。",
+            "implementation": "macOS 26+ 原生 NSGlassEffectView regular/contentView；旧系统补圆角材质遮罩，窗口阴影跟随形状。",
+            "validation": "生产遮罩 1×/2× 透明边界回归通过；CUA 检查 macOS 26.6.2 上浅色、深色与长消息的真实 AppKit fixture 窗口，未见露白直角或叠加边框，截断和控件布局正常。Mac 签名、编译代码及安装包匹配。",
+            "limitations": "真实材质 fixture 不连接手机或系统通知中心；菜单栏 App 入口仍超时，完整通知交互未在该工具中验证。 用户后续实际画面否定 7 版通透感，以上局部检查保留为历史，不算独立桌面验收。"
+          },
+          "backgroundSampling": {
+            "installedVersions": {
+              "android": "48",
+              "macos": "0.1.0 (8)"
+            },
+            "record": "docs/notify.md#mac-8-版背景采样",
+            "trigger": "用户实机截图显示 7 版仍是偏实心浅色卡片，原生 API 接入和边角检查不能证明通透感达标。",
+            "implementation": "原生 clear 玻璃完整显示；独立 behindWindow 背景采样层 alpha 0.65，消息仍嵌入 contentView 并保持完整不透明度。",
+            "validation": "真实 AppKit 窗口内部三色色块背景上检查浅色、深色与长消息：颜色透入、背景文字模糊、消息清楚、圆角和截断正常。Mac 构建、遮罩/队列测试、签名、编译代码与已安装包核对通过。",
+            "limitations": "用户反馈 8 版仍与之前一样，桌面效果未通过验收。窗口级截图和内部背景 fixture 不能证明跨应用桌面合成。"
+          },
+          "desktopMaterial": {
+            "installedVersions": {
+              "android": "48",
+              "macos": "0.1.0 (9)"
+            },
+            "record": "docs/notify.md#mac-9-版桌面材质根",
+            "trigger": "用户反馈 8 版实际效果仍相同。",
+            "implementation": "完整强度 behindWindow 材质直接作为窗口内容根；clear 玻璃 alpha 0.24 作装饰，独立前景保持全不透明，轻量白色渐变反光。",
+            "validation": "队列、图标、1×/2× 圆角透明边界、完整 Mac 编译、只读源码复查通过。CUA 浅深色非激活浮窗文字可读，边角正常；安装、签名和编译代码匹配。",
+            "limitations": "不是完整原生玻璃内容适配；单窗口捕获不包含完整桌面合成，不证明桌面合成。尝试系统截图工具未获得桌面合成图。9 版当时实际效果尚未验收；用户后续实际画面也否定了 9 版，以上检查保留为历史。"
+          },
+          "layoutReview6": {
+            "disposition": "ship",
+            "reviewer": "finish reviewer 结论只覆盖以上截图与源码，没有 material fixes。",
+            "limitations": "离屏布局截图不能证明实际 NSPanel 窗口材质、出现/收起、悬停、点击、关闭或队列交互；安装与接口检查也不替代实机交互验证。",
+            "pendingAtThatTime": "等待用户打开菜单栏「手机通知」页面后验证真实窗口与交互。",
+            "scope": "历史 6 版离屏布局评审；不代表后续玻璃材质或独立桌面效果通过。"
+          },
+          "historicalBaseline": "本对象原有 installedVersions、installation、iconInterface、macos 和 reviewImages 记录 6 版阶段；当前热修复安装与评审状态见 clearRootRefinement。",
+          "clearRootRefinement": {
+            "installationScope": "本轮热修复已实际安装并启动为 11；10 版曾由其他工作安装，现有偏好未动。安装与代码检查不代表独立跨应用桌面效果通过。",
+            "direction": "用户指定 Apple 原生液态玻璃。",
+            "trigger": "7、8、9 版均被用户实际画面否定；过去局部检查与待确认叙述保留为历史。",
+            "implementation": "macOS 26+ 直接以 NSGlassEffectView 作为 NSPanel.contentView，style = .clear，alpha 默认 1，cornerRadius = 12；透明 NSHostingView 放 glass.contentView。移除 NSVisualEffectView 底层、0.24 glass 装饰与自绘白色渐变高光；macOS 13–25 的 popover/behindWindow/active/maskImage 回退不变。",
+            "controlledComparison": {
+              "method": "真实 AppKit child-panel 的受控窗口合成，旧 9 材质与新 clear 根使用完全相同的蓝紫绿色与文字背景。",
+              "observation": "旧 9 材质偏灰白；新 clear 根透出蓝紫绿并软化背景文字，前景消息可读。",
+              "scope": "只证明同背景的受控合成差异，不能证明独立浮窗跨应用桌面效果。"
+            },
+            "captureLimit": "CUA 原生窗口捕获排除其他独立窗口；已通过 Preview 菜单尝试整个桌面截图，但得到工具隐私遮罩。",
+            "invalidEvidence": [
+              {
+                "file": ".impeccable/review/mac-banner-10-invalid-desktop-privacy-shield.png",
+                "valid": false,
+                "reason": "实际显示工具隐私遮罩，不能用于桌面材质验收。"
+              }
+            ],
+            "reviewer": "glass_finish_review_10",
+            "disposition": "recapture",
+            "systemSettings": {
+              "liquidGlass": "Clear",
+              "reduceTransparency": false,
+              "increaseContrast": false,
+              "changedByThisTask": false
+            },
+            "pending": "独立跨应用桌面验收未关闭，需要有效桌面证据与用户实机验收。",
+            "installedVersion": "Mac 0.1.0 (11)",
+            "record": "docs/notify.md#mac-11-版原生-clear-根修正",
+            "installationChecks": "安装包 Info 确认版本 11，ps 确认运行主进程路径；严格 codesign verify 通过，已安装 __TEXT/__text 与完整构建结果一致，已签名构建可执行文件与安装包相同。"
+          }
         }
       },
       "clipboard": {
@@ -260,6 +384,17 @@
           "disabled": "自动同步仅在共享开启且非 busy 时可用，整行沿用现有禁用外观；手动按钮在手机未连接、busy 或对应内容非文字时禁用。",
           "feedback": "未连通 MCP 时提供连接说明和系统主按钮；共享关闭时提供开启说明，反馈复用 feedbackBanner()，底部说明沿用系统 caption 与次要文字色。"
         }
+      },
+      "notificationBanner": {
+        "window": "borderless、nonactivatingPanel 的 NSPanel；透明背景、statusBar 层级，原生系统窗口阴影。",
+        "material": "macOS 26+ 的 NSPanel.contentView 直接使用 NSGlassEffectView，style = .clear，alpha 保持默认 1，cornerRadius = 12；透明 NSHostingView 放入 glass.contentView。移除 NSVisualEffectView 底层、0.24 alpha 的玻璃装饰和自绘白色渐变高光。macOS 13–25 的 popover/behindWindow/active/maskImage 回退不变，宿主内容另行裁剪。",
+        "layout": "正常宽度、内边距、图标与关闭按钮尺寸由 frontmatter 的 mac-notification-banner、mac-notification-banner-icon 与 mac-notification-banner-close 记录；指针所在屏幕右上角排列，窄屏宽度 min(360, max(240, visible.width - 32))，高度随内容增长且至少 94pt，顶部 12pt、右侧 16pt、横幅间隔 8pt；超出屏幕底部时不显示。",
+        "content": "已选择应用的 96×96px PNG 按原比例显示；缺图或解码失败用次要色的 app.fill，不丢弃通知。图标、文字、关闭按钮顶对齐，列间与文字组内间距引用 frontmatter。应用名限一行，标题限两行，正文限三行并追加 2pt 行距；空标题用应用名，空正文不占行。",
+        "accessibility": "图标不重复进入辅助功能遍历；关闭按钮有明确标签，关闭符号使用 10pt semibold 系统字体和次要色。",
+        "queue": "6 秒收起，悬停保持，移开后重新计 6 秒；最多三条，最新在上，同一包名与通知 key 的更新替换原横幅。",
+        "actions": "点击主体收起当前横幅并打开 Mac「手机通知」页，关闭按钮只收起当前条目；暂停接收、关闭自定义横幅、屏幕休眠、会话失活或屏幕配置变化时清空横幅。",
+        "settings": "NotificationPage 复用返回页头、toggleRow、elevatedGroup 与反馈条，新增默认开启的「显示应用图标横幅」和原生「预览横幅」；预览正在执行、未获 Mac 通知授权或暂停接收时禁用。说明明确悬停保持、点击打开本页、系统通知中心保留记录、自定义横幅独立于系统专注模式，关闭此项恢复系统横幅。",
+        "delivery": "自定义模式下系统通知中心只留 passive 记录；系统预览设为永不显示时横幅使用「收到一条新通知」并隐藏正文。关闭自定义横幅时沿用系统 banner、list 与 sound。"
       }
     }
   },
@@ -327,9 +462,20 @@
       "name": "Mac 剪贴板预览与手动复制",
       "kind": "custom",
       "description": "ClipboardPage.swift preview()；elevatedGroup() 内依次为 semibold 标题、76pt 可选择文字滚动区和原生 borderless 复制按钮；手机未连接、busy 或非文字内容时禁用。"
+    },
+    {
+      "name": "Mac 手机通知设置",
+      "kind": "custom",
+      "description": "NotificationPage.swift；沿用返回页头、toggleRow、elevatedGroup、原生预览按钮与反馈条，说明自定义横幅独立于系统专注模式。"
+    },
+    {
+      "name": "Mac 应用图标横幅",
+      "kind": "custom",
+      "refersTo": "mac-notification-banner",
+      "description": "NotificationBanner.swift；非激活 NSPanel 在 macOS 26+ 直接使用原生 clear NSGlassEffectView 窗口根，透明内容放 glass.contentView，旧系统保留 popover 回退；承载真实手机应用图标、应用名、标题、正文和关闭按钮，缺图使用 app.fill，最多三条，同一包名与 key 替换，悬停保持。"
     }
   ],
   "narrative": {
-    "overview": "本记录提取 Android 应用与 Mac 菜单栏面板已实现的原生界面。两端沿用现有平台控件、系统字体和明暗外观，以连接状态、功能分组、配置字段与操作反馈构成层级。各端尺寸分别使用 Android 的 dp/sp 与 macOS 的 pt；这些是原生单位，不代表浏览器 CSS 像素。Mac 的 `rgb()` 百分比逐项对应源码 sRGB 分量，Android 颜色来自资源文件。\n\n实现来源为 [Android 共用界面](lib/android/src/dev/phonestation/adbkeep/StationChrome.java)、[首页](lib/android/src/dev/phonestation/adbkeep/MainActivity.java)、[远程中继页](lib/android/src/dev/phonestation/adbkeep/RemoteRelayActivity.java)、[浅色资源](lib/android/res/values/colors.xml)、[深色资源](lib/android/res/values-night/colors.xml)，以及 [Mac 共用组件](app/mac/StationWidgets.swift)、[面板容器](app/mac/StationView.swift)、[首页](app/mac/MainPage.swift)、[MCP 页](app/mac/McpPage.swift)、[远程中继页](app/mac/RemoteRelayPage.swift)、[连接页](app/mac/ConnectionPage.swift)。应用图标、通知定制与其他工具子页不在这次提取范围。\n\n2026-10-02 的依据包括源码、Android 实机画面与 Mac `NSHostingView` 对模拟数据的原生渲染。Android 已检查首页、远程表单的浅色/深色，以及深色 1.3 倍字号下的下部滚动区域；后者不是整页顶部的证明。Mac 已检查配置、错误、双端配置、仅远程与等待手机状态，未用辅助功能点击验证已安装面板。Android 36 与 Mac 0.1.0 (2) 的安装和独立配置验证见 [两端配置界面与独立配置验证](docs/mcp.md#两端配置界面与独立配置验证)。评审图片在忽略的 `.impeccable/review/`，不是共享设计资产。此记录没有新增品牌方向或自定义控件状态。\n\n42 版补入 [Android 共享剪贴板页](lib/android/src/dev/phonestation/adbkeep/ClipboardActivity.java) 与 [Mac 共享剪贴板页](app/mac/ClipboardPage.swift)，继续沿用各端共用组件。PGT-AN20 已检查浅色、深色和深色 1.3 倍字号；预览文字明确标为界面验证示例。Mac 浅色与深色图片是非活动 `NSHostingView` 原生渲染，灰色系统控件不能单独证明动作禁用；操作验证见 [共享剪贴板验证](docs/clipboard.md#验证)。本次只扩展页面与导航，没有新增 palette、字号角色或布局世界。"
+    "overview": "本记录提取 Android 应用与 Mac 菜单栏面板已实现的原生界面。两端沿用现有平台控件、系统字体和明暗外观，以连接状态、功能分组、配置字段与操作反馈构成层级。各端尺寸分别使用 Android 的 dp/sp 与 macOS 的 pt；这些是原生单位，不代表浏览器 CSS 像素。Mac 的 `rgb()` 百分比逐项对应源码 sRGB 分量，Android 颜色来自资源文件。\n\n实现来源为 [Android 共用界面](lib/android/src/dev/phonestation/adbkeep/StationChrome.java)、[首页](lib/android/src/dev/phonestation/adbkeep/MainActivity.java)、[远程中继页](lib/android/src/dev/phonestation/adbkeep/RemoteRelayActivity.java)、[浅色资源](lib/android/res/values/colors.xml)、[深色资源](lib/android/res/values-night/colors.xml)，以及 [Mac 共用组件](app/mac/StationWidgets.swift)、[面板容器](app/mac/StationView.swift)、[首页](app/mac/MainPage.swift)、[MCP 页](app/mac/McpPage.swift)、[远程中继页](app/mac/RemoteRelayPage.swift)、[连接页](app/mac/ConnectionPage.swift)。41 版补入 [常驻通知](lib/android/src/dev/phonestation/adbkeep/StationNotifications.java) 与 [通知布局](lib/android/res/layout/note_expanded.xml)。应用自身品牌图标、会话提醒与其他工具子页不在这次提取范围。\n\n2026-10-02 的依据包括源码、Android 实机画面与 Mac `NSHostingView` 对模拟数据的原生渲染。Android 38 已检查首页与抽屉的浅色/深色及深色 1.3 倍字号，以及中继开关与接入详情；范围见 [38 版界面验证](docs/adb-keep.md#38-版界面验证)。39 版已远程安装并核对 APK，侧栏结构及点击、边缘滑出、拖动收起、回弹与系统返回已通过实机远程输入和界面树检查；尚未采样新版系统栏的明暗截图，见 [39 版侧栏构建](docs/adb-keep.md#39-版侧栏构建)。此前远程表单已检查浅色/深色，以及深色 1.3 倍字号下的下部滚动区域。Mac 已检查配置、错误、双端配置、仅远程与等待手机状态，未用辅助功能点击验证已安装面板。Android 36 与 Mac 0.1.0 (2) 的安装和独立配置验证见 [两端配置界面与独立配置验证](docs/mcp.md#两端配置界面与独立配置验证)。评审图片在忽略的 `.impeccable/review/`，不是共享设计资产。此记录没有新增品牌方向。\n\n42 版补入 [Android 共享剪贴板页](lib/android/src/dev/phonestation/adbkeep/ClipboardActivity.java) 与 [Mac 共享剪贴板页](app/mac/ClipboardPage.swift)，继续沿用各端共用组件。PGT-AN20 已检查浅色、深色和深色 1.3 倍字号；预览文字明确标为界面验证示例。Mac 浅色与深色图片是非活动 `NSHostingView` 原生渲染，灰色系统控件不能单独证明动作禁用；操作验证见 [共享剪贴板验证](docs/clipboard.md#验证)。本次只扩展页面与导航，没有新增 palette、字号角色或布局世界。\n\n47 版通知设置页沿用 `StationChrome` 的标题、开关、链接行和段落，按「手机通知 → Mac」与「电脑提醒 → 手机」分成两组；应用白名单页使用同一开关行与应用真实图标，搜索字段沿用共用字段样式。Mac 首页新增「手机通知」，子页沿用页头、开关行、分组与反馈条。没有新增颜色或字号角色。2026-10-03 已检查 PGT-AN20 的浅色 1.0 倍、深色 1.3 倍字号及滚动下部，应用列表与搜索也已实机检查；Mac 的未授权、就绪、拒绝授权状态以模拟数据做浅色/深色原生渲染。47 版评审未验证真实系统通知展示，见 [通知同步验证](docs/notify.md#构建与验证)。\n\nAndroid 48 与 Mac 0.1.0 (6) 补入 [手机应用图标导出](lib/android/src/dev/phonestation/adbkeep/NotificationAppIcon.java)、[Mac 应用图标横幅](app/mac/NotificationBanner.swift)、[通知设置页](app/mac/NotificationPage.swift) 与 [通知交付](app/mac/NotificationDelivery.swift)。6 版当时使用 macOS popover 材质，横幅沿用既有系统字体与语义文字色；新增字号角色只用于横幅，没有新增 palette 或品牌方向。\n\n6 版阶段在 2026-10-03 逐张核对横幅浅色、深色、长文本、缺图和设置页浅色/深色六张布局图：`.impeccable/review/mac-banner-light.png`、`mac-banner-dark.png`、`mac-banner-long.png`、`mac-banner-fallback.png`、`mac-notifications-6-light.png`、`mac-notifications-6-dark.png`，均在同一评审目录。它们是离屏 `NSHostingView` 原生渲染，真实微信图标来自当前手机；不能证明实际 `NSPanel` 窗口材质、出现/收起、悬停、点击、关闭或队列交互。当时 finish reviewer 的 ship 结论只覆盖这些截图与源码，没有 material fixes；实机窗口与交互尚待用户打开菜单栏「手机通知」页面。该结论保留为历史，不代表后续玻璃材质已验收。\n\n6 版阶段两端版本已安装，Mac 签名与安装后的可执行文件匹配；手机通知使用权与微信选择保留。实际 MCP 图标接口读取微信成功，未选择的包被拒绝。这些历史安装与接口检查不替代横幅的实机交互验证。\n\nMac 0.1.0 (7) 按用户要求改用 Apple 原生 Liquid Glass：macOS 26 及以上使用 `NSGlassEffectView` 的 regular 样式，通过 `contentView` 嵌入透明内容，圆角仍为 12pt，由系统绘制玻璃轮廓，不叠加自绘边框。旧系统沿用 popover 材质，但补入可拉伸圆角 alpha 遮罩，使背景材质与窗口阴影保持同一轮廓；宿主内容单独裁剪。6 版实机截图暴露了仅裁剪内容图层时圆角外的白色矩形，因此此前离屏布局检查不能作为窗口材质通过的证据。\n\n7 版已在本机 macOS 26.6.2 通过 CUA 检查浅色、深色和长消息的真实 AppKit 玻璃窗口，使用生产 `NotificationBannerSurface` 与示例文字：圆角、文字截断和关闭按钮布局正常，未见露白直角或叠加边框。验证窗口是忽略目录中的独立界面 fixture，不接收手机或系统通知；该结果证明材质窗口的绘制，不证明已安装菜单栏 App 的完整通知交互。Mac 7 已安装并核对签名、编译代码与构建包；实际菜单栏横幅的点击与计时仍以实机反馈为准。\n\n用户的后续实机截图表明 7 版仍缺少明显通透感。Mac 0.1.0 (8) 改为原生 clear 玻璃，并在其下增加独立 underWindowBackground/behindWindow 背景采样层（alpha 0.65）；玻璃与 `contentView` 中的文字、图标保持完整不透明度。8 版的真实 AppKit 窗口内部色块背景已检查浅色、深色与长消息：背景颜色透入、背景文字模糊、消息清楚，圆角与截断正常。该证据证明组件对窗口内部背景的材质处理，仍不代表跨应用桌面采样或已安装菜单栏横幅已经验收。8 版已安装、启动并核对签名与构建代码，见 [背景采样验证](docs/notify.md#mac-8-版背景采样)。\n\n用户反馈 8 版实机效果仍与之前相同，未通过桌面验收。Mac 0.1.0 (9) 改由完整强度的 behindWindow 材质直接承载窗口，原生 clear 玻璃降为 0.24 不透明度的装饰；内容独立保持全不透明，增加轻量白色边缘反光。非激活浮窗在窗口内部背景上的玻璃仍能工作，因此不能归因为缺少窗口焦点。9 版已安装、启动并核对签名与编译代码；浅深色布局、队列与透明圆角通过。CUA 单窗口捕获不证明桌面合成，9 版当时的实机效果仍待确认，见 [桌面材质记录](docs/notify.md#mac-9-版桌面材质根)。用户后续实际画面也否定了 9 版；7、8、9 的局部检查与待确认叙述保留为历史，均不算独立桌面效果通过。\n\n当前生产源码继续按用户指定的 Apple 原生液态玻璃方向修正：macOS 26 及以上将 `NSGlassEffectView` 直接作为 `NSPanel.contentView`，`style = .clear`，alpha 保持默认 1，`cornerRadius = 12`；透明 `NSHostingView` 放入 `glass.contentView`。已移除 `NSVisualEffectView` 底层、0.24 alpha 的玻璃装饰与自绘白色渐变高光。macOS 13–25 的 popover/behindWindow/active/maskImage 回退保持不变。本轮热修复已安装并启动为 Mac 0.1.0 (11)，版本与主进程路径已确认，严格签名校验及构建代码核对通过，现有偏好未动；10 版曾由其他工作安装。这些安装检查不代表独立桌面效果已验收，见 [Mac 11 版原生 Clear 根修正](docs/notify.md#mac-11-版原生-clear-根修正)。\n\n根因对照使用真实 AppKit child-panel 的受控窗口合成，在完全相同的蓝紫绿色与文字背景上比较旧 9 版材质和新的 clear 玻璃根：旧层次偏灰白，新实现透出背景颜色并软化背景文字，前景消息可读。它证明受控合成中的差异，不能证明独立浮窗对其他应用和桌面的实际效果。Fresh reviewer `glass_finish_review_10` 的 disposition 为 `recapture`，独立跨应用桌面验收仍未关闭。\n\nCUA 原生窗口捕获排除了其他独立窗口；已尝试通过 Preview 菜单截取整个桌面，但 `.impeccable/review/mac-banner-10-invalid-desktop-privacy-shield.png` 实际显示工具隐私遮罩，因此是无效证据，不能用于材质验收。本机系统 Liquid Glass 已选择 Clear，「降低透明度」与「增加对比度」均为 false，本轮没有改动系统开关。当前状态仍是等待有效的独立跨应用桌面证据与用户实机验收。"
   }
 }

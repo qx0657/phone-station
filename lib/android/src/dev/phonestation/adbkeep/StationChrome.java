@@ -211,6 +211,43 @@ final class StationChrome {
     }
 
     TextView linkRow(LinearLayout card, int iconRes, String label, View.OnClickListener click) {
+        return statusLinkRow(card, iconRes, label, click).value;
+    }
+
+    void issueRow(LinearLayout parent, String title, String detail, View.OnClickListener click) {
+        LinearLayout line = row();
+        line.setMinimumHeight(dp(56));
+        line.setPadding(dp(16), dp(10), dp(14), dp(10));
+        LinearLayout words = new LinearLayout(activity);
+        words.setOrientation(LinearLayout.VERTICAL);
+        TextView name = text(16);
+        name.setText(title);
+        name.setTypeface(medium);
+        name.setTextColor(waiting());
+        words.addView(name, matchWrap());
+        TextView explanation = text(14);
+        explanation.setText(detail);
+        explanation.setTextColor(muted());
+        explanation.setLineSpacing(0, 1.2f);
+        LinearLayout.LayoutParams gap = matchWrap();
+        gap.topMargin = dp(4);
+        words.addView(explanation, gap);
+        line.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView arrow = glyph(R.drawable.ic_chevron, 18, muted());
+        LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(dp(18), dp(18));
+        arrowParams.setMarginStart(dp(8));
+        line.addView(arrow, arrowParams);
+        line.setContentDescription(title + "。" + detail + "。查看处理方法");
+        line.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        words.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        line.setClickable(true);
+        line.setOnClickListener(click);
+        ripple(line);
+        parent.addView(line, matchWrap());
+    }
+
+    Link statusLinkRow(LinearLayout card, int iconRes, String label, View.OnClickListener click) {
         Mark mark = mark(iconRes);
         mark.fill.setColor(color(R.color.well));
         mark.icon.setColorFilter(ink(), PorterDuff.Mode.SRC_IN);
@@ -243,7 +280,7 @@ final class StationChrome {
         line.setOnClickListener(click);
         ripple(line);
         card.addView(line, matchWrap());
-        return value;
+        return new Link(mark, value, line, chevron);
     }
 
     TextView address(LinearLayout card) {
@@ -543,6 +580,20 @@ final class StationChrome {
         Fact(ImageView icon, TextView value) {
             this.icon = icon;
             this.value = value;
+        }
+    }
+
+    static final class Link {
+        final Mark mark;
+        final TextView value;
+        final View row;
+        final ImageView chevron;
+
+        Link(Mark mark, TextView value, View row, ImageView chevron) {
+            this.mark = mark;
+            this.value = value;
+            this.row = row;
+            this.chevron = chevron;
         }
     }
 

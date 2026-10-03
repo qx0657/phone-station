@@ -33,6 +33,63 @@ func callGateway(g *gateway, body string) *httptest.ResponseRecorder {
 	return w
 }
 
+func TestStatusStreamPublishesTransitionsAndRequiresAuth(t *testing.T) {
+	g := testGateway("", nil)
+	server := httptest.NewServer(g)
+	defer server.Close()
+	response, err := http.Get(server.URL + "/__events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatal("status stream exposed without auth")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	r, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/__events", nil)
+	r.Header.Set("Authorization", "Bearer test")
+	response, err = http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	decoder := json.NewDecoder(response.Body)
+	var first, next statusReply
+	if err := decoder.Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	if !first.Ready || !first.LocalOnline || first.Token != "" {
+		t.Fatalf("bad initial snapshot: %+v", first)
+	}
+	value, _ := g.config()
+	g.noteRemote(value, probeResult{})
+	if err := decoder.Decode(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next.RemoteOnline || !next.LocalOnline {
+		t.Fatalf("transition not published: %+v", next)
+	}
+}
+
+func TestBusyRemoteExpiresConfirmationWithoutCancellingOperation(t *testing.T) {
+	g := testGateway("", nil)
+	value, _ := g.config()
+	g.state.mu.Lock()
+	g.state.remoteBusy = true
+	g.state.remoteCheckedAt = time.Now().Add(-remoteFresh - time.Second)
+	g.state.mu.Unlock()
+	status := g.snapshot(value)
+	if status.RemoteVerified || !status.RemoteChecking || !status.RemoteOnline {
+		t.Fatalf("stale busy route presented as confirmed: %+v", status)
+	}
+	g.noteRemote(value, probeResult{ok: true, rtt: time.Millisecond})
+	status = g.snapshot(value)
+	if !status.RemoteVerified || status.RemoteChecking {
+		t.Fatalf("response did not restore confirmation: %+v", status)
+	}
+}
+
 func TestDeadForwardSwitchesBeforeMutationDispatch(t *testing.T) {
 	var localCalls, remoteCalls atomic.Int32
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +236,21 @@ func TestUnsafeMethodsNeverReplay(t *testing.T) {
 func TestShellStatusCanReplay(t *testing.T) {
 	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_shell_status"}}`)) {
 		t.Fatal("read-only Shizuku status should be safe to replay")
+	}
+}
+
+func TestNotificationReplayPolicy(t *testing.T) {
+	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_notification_status"}}`)) {
+		t.Fatal("notification status should be safe to replay")
+	}
+	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_notification_icon"}}`)) {
+		t.Fatal("read-only app icon should be safe to replay")
+	}
+	for _, name := range []string{"station_notification_poll", "station_notification_configure"} {
+		body := []byte(`{"method":"tools/call","params":{"name":"` + name + `"}}`)
+		if safeToReplay(body) {
+			t.Fatalf("notification session must not replay %s", name)
+		}
 	}
 }
 

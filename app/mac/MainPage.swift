@@ -7,6 +7,7 @@ struct MainPage: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             VStack(alignment: .leading, spacing: 12) {
+                healthWarnings
                 actionRow
                 if station.link.serial == nil && station.link.remoteConnected {
                     Text("远程 MCP 已连接。投屏、截屏和录屏需通过 USB 或同一 Wi-Fi 连接 adb。")
@@ -33,6 +34,10 @@ struct MainPage: View {
                         station.page = .clipboard
                     }
                     StationRows.groupDivider.padding(.horizontal, 10)
+                    StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.notifications.summary) {
+                        station.page = .notifications
+                    }
+                    StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail) {
                         station.page = .files
                     }
@@ -45,6 +50,72 @@ struct MainPage: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 14)
+        }
+    }
+
+    @ViewBuilder private var healthWarnings: some View {
+        if !station.health.issues.isEmpty {
+            Group {
+                if station.health.issues.count > 1 {
+                    ScrollView { issueRows }.frame(height: 190)
+                } else { issueRows }
+            }.padding(12).elevatedGroup()
+        }
+        if let failure = station.health.failure {
+            Text(failure).font(.caption).foregroundStyle(StationPalette.caution)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if station.link.isConnected && !station.mcp.listening {
+            StationRows.navigationRow("MCP 服务尚未连通", symbol: "exclamationmark.triangle",
+                detail: "共享剪贴板与手机通知需要 MCP") { station.page = .mcp }
+                .elevatedGroup()
+        }
+        if station.notifications.connected, station.notifications.snapshot?.enabled == true,
+           (!station.notifications.receiving || station.notifications.permission != .authorized) {
+            StationRows.navigationRow("手机通知需要处理", symbol: "exclamationmark.triangle",
+                detail: station.notifications.summary) { station.page = .notifications }
+                .elevatedGroup()
+        }
+        if station.clipboard.shared, station.clipboard.blocker == nil,
+           !station.clipboard.connected, station.mcp.listening,
+           !station.health.issues.contains(where: { $0.id == "clipboard" || $0.id == "shizuku" }) {
+            StationRows.navigationRow("共享剪贴板", symbol: "exclamationmark.triangle",
+                detail: station.clipboard.summary) { station.page = .clipboard }
+                .elevatedGroup()
+        }
+    }
+
+    private var issueRows: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(station.health.issues) { issue in
+                    Button { openIssue(issue) } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(StationPalette.caution).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(issue.title).font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(StationPalette.caution)
+                                Text(issue.detail).font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(issue.destination == "permissions" && station.link.serial != nil
+                                     ? "打开手机权限页" : "查看处理方法")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "chevron.right").font(.caption)
+                                .foregroundStyle(.secondary).accessibilityHidden(true)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+    }
+
+    private func openIssue(_ issue: DeviceIssue) {
+        switch issue.destination {
+        case "permissions": station.setup.openPermissions(serial: station.link.serial)
+        case "clipboard": station.page = .clipboard
+        case "notifications": station.page = .notifications
+        case "remoteRelay": station.page = .remoteRelay
+        default: station.page = .mcp
         }
     }
 
@@ -155,12 +226,18 @@ struct MainPage: View {
     }
 
     private var statusChip: some View {
-        Text(station.link.statusLabel)
+        HStack(spacing: 4) {
+            if !station.link.isConnected && (station.link.isChecking || station.link.isReconnecting || station.link.remoteChecking) {
+                ProgressView().controlSize(.mini).accessibilityHidden(true)
+            }
+            Text(station.link.statusLabel)
+        }
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(statusTint)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(statusTint.opacity(0.14), in: Capsule())
+            .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var statusTint: Color {
