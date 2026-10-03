@@ -227,6 +227,7 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 ```bash
 ./scripts/mcp.sh
 ./scripts/mcp.sh status
+./scripts/mcp.sh status --safe
 ./scripts/mcp.sh profile
 ./scripts/mcp.sh stop
 ./scripts/mcp.sh desktop https://relay.example.com '<SPKI-SHA256>'
@@ -234,6 +235,8 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 ./scripts/mcp.sh pair https://relay.example.com '<SPKI-SHA256>'
 ./scripts/mcp.sh unpair
 ```
+
+自动化调用可用 `./scripts/mcp.sh call` 从标准输入提交 JSON-RPC，凭据在进程内部读取，不进入命令参数或输出。`status --safe` 查看已有网关状态且不输出令牌、不刷新 adb。AI 需要启动服务时用 `./scripts/mcp.sh >/dev/null`，再调用这两个入口，示例见 [MCP 步骤](.agents/skills/phone-mcp/SKILL.md)。
 
 示例域名需换成自己的中继地址，指纹需换成服务器公钥的实际 SHA-256。`profile` 只读地址与证书指纹，不输出令牌。`desktop` 隐藏提示输入一枚电脑令牌，只配置此 Mac；`forget-desktop` 只清除此 Mac。`pair` 会隐藏提示输入手机端和电脑端两枚令牌，并通过 adb 同时配置两端。手机端令牌加密存入 Android Keystore，电脑端令牌存入 macOS 钥匙串。`stop` 同时关 MCP 和远程通道但保留配对；`unpair` 清除两端配对凭据。
 
@@ -376,6 +379,12 @@ PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，�
 ### 地址
 
 无线调试页面上的 `172.19.0.1` 不要拿来 `adb pair` 或 `adb connect`。那是 VPN 地址。这台 Mac 上的 Clash 会把 `172.19.0.0/16` 送进隧道，握手报 `protocol fault`。用局域网地址，例如 `192.168.0.103`，并且路由不能走 `utun`。
+
+## 本机检查
+
+开发时运行 `./scripts/check.sh`，统一检查文档镜像、项目 Skill 入口、脚本语法、Python/Java/Go race/Swift 测试和 Mac 全量源码编译。依赖 Python 3.10+、zsh、Go 1.23+、JDK 17+ 和 macOS Command Line Tools；无 Android SDK 也可运行。其他平台用 `./scripts/check.sh --core`，明确排除 Swift。
+
+检查只使用临时产物与测试数据，不连接手机、不启动真实网关、不读发布签名。Android 资源和 APK 打包仍用 `lib/android/build.sh`；可安装 Mac 包用 `scripts/build-mac-app.sh`。CI 使用同一检查入口，范围及尚未覆盖的设计边界见 [验证说明](docs/validation.md)。
 
 ## 给 AI 的步骤
 

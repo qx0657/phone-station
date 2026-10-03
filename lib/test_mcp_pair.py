@@ -9,7 +9,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parent.parent
-GATEWAY = ROOT / "build/.phone-station/phone-relay-gateway"
+GATEWAY = Path(os.environ.get("PHONE_STATION_TEST_GATEWAY", ROOT / "build/.phone-station/phone-relay-gateway"))
 PIN = "a" * 64
 PHONE_TOKEN = "b" * 64
 DESKTOP_TOKEN = "c" * 64

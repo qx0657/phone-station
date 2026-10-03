@@ -6,6 +6,7 @@
 
 | 文档 | 对应 | 这篇里有什么 |
 | --- | --- | --- |
+| [validation.md](validation.md) | `scripts/check.sh`、CI | 统一本机回归、依赖、Android 打包与真机验证的区别，以及下一轮设计检查的剩余边界 |
 | [mac-app.md](mac-app.md) | `scripts/build-mac-app.sh` | 菜单栏 App 的构建、脚本打包、面板上的亮屏和闪光灯，以及录屏、跟随声音的结束方式。图标不在菜单栏上时，看 Hidden Bar 记下的位置，以及控制中心是否把它算进已禁用的 App |
 | [mcp.md](mcp.md) | `scripts/mcp.sh` | 手机工位 MCP、Mac 统一网关、可配置远程中继、两端配置界面、鉴权与路径边界，以及 PGT-AN20 上读到和读不到的地方 |
 | [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku shell、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
