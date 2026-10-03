@@ -1,6 +1,7 @@
 package dev.phonestation.adbkeep;
 
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,9 +47,15 @@ final class McpHttpTest {
             try (Socket slow = new Socket("127.0.0.1", http.port())) {
                 slow.setSoTimeout(2000);
                 long start = System.nanoTime();
-                for (int i = 0; i < 4; i++) {
-                    slow.getOutputStream().write('P');
-                    slow.getOutputStream().flush();
+                for (int i = 0; i < 8; i++) {
+                    try {
+                        slow.getOutputStream().write('P');
+                        slow.getOutputStream().flush();
+                    } catch (SocketException expired) {
+                        // The absolute deadline may close the connection before the next trickle.
+                        // Still require the actual HTTP 408 below; a missing reply must fail.
+                        break;
+                    }
                     Thread.sleep(120);
                 }
                 expect(408, status(slow));
