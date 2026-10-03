@@ -32,6 +32,7 @@ public final class FileMcpService extends Service {
     private String token;
     private PhoneRelayClient remoteClient;
     private boolean restoredKeeper;
+    private java.util.concurrent.ScheduledExecutorService captureCleanup;
 
     static boolean listening() {
         return listening;
@@ -56,6 +57,16 @@ public final class FileMcpService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (captureCleanup == null) {
+            captureCleanup = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(job -> {
+                Thread worker = new Thread(job, "station-capture-cleanup");
+                worker.setDaemon(true); return worker;
+            });
+            captureCleanup.scheduleWithFixedDelay(() -> {
+                try { ScreenCapture.cleanup(FileOps.device(), System.currentTimeMillis()); }
+                catch (FileFailure ignored) { /* 权限不可用时不碰文件，恢复后再清理。 */ }
+            }, 0, 60, java.util.concurrent.TimeUnit.SECONDS);
+        }
         StationNotifications.attachMcp(this);
         StationNotifications.enter(this);
         if (intent != null) { InstallRecovery.service(intent.getStringExtra(InstallRecovery.EXTRA)); }
@@ -110,6 +121,7 @@ public final class FileMcpService extends Service {
 
     @Override
     public void onDestroy() {
+        if (captureCleanup != null) { captureCleanup.shutdownNow(); captureCleanup = null; }
         SharedClipboard.close();
         ShizukuTorch.close();
         listening = false;

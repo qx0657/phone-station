@@ -56,6 +56,10 @@ enum RemoteCapture {
 final class RemoteControlsSession: ObservableObject {
     @Published private(set) var reading: RemoteControlsReading?
     @Published private(set) var failure: String?
+    struct PendingCapture: Codable { var id: String; var endpoint: String; var localFile: String? }
+    @Published private(set) var pendingCapture: PendingCapture?
+    private let captureDefaults: UserDefaults
+    private let captureKey = "phoneStationPendingCapture"
     var route: () -> (String, String)? = { nil }
     var monitoring = false
     private var nextPoll = Date.distantPast
@@ -69,9 +73,14 @@ final class RemoteControlsSession: ObservableObject {
     private var readRoute: (String, String)?
     private let rpc: (String, String, String, [String: Any]) async throws -> Data
 
-    init(feedback: StationFeedback, startTimer: Bool = true,
+    init(feedback: StationFeedback, startTimer: Bool = true, defaults: UserDefaults = .standard,
          rpc: ((String, String, String, [String: Any]) async throws -> Data)? = nil) {
         self.feedback = feedback
+        captureDefaults = defaults
+        if let data = defaults.data(forKey: captureKey),
+           let pending = try? JSONDecoder().decode(PendingCapture.self, from: data), UUID(uuidString: pending.id) != nil {
+            pendingCapture = pending
+        }
         self.rpc = rpc ?? { endpoint, token, name, args in
             try await ClipboardRPC.call(endpoint: endpoint, token: token, name: name, arguments: args, timeout: 25)
         }
@@ -90,7 +99,17 @@ final class RemoteControlsSession: ObservableObject {
               Date().timeIntervalSince(readAt) < 30, reading?.supportedModel == true else { return nil }
         return reading
     }
-    var canCapture: Bool { current?.screenshotAvailable == true && feedback.activity == nil }
+    var canCapture: Bool { current?.screenshotAvailable == true && feedback.activity == nil && pendingCapture == nil }
+    var canRecoverCapture: Bool {
+        guard let pendingCapture, let currentRoute = route() else { return false }
+        return currentRoute.0 == pendingCapture.endpoint && feedback.activity == nil
+    }
+    var captureRecoveryTitle: String { pendingCapture?.localFile == nil ? "继续下载上次截图" : "清理手机临时截图" }
+    private func rememberCapture(_ value: PendingCapture?) {
+        pendingCapture = value
+        if let value, let data = try? JSONEncoder().encode(value) { captureDefaults.set(data, forKey: captureKey) }
+        else { captureDefaults.removeObject(forKey: captureKey) }
+    }
     var canStayAwake: Bool { current?.stayAwakeAvailable == true && feedback.activity == nil }
     var canTorch: Bool { current?.torch.available == true && current?.torch.on != nil && feedback.activity == nil }
     var stayAwake: Bool { reading?.stayAwake ?? false }
@@ -153,38 +172,64 @@ final class RemoteControlsSession: ObservableObject {
     }
     func screenshot() {
         guard canCapture, let (endpoint, token) = route() else { return }
-        operation = true; epoch += 1
-        feedback.activity = "正在远程截取画面…"; feedback.notice = nil
         let id = UUID().uuidString.lowercased()
+        rememberCapture(PendingCapture(id: id, endpoint: endpoint, localFile: nil))
+        runCapture(id: id, endpoint: endpoint, token: token, new: true)
+    }
+    func recoverCapture() {
+        guard canRecoverCapture, let pending = pendingCapture, let (endpoint, token) = route() else { return }
+        runCapture(id: pending.id, endpoint: endpoint, token: token, new: false)
+    }
+    func discardCapture() {
+        guard canRecoverCapture, let pending = pendingCapture, let (endpoint, token) = route() else { return }
+        operation = true; feedback.activity = "正在清理上次手机截图…"
         Task {
+            defer { feedback.activity = nil; operation = false; refresh() }
             do {
-                let data = try await rpc(endpoint, token, "station_screen_capture", ["requestId": id])
-                let info = try JSONDecoder().decode(RemoteCapture.Info.self, from: data)
-                try RemoteCapture.validate(info, id: id)
-                var png = Data(capacity: info.size)
-                let deadline = Date().addingTimeInterval(180)
-                while png.count < info.size {
-                    guard Date() < deadline else { throw ClipboardRPC.Failure(message: "截图下载超时") }
-                    feedback.activity = "正在下载截图… \(png.count * 100 / info.size)%"
-                    let data = try await rpc(endpoint, token, "station_file_read_bytes", ["path": info.path, "offset": png.count, "length": 65536])
-                    let page = try JSONDecoder().decode(RemoteCapture.Page.self, from: data)
-                    png.append(try RemoteCapture.decode(page, info: info, offset: png.count))
+                _ = try await rpc(endpoint, token, "station_screen_capture_release", ["requestId": pending.id])
+                rememberCapture(nil); feedback.notice = "手机临时截图已清理。"
+            } catch { feedback.notice = "清理结果未确认，保留截图编号：\(pending.id)" }
+        }
+    }
+    private func runCapture(id: String, endpoint: String, token: String, new: Bool) {
+        operation = true; epoch += 1
+        feedback.activity = new ? "正在远程截取画面…" : "正在恢复上次截图…"; feedback.notice = nil
+        Task {
+            defer { feedback.activity = nil; operation = false; refresh() }
+            do {
+                if pendingCapture?.localFile == nil {
+                    let name = new ? "station_screen_capture" : "station_screen_capture_status"
+                    let data = try await rpc(endpoint, token, name, ["requestId": id])
+                    if !new, let status = try JSONSerialization.jsonObject(with: data) as? [String: Any], status["available"] as? Bool == false {
+                        rememberCapture(nil); feedback.notice = "上次手机截图已清理或过期，可重新截取。"; return
+                    }
+                    let info = try JSONDecoder().decode(RemoteCapture.Info.self, from: data)
+                    try RemoteCapture.validate(info, id: id)
+                    var png = Data(capacity: info.size)
+                    let deadline = Date().addingTimeInterval(180)
+                    while png.count < info.size {
+                        guard Date() < deadline else { throw ClipboardRPC.Failure(message: "截图下载超时") }
+                        feedback.activity = "正在下载截图… \(png.count * 100 / info.size)%"
+                        let data = try await rpc(endpoint, token, "station_file_read_bytes", ["path": info.path, "offset": png.count, "length": 65536])
+                        let page = try JSONDecoder().decode(RemoteCapture.Page.self, from: data)
+                        png.append(try RemoteCapture.decode(page, info: info, offset: png.count))
+                    }
+                    try RemoteCapture.verify(png, info: info)
+                    let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/scrcpy")
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let date = DateFormatter(); date.dateFormat = "yyyyMMdd-HHmmss"
+                    let file = folder.appendingPathComponent("\(date.string(from: Date()))-remote-\(id.prefix(6)).png")
+                    try png.write(to: file, options: .atomic)
+                    rememberCapture(PendingCapture(id: id, endpoint: endpoint, localFile: file.path))
+                    NSWorkspace.shared.open(file); onFinishedCapture()
                 }
-                try RemoteCapture.verify(png, info: info)
-                let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/scrcpy")
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let date = DateFormatter(); date.dateFormat = "yyyyMMdd-HHmmss"
-                let file = folder.appendingPathComponent("\(date.string(from: Date()))-remote-\(id.prefix(6)).png")
-                try png.write(to: file, options: .atomic)
-                NSWorkspace.shared.open(file); onFinishedCapture()
-                do {
-                    _ = try await rpc(endpoint, token, "station_screen_capture_release", ["requestId": id])
-                    feedback.notice = "截图已保存，并在预览中打开。"
-                } catch { feedback.notice = "截图已保存；手机临时文件清理未确认。编号：\(id)" }
+                _ = try await rpc(endpoint, token, "station_screen_capture_release", ["requestId": id])
+                rememberCapture(nil); feedback.notice = "截图已保存，手机临时文件已清理。"
             } catch {
-                feedback.notice = "\(error.localizedDescription)。本次未重拍；截图编号：\(id)"
+                feedback.notice = pendingCapture?.localFile == nil
+                    ? "\(error.localizedDescription)。可按原编号继续下载，本次未重拍。编号：\(id)"
+                    : "截图已保存；手机清理未确认，可继续清理。编号：\(id)"
             }
-            feedback.activity = nil; operation = false; refresh()
         }
     }
 }

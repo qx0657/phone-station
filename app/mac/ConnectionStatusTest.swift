@@ -104,13 +104,16 @@ struct ConnectionStatusTest {
     }
 
     @MainActor static func remoteControlsTest() async {
+        let suite = "capture-test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
         let feedback = StationFeedback()
         var route: (String, String)? = ("test-endpoint", "test-token")
         var model = "PGT-AN20"
         var torchOn = false
         var writes = 0
         var reads = 0
-        let controls = RemoteControlsSession(feedback: feedback, startTimer: false, rpc: { _, _, name, args in
+        let controls = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, args in
             if name == "station_torch" {
                 writes += 1
                 torchOn = args["on"] as! Bool // 操作已生效，但应答丢失。
@@ -141,6 +144,51 @@ struct ConnectionStatusTest {
         for _ in 0..<100 where controls.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
         precondition(!controls.canCapture && !controls.canStayAwake && !controls.canTorch,
                      "服务器字段不能为未验证型号启用操作")
+
+        var captureCalls = 0
+        var statusCalls = 0
+        let recovery = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
+            if name == "station_screen_capture" { captureCalls += 1; throw ClipboardRPC.Failure(message: "lost") }
+            if name == "station_screen_capture_status" {
+                statusCalls += 1
+                return try JSONSerialization.data(withJSONObject: ["available": false])
+            }
+            precondition(name == "station_controls_status")
+            return try JSONSerialization.data(withJSONObject: ["model": "PGT-AN20", "verified": true,
+                "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
+                "screenshotAvailable": true, "screenshotReason": "",
+                "torch": ["on": false, "available": true, "reason": ""]])
+        })
+        recovery.route = { ("capture-endpoint", "token") }
+        recovery.refresh()
+        for _ in 0..<100 where recovery.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        recovery.screenshot()
+        for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(captureCalls == 1 && recovery.pendingCapture != nil && !recovery.canCapture)
+        let restored = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults)
+        precondition(restored.pendingCapture?.id == recovery.pendingCapture?.id, "重启后保留原编号")
+        recovery.recoverCapture()
+        for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(captureCalls == 1 && statusCalls == 1 && recovery.pendingCapture == nil, "恢复只查询，不重拍")
+
+        let cleanupID = UUID().uuidString.lowercased()
+        let saved = RemoteControlsSession.PendingCapture(id: cleanupID, endpoint: "capture-endpoint", localFile: "/test/saved.png")
+        defaults.set(try! JSONEncoder().encode(saved), forKey: "phoneStationPendingCapture")
+        var releaseCalls = 0
+        let cleanup = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
+            if name == "station_controls_status" { throw ClipboardRPC.Failure(message: "offline") }
+            precondition(name == "station_screen_capture_release", "保存后只清理，不重新下载")
+            releaseCalls += 1
+            if releaseCalls == 1 { throw ClipboardRPC.Failure(message: "lost cleanup response") }
+            return Data("{}".utf8)
+        })
+        cleanup.route = { ("capture-endpoint", "token") }
+        cleanup.recoverCapture()
+        for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(cleanup.pendingCapture != nil)
+        cleanup.recoverCapture()
+        for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(cleanup.pendingCapture == nil && releaseCalls == 2)
 
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,

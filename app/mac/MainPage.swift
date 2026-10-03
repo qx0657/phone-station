@@ -14,6 +14,13 @@ struct MainPage: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let pending = station.remoteControls.pendingCapture {
+                    HStack {
+                        Button(station.remoteControls.captureRecoveryTitle) { station.remoteControls.recoverCapture() }
+                        Button("放弃并清理") { station.remoteControls.discardCapture() }
+                    }.buttonStyle(.borderless).disabled(!station.remoteControls.canRecoverCapture)
+                    Text("截图编号：\(pending.id)").font(.caption.monospaced()).textSelection(.enabled)
+                }
                 controlGroup
                 if let text = station.feedbackText {
                     StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)

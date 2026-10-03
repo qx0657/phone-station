@@ -109,6 +109,7 @@ final class McpProtocol {
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
         if ("station_controls_status".equals(name)) { return host(host).controlsStatus(); }
         if ("station_screen_capture".equals(name)) { return host(host).screenCapture(required(args, "requestId")); }
+        if ("station_screen_capture_status".equals(name)) { return ScreenCapture.status(files, required(args, "requestId")); }
         if ("station_screen_capture_release".equals(name)) { return ScreenCapture.release(files, required(args, "requestId")); }
         if ("station_torch".equals(name)) { return host(host).torch(requiredBool(args, "on")); }
         if ("station_notification_status".equals(name)) { return host.notificationStatus(); }
@@ -457,6 +458,8 @@ final class McpProtocol {
         tools.add(tool("station_screen_capture",
                 "通过已运行且授权的 Shizuku 截取当前画面，返回临时 PNG 路径、大小、targetVersion 与 SHA-256。仅在用户要求截屏时调用；安全界面仍可能是黑屏。requestId 为新的 UUID，已有编号拒绝重拍。文件最多 32 MiB，用文件读取工具下载后调用 release；结果未知时先按该编号核实文件，不重拍。",
                 false, false, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("本次截图的 UUID，不得重用。")))));
+        tools.add(tool("station_screen_capture_status", "按原截图 UUID 查询已有 PNG，用于应答丢失后的恢复，不重新截屏。",
+                true, false, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("原截图 UUID。")))));
         tools.add(tool("station_screen_capture_release",
                 "删除本次 UUID 对应的临时截图，不进回收站。只用于下载完成后清理本次截图。",
                 false, true, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("已下载截图的 UUID。")))));
