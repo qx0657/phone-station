@@ -29,6 +29,8 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+python3 "$here/test_signing_key.py"
+
 print -r -- "检查打开时机…"
 javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/KeeperPolicy.java" \
@@ -163,29 +165,20 @@ zip -j -q "$work/unsigned.apk" "$work/dex/classes.dex"
 mkdir -p "$repo/build"
 # 签过名的钥匙不放进 build/。删掉构建目录或换一台电脑时，把这一份拷到同一路径再编，才不用卸掉重装。
 ks_dir=${PHONE_STATION_KEY_DIR:-$HOME/.phonestation}
-mkdir -p "$ks_dir"
-ks=$ks_dir/adb-keep.keystore
 legacy=$repo/build/adb-keep.keystore
-if [[ ! -f $ks && -f $legacy ]]; then
-  cp "$legacy" "$ks"
+if ! signing_output=$(python3 "$here/signing_key.py" "$ks_dir" "$legacy"); then
+  exit 1
 fi
-if [[ ! -f $ks ]]; then
-  keytool -genkeypair \
-    -keystore "$ks" \
-    -storepass android \
-    -keypass android \
-    -alias adbkeep \
-    -keyalg RSA -keysize 2048 -validity 10000 \
-    -dname "CN=Phone Station Adb Keep, O=Phone Station, C=CN"
-fi
+signing_paths=("${(@f)signing_output}")
+ks=${signing_paths[1]}
+ks_password=${signing_paths[2]}
 
 out=$repo/build/adb-keep.apk
 "$bt/zipalign" -f 4 "$work/unsigned.apk" "$work/aligned.apk"
 "$bt/apksigner" sign \
   --ks "$ks" \
   --ks-key-alias adbkeep \
-  --ks-pass pass:android \
-  --key-pass pass:android \
+  --ks-pass "file:$ks_password" \
   --out "$out" \
   "$work/aligned.apk"
 print -r -- "写入 $out"
