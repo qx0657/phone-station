@@ -67,7 +67,9 @@ public final class TerminalUserService extends Binder {
                 start();
             }
             // Native operations return immediately; a hung helper is terminated without replay.
-            result = io.submit(() -> exchange(body)).get(3, TimeUnit.SECONDS);
+            OutputStreamWriter activeWriter = writer;
+            BufferedReader activeReader = reader;
+            result = io.submit(() -> exchange(body, activeWriter, activeReader)).get(3, TimeUnit.SECONDS);
             result.put("uid", uid).put("identity", uid == 0 ? "root" : "shell");
         } catch (Exception error) {
             stop();
@@ -77,9 +79,10 @@ public final class TerminalUserService extends Binder {
         reply.writeNoException(); reply.writeString(result.emit()); return true;
     }
 
-    private Json exchange(String body) throws Exception {
-        writer.write(body); writer.write('\n'); writer.flush();
-        String line = reader.readLine();
+    private Json exchange(String body, OutputStreamWriter activeWriter, BufferedReader activeReader) throws Exception {
+        // A timed-out call must never read or write a replacement helper's pipes.
+        activeWriter.write(body); activeWriter.write('\n'); activeWriter.flush();
+        String line = activeReader.readLine();
         if (line == null || line.length() > 100000) { throw new java.io.IOException(); }
         return Json.parse(line);
     }
