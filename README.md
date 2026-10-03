@@ -220,6 +220,8 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 
 读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，打开固定的本机网关地址并给出 `Authorization` 头。网关优先走 adb，无线断开时切到已配置的中继；完整 adb、投屏与录屏仍需本地 adb，远程 shell 和安装升级见 [远程命令与安装](#远程命令与安装)。远程通道转发手机工位已有的 MCP 工具。手机与 Mac 可各自配置；通过 adb 同时配置或清除两端资料时才需要 adb 在线。
 
+Mac 19 起，`./scripts/mcp.sh clients create '资料读取' status,files.read` 可生成独立客户端令牌，按需授予状态、文件读写或 shell 权限；`clients list` 查看，`clients revoke <编号>` 撤销。创建时只显示一次令牌，详细范围见 [客户端权限](docs/mcp-clients.md)。
+
 需要通过本地或远程通道执行 shell 命令时，在手机上启动 Shizuku 13 或更新版，并在「手机工位 → 权限 → Shizuku」允许使用。`station_shell_status` 检查是否可用，`station_shell_exec` 执行命令并返回输出、退出码和是否超时。默认 10 秒，最长 60 秒，没有交互终端，也不保留后台任务。非 root 手机重启后需要重新启动 Shizuku，之前的应用授权仍保留。参数和权限边界见 [MCP 文档](docs/mcp.md#shizuku-shell)。
 
 远程通道默认未配置，没有内置服务器地址。手机「远程中继设置」填写 HTTPS 地址、SPKI SHA-256 证书指纹和手机令牌；Mac「MCP 服务 → 远程中继」填写相同地址、指纹和另一枚电脑令牌，点「保存 Mac 配置」。两端均可独立配置，无需 adb。Mac 勾选「同时配置手机」后，可通过已连接的 adb 一次保存两端资料。地址支持域名或 IP、可选端口和路径，例如 `https://relay.example.com/station`。中继需要实现手机工位的转发协议，见 [docs/mcp.md](docs/mcp.md)；任意 MCP 服务器不能直接代替它。已有配对在更新后保留。

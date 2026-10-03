@@ -92,11 +92,18 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "desktop 只配置此 Mac，隐藏输入电脑令牌；--stdin 读取一行。不需要 adb。"
   print -r -- "forget-desktop 只清除此 Mac 的远程配置，不修改手机。"
   print -r -- "call 从标准输入接收一个带 id 的 JSON-RPC 请求；走已有统一网关，不打印令牌、不启动服务。"
+  print -r -- "clients create <名称> <逗号分隔权限> | list | revoke <编号>：管理独立客户端；create 仅一次输出令牌。"
+  print -r -- "权限: status,files.read,files.write,shell；不连接手机，不启动网关。"
   print -r -- "status --safe 只读已有网关状态，不输出令牌，也不刷新 adb 转发。"
   exit 0
 fi
 
 find_gateway
+
+if [[ ${1:-} == clients ]]; then
+  shift
+  exec "$GATEWAY_BIN" clients "$@"
+fi
 
 if [[ ${1:-} == call && $# == 1 ]]; then
   exec "$GATEWAY_BIN" call

@@ -72,9 +72,10 @@ type gateway struct {
 	state    health
 	remoteMu remoteGate
 	// Overrides let transport tests use isolated servers without real credentials.
-	localURL   string
-	readConfig func() (config, error)
-	callRemote func(context.Context, config, []byte) (relayResponse, error)
+	localURL    string
+	readConfig  func() (config, error)
+	readClients func() (clientRegistry, error)
+	callRemote  func(context.Context, config, []byte) (relayResponse, error)
 }
 
 // One bounded queue shared by App, CLI, and health probes. FIFO within each priority.
@@ -192,6 +193,12 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "clients":
+		var file string
+		file, err = clientsPath()
+		if err == nil {
+			err = clientsCLI(os.Args[2:], file, os.Stdout)
+		}
 	case "configure":
 		err = configureRemote()
 	case "profile":
@@ -257,7 +264,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "phone-relay-gateway configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|status-safe|credentials|call|remote-call")
+	fmt.Fprintln(os.Stderr, "phone-relay-gateway clients <create|list|revoke> | configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|status-safe|credentials|call|remote-call")
 }
 
 // Uses the daemon's remote-only route, without opening adb or printing credentials.
@@ -710,8 +717,15 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/mcp" && r.Method != http.MethodPost {
 		if !authorized(r, value.GatewayToken) {
-			writeMCPError(w, nil, http.StatusUnauthorized, "需要本机网关令牌")
-			return
+			client, err := g.clientAuthorization(r)
+			if err != nil {
+				writeMCPError(w, nil, http.StatusServiceUnavailable, "客户端授权不可用")
+				return
+			}
+			if client == nil {
+				writeMCPError(w, nil, http.StatusUnauthorized, "需要有效的网关令牌")
+				return
+			}
 		}
 		w.Header().Set("Allow", "POST")
 		writeMCPError(w, nil, http.StatusMethodNotAllowed, "本服务不提供 MCP SSE 流，请使用 POST")
@@ -721,9 +735,19 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMCPError(w, nil, http.StatusNotFound, "unknown endpoint")
 		return
 	}
+	var client *clientGrant
 	if !authorized(r, value.GatewayToken) {
-		writeMCPError(w, nil, http.StatusUnauthorized, "需要本机网关令牌")
-		return
+		if r.URL.Path == "/mcp" {
+			client, err = g.clientAuthorization(r)
+		}
+		if err != nil {
+			writeMCPError(w, nil, http.StatusServiceUnavailable, "客户端授权不可用")
+			return
+		}
+		if client == nil {
+			writeMCPError(w, nil, http.StatusUnauthorized, "需要有效的网关令牌")
+			return
+		}
 	}
 	body, err := readBody(r.Body, maxBody)
 	if err != nil {
@@ -733,6 +757,18 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !utf8.Valid(body) || !json.Valid(body) {
 		writeRPCError(w, nil, http.StatusOK, -32700, "请求必须是 UTF-8 JSON")
 		return
+	}
+	if client != nil {
+		lists, denied := client.preflight(body)
+		if denied != nil {
+			writeMCPError(w, requestID(body), http.StatusForbidden, denied.Error())
+			return
+		}
+		if len(lists) > 0 {
+			captured := &clientResponse{header: make(http.Header)}
+			defer client.finish(w, captured, lists)
+			w = captured
+		}
 	}
 	if r.URL.Path == "/__remote-call" {
 		if r.Header.Get("X-Phone-Station-Remote-Profile") != profileFingerprint(value) {
