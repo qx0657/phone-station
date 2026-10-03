@@ -15,6 +15,7 @@
 | 网关未就绪 | 检查 Mac App / 网关是否启动，源码修改后是否仍在运行旧二进制；构建与替换步骤见 [Mac 文档](mac-app.md) |
 | 认证失败 | 核对两端地址与 SPKI、手机/电脑角色令牌是否放反；证书或凭据变更必须同步两端，不关闭鉴权排障 |
 | 远程离线 | 检查手机 MCP 与远程开关、默认网络和中继状态；配置已保存不等于往返已确认，忙碌时的确认中也不等于离线 |
+| Mac 更新后远程持续“确认连接中” | 若新版 `phone-relay-keychain get` 与 SecurityAgent 等待系统授权，用户须在本机完成钥匙串访问提示；不要把密码或凭据发到聊天，不重新配对或关闭钥匙串保护。授权后核对 `status --safe` 的远程在线与实际只读调用；服务器升级前先通过旧中继兼容验收 |
 | Shizuku 不可用 | `./scripts/shell.sh --status` 只查询；按原因区分未安装、未运行、未授权和身份不符。非 root 手机重启后须重新启动 Shizuku |
 | shell 结果未知 | `./scripts/shell.sh --job-status <原编号>`；`result_unknown` 或记录缺失时核对实际效果，不生成新编号重做 |
 | APK 已安装但服务未恢复 | `./scripts/install-apk.sh --status <原编号>`，分别检查 `verified`、`completed` 与恢复记录。手动打开不算自动恢复验收通过 |
