@@ -488,7 +488,7 @@ final class McpProtocol {
                 schema(new String[0], Json.obj())));
         tools.add(tool(
                 "station_stay_awake",
-                "保持亮屏的开或关。on 为 true 时息屏设为 2147483647 毫秒，充电（交流电、USB、无线充）时不熄屏。false 时息屏恢复为 60 秒，并关掉充电时常亮。",
+                "保持亮屏的开或关。on 为 true 时息屏设为 2147483647 毫秒，充电（交流电、USB、无线充）时不熄屏。false 恢复开启前保存的设置，保留用户中途手动改过的值；旧版无记录常亮回退到 60 秒/充电掩码 0。",
                 false,
                 false,
                 schema(new String[] {"on"}, Json.obj().put("on", bool("true 打开，false 恢复。")))));

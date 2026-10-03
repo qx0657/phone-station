@@ -241,6 +241,12 @@ final class McpLoopbackTest {
             call(http.port(), "station_shell_start", arguments);
             expect(true, beforeDuplicate == shellCalls[0]);
             jobRelease.countDown();
+            // Status is serialized with the durable receipt write. Wait for it
+            // before teardown removes the directory under the worker.
+            long completionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!"completed".equals(jobs.status(jobID).get("state").string())
+                    && System.nanoTime() < completionDeadline) { Thread.sleep(5); }
+            expect("completed", jobs.status(jobID).get("state").string());
             System.out.println("McpLoopbackTest ok");
         } finally {
             jobRelease.countDown(); jobs.close();
