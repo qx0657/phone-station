@@ -6,10 +6,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 final class FileOpsTest {
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws Exception {
         Path home = Files.createTempDirectory("station-mcp");
         try {
             FileOps ops = new FileOps(home, "secret");
+            Files.writeString(home.resolve("race.txt"), "a");
+            String stale = ops.stat("race.txt").get("targetVersion").string();
+            java.nio.file.attribute.FileTime time = Files.getLastModifiedTime(home.resolve("race.txt"));
+            Files.writeString(home.resolve("race.txt"), "b");
+            Files.setLastModifiedTime(home.resolve("race.txt"), time);
+            mustThrow(() -> ops.appendText("race.txt", "!", stale), "已变化");
+            FileOps otherChannel = new FileOps(home);
+            for (int trial = 0; trial < 30; trial++) {
+                String current = ops.stat("race.txt").get("targetVersion").string();
+                String request = Json.obj().put("jsonrpc", "2.0").put("id", 1).put("method", "tools/call")
+                        .put("params", Json.obj().put("name", "station_file_append_text").put("arguments",
+                                Json.obj().put("path", "race.txt").put("text", "!").put("targetVersion", current))).emit();
+                java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+                java.util.concurrent.CompletableFuture<Boolean> a = append(start, request, ops);
+                java.util.concurrent.CompletableFuture<Boolean> b = append(start, request, otherChannel);
+                start.countDown();
+                expect(1, (a.get() ? 1 : 0) + (b.get() ? 1 : 0));
+            }
             ops.writeText("note.txt", "手机\r\n", null);
             Json page = ops.readText("note.txt", 1, 10);
             expect("手机\r\n", page.get("text").string());
@@ -128,6 +146,15 @@ final class FileOpsTest {
                 Files.delete(dir);
                 return java.nio.file.FileVisitResult.CONTINUE;
             }
+        });
+    }
+
+    private static java.util.concurrent.CompletableFuture<Boolean> append(
+            java.util.concurrent.CountDownLatch start, String request, FileOps files) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try { start.await(); } catch (InterruptedException e) { throw new RuntimeException(e); }
+            String body = McpProtocol.handle(request, "Bearer token", "token", files, null, "test").body;
+            return !body.contains("isError");
         });
     }
 

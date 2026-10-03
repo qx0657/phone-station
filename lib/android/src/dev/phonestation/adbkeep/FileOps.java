@@ -2,6 +2,9 @@ package dev.phonestation.adbkeep;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
@@ -28,6 +31,8 @@ import java.util.List;
 
 /** 内部存储上的普通文件。请求串行处理。删除不进回收站，也不跟随链接。 */
 final class FileOps {
+    // 所有通道、所有 FileOps 实例共享事务锁；版本校验和落盘不能分开。
+    static final Object TRANSACTIONS = new Object();
     static final int BYTE_PAGE = 65536;
     static final long TEXT_LIMIT = 8L * 1024L * 1024L;
     private static final int SEARCH_VISITS = 20000;
@@ -795,7 +800,7 @@ final class FileOps {
         if (version == null || version.isEmpty()) {
             throw new FileFailure("要带 targetVersion");
         }
-        String current = targetVersion(attributes(path));
+        String current = targetVersion(path, attributes(path));
         if (!current.equals(version)) {
             throw new FileFailure("文件已变化，先重新读取。当前 targetVersion 是 " + current);
         }
@@ -892,11 +897,31 @@ final class FileOps {
                 .put("type", type)
                 .put("size", attrs.size())
                 .put("mtime", attrs.lastModifiedTime().toMillis())
-                .put("targetVersion", targetVersion(attrs));
+                .put("targetVersion", targetVersion(path, attrs));
     }
 
-    private static String targetVersion(BasicFileAttributes attrs) {
-        return attrs.lastModifiedTime().toMillis() + ":" + attrs.size();
+    private static String targetVersion(Path path, BasicFileAttributes attrs) {
+        if (!attrs.isRegularFile()) {
+            return attrs.lastModifiedTime() + ":" + attrs.size();
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            // 包括文件身份；同内容的文件替换也使旧版本失效。
+            digest.update((String.valueOf(attrs.fileKey()) + ":" + attrs.creationTime()
+                    + ":" + attrs.lastModifiedTime()).getBytes(StandardCharsets.UTF_8));
+            try (InputStream input = Files.newInputStream(path, NOFOLLOW)) {
+                byte[] buffer = new byte[65536];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+            return "sha256:" + toHex(digest.digest());
+        } catch (IOException error) {
+            throw io(error);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     private Row row(Path child) {

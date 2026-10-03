@@ -49,7 +49,7 @@ final class McpProtocol {
             }
             if ("tools/call".equals(method)) {
                 // 文件请求仍按顺序执行；长 shell 调用期间 ping 独立响应，避免网关误判断线。
-                synchronized (files) {
+                synchronized (FileOps.TRANSACTIONS) {
                     return rpc(id, call(params, files, host));
                 }
             }
