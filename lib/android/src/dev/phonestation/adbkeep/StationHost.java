@@ -6,6 +6,12 @@ interface StationHost {
 
     Json stayAwake(boolean on);
 
+    Json controlsStatus();
+
+    Json screenCapture(String requestId);
+
+    Json torch(boolean on);
+
     Json notify(String title, String text, String agent, String sound);
 
     Json clipboard(String text);

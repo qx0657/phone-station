@@ -107,6 +107,10 @@ final class McpProtocol {
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
+        if ("station_controls_status".equals(name)) { return host(host).controlsStatus(); }
+        if ("station_screen_capture".equals(name)) { return host(host).screenCapture(required(args, "requestId")); }
+        if ("station_screen_capture_release".equals(name)) { return ScreenCapture.release(files, required(args, "requestId")); }
+        if ("station_torch".equals(name)) { return host(host).torch(requiredBool(args, "on")); }
         if ("station_notification_status".equals(name)) { return host.notificationStatus(); }
         if ("station_notification_configure".equals(name)) {
             return host.notificationConfigure(Json.obj().put("enabled", requiredBool(args, "enabled")));
@@ -447,6 +451,18 @@ final class McpProtocol {
                 false,
                 false,
                 schema(new String[] {"on"}, Json.obj().put("on", bool("true 打开，false 恢复。")))));
+        tools.add(tool("station_controls_status",
+                "只读：已验证机型、保持亮屏和手电筒实际状态，以及远程截屏、亮屏和手电筒是否可用。可能连接只读的 Shizuku 手电筒状态服务，不开灯、不截屏、不申请权限。",
+                true, false, schema(new String[0], Json.obj())));
+        tools.add(tool("station_screen_capture",
+                "通过已运行且授权的 Shizuku 截取当前画面，返回临时 PNG 路径、大小、targetVersion 与 SHA-256。仅在用户要求截屏时调用；安全界面仍可能是黑屏。requestId 为新的 UUID，已有编号拒绝重拍。文件最多 32 MiB，用文件读取工具下载后调用 release；结果未知时先按该编号核实文件，不重拍。",
+                false, false, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("本次截图的 UUID，不得重用。")))));
+        tools.add(tool("station_screen_capture_release",
+                "删除本次 UUID 对应的临时截图，不进回收站。只用于下载完成后清理本次截图。",
+                false, true, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("已下载截图的 UUID。")))));
+        tools.add(tool("station_torch",
+                "通过已授权的 Shizuku 持续控制手电筒，返回实际状态。on 为 true 开灯，false 关灯。仅在用户要求时调用。手机工位或 Shizuku 停止、升级后灯会关闭，不自动重开；断线后只核实状态，不重放开关。",
+                false, false, schema(new String[] {"on"}, Json.obj().put("on", bool("true 开灯，false 关灯。")))));
         tools.add(tool(
                 "station_shell_status",
                 "只读：Shizuku 是否安装、运行及授权，shell/root 身份和不可用时的处理方法。不启动服务，不弹授权框。",

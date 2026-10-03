@@ -67,12 +67,50 @@ type health struct {
 
 type gateway struct {
 	state    health
-	remoteMu sync.Mutex
+	remoteMu remoteGate
 	// Overrides let transport tests use isolated servers without real credentials.
 	localURL   string
 	readConfig func() (config, error)
 	callRemote func(context.Context, config, []byte) (relayResponse, error)
 }
+
+// Cancel queue waits before dispatch; an expired operation must not run later.
+type remoteGate struct {
+	once sync.Once
+	busy chan struct{}
+}
+
+func (gate *remoteGate) channel() chan struct{} {
+	gate.once.Do(func() { gate.busy = make(chan struct{}, 1) })
+	return gate.busy
+}
+
+func (gate *remoteGate) acquire(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case gate.channel() <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			gate.Unlock()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (gate *remoteGate) TryLock() bool {
+	select {
+	case gate.channel() <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (gate *remoteGate) Unlock() { <-gate.channel() }
 
 func main() {
 	if len(os.Args) < 2 {
@@ -835,7 +873,9 @@ func safeToReplay(body []byte) bool {
 }
 
 func (g *gateway) proxyRemote(parent context.Context, w http.ResponseWriter, body []byte, value config) {
-	g.remoteMu.Lock()
+	if g.remoteMu.acquire(parent) != nil {
+		return
+	}
 	defer g.remoteMu.Unlock()
 	g.setRemoteBusy(true)
 	defer g.setRemoteBusy(false)

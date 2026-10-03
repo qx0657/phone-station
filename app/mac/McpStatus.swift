@@ -11,7 +11,8 @@ struct McpStatus {
     let remoteConfigured: Bool?
     let remoteChecking: Bool
 
-    var listening: Bool { !endpoint.isEmpty }
+    let listening: Bool
+    let requestAvailable: Bool
 
     init(_ output: String) {
         if let data = output.data(using: .utf8),
@@ -19,10 +20,14 @@ struct McpStatus {
             let remoteVerified = value.remoteOnline && (value.remoteVerified ?? true)
             let available = value.ready && ((value.mode == "local" && value.localOnline)
                 || (value.mode == "remote" && remoteVerified))
+            // A busy relay can lose freshness without losing its actual route.
+            let dispatchable = available || (value.ready && value.mode == "remote" && value.remoteOnline && value.remoteChecking == true)
             gatewayReady = value.ready
-            endpoint = available ? (value.endpoint ?? "") : ""
-            token = available ? (value.token ?? "") : ""
-            channel = available ? value.mode : ""
+            endpoint = dispatchable ? (value.endpoint ?? "") : ""
+            token = dispatchable ? (value.token ?? "") : ""
+            channel = dispatchable ? value.mode : ""
+            listening = available && !endpoint.isEmpty
+            requestAvailable = dispatchable && !endpoint.isEmpty && !token.isEmpty
             remoteConnected = value.ready && value.remoteOnline && (value.remoteVerified ?? true)
             remoteConfigured = value.remoteConfigured
             remoteChecking = value.ready && (value.remoteChecking ?? false)
@@ -42,12 +47,16 @@ struct McpStatus {
             token = ""
             self.channel = ""
             remoteConnected = false
+            listening = false
+            requestAvailable = false
             return
         }
         self.endpoint = endpoint
         token = lines.first { $0.hasPrefix("Authorization: Bearer ") }
             .map { String($0.dropFirst("Authorization: Bearer ".count)) } ?? ""
         self.channel = channel
+        listening = !endpoint.isEmpty
+        requestAvailable = listening && !token.isEmpty
         remoteConnected = channel == "remote" || fields.contains("relay=online")
     }
 

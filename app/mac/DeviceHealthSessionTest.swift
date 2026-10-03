@@ -24,6 +24,10 @@ enum DeviceHealthSessionTest {
         session.route = { hasRoute ? ("http://127.0.0.1:18765/mcp", "test") : nil }
         session.refresh(); await waitFor { session.issues.count == 1 }
         precondition(session.failure == nil && session.issues[0].title == "Shizuku 未启动")
+        let firstCalls = calls
+        session.refresh(background: true)
+        for _ in 0..<100 { await Task.yield() }
+        precondition(calls == firstCalls, "background diagnostics respect a cooldown after completion")
         blocked = false
         session.refresh(); await waitFor { session.issues.isEmpty }
         fail = true

@@ -31,6 +31,10 @@ final class McpLoopbackTest {
                 return Json.obj().put("stayAwake", on);
             }
 
+            public Json controlsStatus() { return Json.obj().put("verified", true); }
+            public Json screenCapture(String id) { return Json.obj().put("requestId", id); }
+            public Json torch(boolean on) { return Json.obj().put("on", on); }
+
             @Override
             public Json notify(String title, String text, String agent, String sound) {
                 return Json.obj().put("posted", true).put("title", title)
@@ -99,6 +103,10 @@ final class McpLoopbackTest {
             expect(true, tools[1].contains("station_device_status"));
             expect(true, tools[1].contains("station_storage_summary"));
             expect(true, tools[1].contains("station_stay_awake"));
+            expect(true, tools[1].contains("station_controls_status"));
+            expect(true, tools[1].contains("station_screen_capture"));
+            expect(true, tools[1].contains("station_screen_capture_release"));
+            expect(true, tools[1].contains("station_torch"));
             expect(true, tools[1].contains("station_notify"));
             expect(true, tools[1].contains("station_clipboard_set"));
             expect(true, tools[1].contains("station_clipboard_get"));
@@ -112,6 +120,10 @@ final class McpLoopbackTest {
             expect(true, tools[1].contains("station_file_open"));
             Json listed = Json.parse(tools[1]).get("result").get("tools");
             for (Json tool : listed.array()) {
+                String toolName = tool.get("name").string();
+                if (toolName.equals("station_screen_capture") || toolName.equals("station_torch")) {
+                    expect(false, tool.get("annotations").get("readOnlyHint").boolValue());
+                }
                 if ("station_notify".equals(tool.get("name").string())) {
                     expect(false, tool.get("inputSchema").get("properties").has("mode"));
                 }
@@ -123,6 +135,9 @@ final class McpLoopbackTest {
             expect(true, tools[1].contains("station_shell_exec"));
             expect(true, tools[1].contains("station_shell_status"));
             expect(true, tools[1].contains("destructiveHint"));
+            expect(true, call(http.port(), "station_controls_status", "{}")[1].contains("verified"));
+            expect(true, call(http.port(), "station_torch", "{\"on\":true}")[1].contains("true"));
+            expect(true, call(http.port(), "station_torch", "{}")[1].contains("isError"));
 
             expect(true, call(http.port(), "station_notification_status", "{}")[1].contains("enabled"));
             expect(true, call(http.port(), "station_notification_icon", "{\"packageName\":\"chat\"}")[1].contains("chat"));

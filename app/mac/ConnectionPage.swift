@@ -27,7 +27,7 @@ struct ConnectionPage: View {
                         online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
                 }.elevatedGroup()
                 Text(station.link.remoteConnected && station.link.serial == nil
-                     ? "远程连接已可用，文件等 MCP 功能可以继续使用。投屏和 adb 操作需要接入 USB，或回到同一 Wi-Fi。"
+                     ? "远程连接已可用，可使用文件、截屏、保持亮屏和手电筒。投屏、录屏与灯光跟随声音需要接入 USB，或回到同一 Wi-Fi。"
                      : "无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

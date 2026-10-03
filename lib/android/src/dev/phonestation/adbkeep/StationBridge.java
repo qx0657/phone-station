@@ -49,6 +49,39 @@ final class StationBridge implements StationHost {
         return ShizukuShell.execute(context, request);
     }
 
+    private static boolean verifiedModel() { return "PGT-AN20".equals(Build.MODEL.replace('_', '-')); }
+    private static void requireVerifiedModel() {
+        if (!verifiedModel()) { throw new FileFailure("当前机型 " + Build.MODEL + " 尚未验证，停止设备操作"); }
+    }
+
+    @Override public Json controlsStatus() {
+        Json shell = ShizukuShell.status(context);
+        boolean verified = verifiedModel();
+        boolean storage = Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager();
+        boolean settings = context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
+                == PackageManager.PERMISSION_GRANTED;
+        String unsupported = verified ? "" : "当前机型 " + Build.MODEL + " 尚未验证，停止设备操作";
+        Json lamp = verified ? ShizukuTorch.status(context) : Json.obj().put("available", false)
+                .put("on", Json.nul()).put("reason", unsupported);
+        return Json.obj().put("model", Build.MODEL).put("verified", verified)
+                .put("stayAwake", StayAwake.held(systemInt(Settings.System.SCREEN_OFF_TIMEOUT), globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN)))
+                .put("stayAwakeAvailable", verified && settings)
+                .put("stayAwakeReason", !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")
+                .put("screenshotAvailable", verified && storage && shell.get("available").boolValue())
+                .put("screenshotReason", !verified ? unsupported : !storage ? "请在手机权限页允许所有文件访问" : shell.get("reason").string())
+                .put("torch", lamp);
+    }
+
+    @Override public Json screenCapture(String requestId) {
+        requireVerifiedModel();
+        return ScreenCapture.capture(files, request -> ShizukuShell.execute(context, request), requestId);
+    }
+
+    @Override public Json torch(boolean on) {
+        requireVerifiedModel();
+        return ShizukuTorch.set(context, on);
+    }
+
     @Override
     public Json status() {
         BatteryManager battery = context.getSystemService(BatteryManager.class);
@@ -82,6 +115,7 @@ final class StationBridge implements StationHost {
 
     @Override
     public Json stayAwake(boolean on) {
+        requireVerifiedModel();
         boolean timeoutOk = Settings.System.putInt(
                 context.getContentResolver(),
                 Settings.System.SCREEN_OFF_TIMEOUT,

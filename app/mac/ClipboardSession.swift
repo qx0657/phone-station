@@ -20,19 +20,22 @@ final class ClipboardSession: ObservableObject {
     @Published private(set) var lastSyncAt: Date?
     @Published private(set) var lastSyncDirection: String?
     var route: () -> (String, String)? = { nil }
+    var remote: () -> Bool = { false }
     private let clientID = UUID().uuidString
     private var policy = ClipboardSyncPolicy()
     private var recovery = ClipboardRecovery()
     private var timer: Timer?
     private var inFlight = false
     private var showing = false
-    private var requestStarted: TimeInterval = 0
+    private var requestStarted: TimeInterval?
+    private var slowAfter: TimeInterval = 6
+    private var nextPoll: TimeInterval = 0
     private let readLocal: () -> ClipboardLocalState
     private let writeLocal: (String) -> Void
     private let readImage: (Int) -> Data?
     private var attemptedImageCount: Int?
     private var lastSentCount: Int?
-    private let rpc: (String, String, String, [String: Any]) async throws -> Data
+    private let rpc: ((String, String, String, [String: Any]) async throws -> Data)?
     private let clock: () -> TimeInterval
     private let logger = Logger(subsystem: "com.qx0657.phonestation", category: "clipboard")
 
@@ -43,10 +46,7 @@ final class ClipboardSession: ObservableObject {
         self.readLocal = readLocal ?? Self.readPasteboard
         self.writeLocal = writeLocal ?? Self.writePasteboard
         self.readImage = readImage ?? Self.readPasteboardImage
-        self.rpc = rpc ?? { endpoint, token, name, arguments in
-            try await ClipboardRPC.call(endpoint: endpoint, token: token, name: name,
-                                        arguments: arguments, timeout: arguments["macImage"] == nil ? 8 : 30)
-        }
+        self.rpc = rpc
         self.clock = clock
         if startTimer {
             let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] _ in
@@ -59,8 +59,8 @@ final class ClipboardSession: ObservableObject {
     var summary: String {
         guard shared else { return "未开启" }
         if let blocker { return blocker.status }
-        if checking { return "正在核对剪贴板" }
         guard connected else { return recovering ? "正在恢复同步" : "等待剪贴板连接" }
+        if checking { return "同步响应较慢" }
         if phone?.kind == "locked" { return "手机已锁定 · 同步暂停" }
         if automatic, let reason = pauseReason(phone, device: "手机") { return reason }
         if automatic, let reason = pauseReason(mac, device: "Mac") { return reason }
@@ -73,7 +73,7 @@ final class ClipboardSession: ObservableObject {
         default: return nil
         }
     }
-    func show() { showing = true; refresh() }
+    func show() { showing = true; nextPoll = 0; refresh() }
     func hide() { showing = false }
     func configure(shared: Bool? = nil, automatic: Bool? = nil, images: Bool? = nil) {
         var args: [String: Any] = [:]
@@ -102,10 +102,11 @@ final class ClipboardSession: ObservableObject {
         Task {
             while inFlight { try? await Task.sleep(nanoseconds: 50_000_000) }
             do {
-                let data = try await rpc(endpoint, token, name, arguments)
+                let data = try await call(endpoint, token, name, arguments)
                 done(data)
             } catch { message = error.localizedDescription }
             busy = false
+            nextPoll = 0
             refresh()
         }
     }
@@ -119,18 +120,24 @@ final class ClipboardSession: ObservableObject {
         let local = sample()
         let availableRoute = route()
         if availableRoute == nil { interrupted(nil) }
-        if inFlight, availableRoute != nil, clock() - requestStarted >= 2 { checking = shared; connected = false }
+        if inFlight, availableRoute != nil, connected, let requestStarted, clock() - requestStarted >= slowAfter {
+            checking = shared
+        }
         guard !inFlight, !busy else { return }
         guard let (endpoint, token) = availableRoute else { return }
+        // New Mac copies bypass the idle remote polling interval.
+        guard clock() >= nextPoll || (shared && local.count != lastSentCount) else { return }
         let needsProbe = recovery.recovering || policy.phoneVersion == nil
         let wasRecovering = recovering
         inFlight = true
-        requestStarted = clock()
+        requestStarted = nil
         Task {
             var sentCount = local.count
             defer {
                 inFlight = false
                 checking = false
+                requestStarted = nil
+                nextPoll = clock() + (remote() ? 2 : 0)
                 if shared, sample().count != sentCount, !busy { refresh() }
             }
             do {
@@ -140,7 +147,7 @@ final class ClipboardSession: ObservableObject {
                 var version = policy.phoneVersion
                 if needsProbe {
                     // Reconcile an unknown outcome without replaying the old exchange.
-                    let data = try await rpc(endpoint, token, "station_clipboard_state", ["refresh": true])
+                    let data = try await call(endpoint, token, "station_clipboard_state", ["refresh": true])
                     let snapshot = try JSONDecoder().decode(ClipboardSnapshot.self, from: data)
                     applySettings(snapshot)
                     if let error = snapshot.error { interrupted(error); return }
@@ -178,7 +185,7 @@ final class ClipboardSession: ObservableObject {
                 sentCount = current.count
                 lastSentCount = sentCount
                 recovery.sent(count: sentCount)
-                let data = try await rpc(endpoint, token, "station_clipboard_exchange", args)
+                let data = try await call(endpoint, token, "station_clipboard_exchange", args)
                 guard let currentRoute = route(), currentRoute.0 == endpoint, currentRoute.1 == token else {
                     interrupted(nil); return
                 }
@@ -211,6 +218,26 @@ final class ClipboardSession: ObservableObject {
                 }
             } catch { interrupted(error.localizedDescription) }
         }
+    }
+    private func call(_ endpoint: String, _ token: String, _ name: String, _ arguments: [String: Any]) async throws -> Data {
+        requestStarted = nil
+        checking = false
+        slowAfter = arguments["macImage"] == nil ? 6 : 25
+        if let rpc {
+            requestStarted = clock()
+            return try await rpc(endpoint, token, name, arguments)
+        }
+        return try await ClipboardRPC.call(endpoint: endpoint, token: token, name: name, arguments: arguments,
+            timeout: arguments["macImage"] == nil ? 8 : 30, onStart: {
+                let valid = await MainActor.run {
+                    guard let current = self.route(), current.0 == endpoint, current.1 == token else { return false }
+                    self.requestStarted = self.clock()
+                    return true
+                }
+                guard valid else {
+                    throw ClipboardRPC.Failure(message: "剪贴板连接已改变")
+                }
+            })
     }
     private func noteSync(_ direction: String) {
         lastSyncAt = Date()

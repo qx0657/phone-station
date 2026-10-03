@@ -174,7 +174,9 @@ func TestInflightFailoverReplaysOnlyReadOperations(t *testing.T) {
 
 func TestBusyRelayCannotDelayLocalFailureOrOverwriteHealth(t *testing.T) {
 	g := testGateway("", nil)
-	g.remoteMu.Lock()
+	if err := g.remoteMu.acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	defer g.remoteMu.Unlock()
 	if _, sampled := g.probeRemote(config{}); sampled {
 		t.Fatal("busy relay produced stale health sample")
@@ -272,5 +274,42 @@ func TestLateLocalProbeCannotReviveDisconnectedRoute(t *testing.T) {
 	<-finished
 	if g.mode() != "remote" || g.state.localOnline {
 		t.Fatal("late success revived a failed route")
+	}
+}
+
+func TestCancelledRelayQueueDoesNotDispatchLater(t *testing.T) {
+	var calls atomic.Int32
+	g := testGateway("", func(ctx context.Context, value config, body []byte) (relayResponse, error) {
+		calls.Add(1)
+		return relayResponse{Status: http.StatusOK, Body: []byte(pingReply)}, nil
+	})
+	if err := g.remoteMu.acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	value, _ := g.config()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	finished := make(chan struct{})
+	go func() {
+		g.proxyRemote(ctx, httptest.NewRecorder(), []byte(`{"method":"tools/call","params":{"name":"station_clipboard_exchange"}}`), value)
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		g.remoteMu.Unlock()
+		t.Fatal("cancelled request remained in the relay queue")
+	}
+	g.remoteMu.Unlock()
+	if calls.Load() != 0 {
+		t.Fatal("expired mutation dispatched after queue cancellation")
+	}
+	// Cancellation must not consume the permit or mark a working route offline.
+	if err := g.remoteMu.acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	g.remoteMu.Unlock()
+	if !g.state.remoteOnline {
+		t.Fatal("queue cancellation changed remote health")
 	}
 }

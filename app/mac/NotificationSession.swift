@@ -12,6 +12,8 @@ final class NotificationSession: ObservableObject {
     @Published private(set) var customBanners: Bool
     @Published private(set) var previewing = false
     var route: () -> (String, String)? = { nil }
+    var remote: () -> Bool = { false }
+    private var nextPoll = Date.distantPast
     private let clientID = UUID().uuidString
     private var policy = NotificationReceivePolicy()
     private var timer: Timer?
@@ -52,7 +54,7 @@ final class NotificationSession: ObservableObject {
         self.previewBanner = previewBanner ?? { event in Task { try? await NotificationDelivery.shared.post(event) } }
         if startTimer {
             let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.refresh() }
+                Task { @MainActor in self?.refresh(background: true) }
             }
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
@@ -135,11 +137,12 @@ final class NotificationSession: ObservableObject {
             }
         }
     }
-    func refresh() {
+    func refresh(background: Bool = false) {
+        guard !background || Date() >= nextPoll else { return }
         guard !inFlight, !busy else { return }
         inFlight = true
         Task {
-            defer { inFlight = false }
+            defer { inFlight = false; nextPoll = Date().addingTimeInterval(remote() ? 2 : 0) }
             if Date().timeIntervalSince(permissionTime) >= 10 {
                 permission = await readPermission()
                 permissionTime = Date()

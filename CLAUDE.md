@@ -12,7 +12,7 @@
 
 - 动手：内部存储里的普通文件走手机上「手机工位」的 MCP。长说明在 `docs/mcp.md`，步骤在 `.agents/skills/phone-mcp/SKILL.md`。入口是 `scripts/mcp.sh`。手机上的 MCP 只有这个应用里的服务，以后要加的工具也做在这里。
 - 信号：只有用户或上游任务明确要求这一次提醒时才调用 `scripts/notify.sh` 或 `scripts/vibrate.sh`，用法在 `README.md` 的「会话提醒」。一轮完成、权限确认和中途询问由已安装的全局 hook 负责，不要在每个任务末尾再跑一遍。安装和卸下用 `scripts/install-agent-notify.sh`，步骤在 `.agents/skills/agent-notify/SKILL.md`，事件在 `docs/notify.md`。
-- 看：`scripts/mirror.sh`、`scripts/record.sh`、`scripts/screenshot.sh` 给人看屏幕，依赖本机的 scrcpy。截取当前画面用 `screenshot.sh`。相册里已经存在的截图走图库这一条。
+- 看：`scripts/mirror.sh`、`scripts/record.sh` 给人看屏幕，依赖本机的 scrcpy；`scripts/screenshot.sh` 用本机 adb 截屏。Mac App 或 MCP 可经已授权的 Shizuku 远程截屏，步骤在 phone-mcp skill，详情在 `docs/remote-controls.md`。相册里已经存在的截图走图库这一条。
 - 图库截图：判断哪些可以删。标准在 `docs/screenshot-cleanup.md`，步骤在 `.agents/skills/screenshot-cleanup/SKILL.md`。
 
 `.grok/skills/` 和 `.claude/skills/` 里的同名目录是指到 `.agents/skills/` 的软链接，不要在那两处另写一份。
@@ -41,7 +41,7 @@ Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当�
 
 - `scripts/` 放用户会运行的脚本：`mcp.sh`、`status.sh`、`connect.sh`、`disconnect.sh`、`host-state.sh`、`pair-qr.sh`、`pair-code.sh`、`android.sh`、`shell.sh`、`install-apk.sh`、`mirror.sh`、`record.sh`、`screenshot.sh`、`stay-awake.sh`、`vibrate.sh`、`notify.sh`、`install-agent-notify.sh`、`agent-notify-hook.sh`、`torch.sh`。
 - `lib/` 是这些脚本的内部实现，不要让用户直接运行。新脚本用 `source "$DIR/../lib/common.sh"`，`DIR` 取脚本自己的目录。无线地址发现走 `lib/adb_mdns.py`；USB 序列号直接来自 `adb devices`。
-- `lib/remote-gateway/` 是 Mac 本机 MCP 网关源码，构建时打包网关和钥匙串助手。统一 MCP 优先走本地 adb；`remote-call` 子命令直接经中继调用，不连接 adb。完整 adb、投屏和录屏仍要求本机 adb。
+- `lib/remote-gateway/` 是 Mac 本机 MCP 网关源码，构建时打包网关和钥匙串助手。统一 MCP 优先走本地 adb；`remote-call` 子命令直接经中继调用，不连接 adb。完整 adb、投屏、录屏和灯光跟随声音仍要求本机 adb。Mac App 的截屏、保持亮屏和手电筒可用远程 MCP；`station_controls_status` 只读核实机型、权限与状态，`station_screen_capture`/`station_screen_capture_release` 负责单次 PNG 与清理，`station_torch` 通过持续的 Shizuku UserService 持灯。开关与截图丢失应答后只核实，不重放。
 - `station_shell_status` 检查 Shizuku，`station_shell_exec` 通过已启动并授权的 Shizuku 13+ UserService 执行命令，本地与远程共用。需要用户要求 shell 或系统操作才调用执行工具。普通文件仍走 `station_file_*`。命令超时或断线不自动重做，先核实结果；非 root 手机重启后要重新启动 Shizuku。执行端不回退到应用 UID，详情在 `docs/mcp.md`。
 - 用户要求安装、升级 APK 或改需求后更新手机工位时，优先 `scripts/install-apk.sh <电脑APK>`、`scripts/android.sh --remote`；远程 shell 用 `scripts/shell.sh '<手机命令>'`，这些入口不依赖 adb 连接。安装支持 base + split、SHA-256 核对和保留数据升级，不自动卸载解决签名冲突。自身更新用最长 180 秒的独立安装助手，重连后查询原任务。结果未知时 `install-apk.sh --status <任务编号>`，不重新安装。默认 `android.sh` 仅在上传前检查远程不可用时才走 adb；`--adb` 强制本地。见 `docs/remote-ops.md`。
 - 脚本是 zsh，`set -euo pipefail`。不要用变量名 `path`，zsh 里它和 `PATH` 绑在一起，赋空值会把后续命令全部变成找不到。

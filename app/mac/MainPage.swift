@@ -7,10 +7,10 @@ struct MainPage: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             VStack(alignment: .leading, spacing: 12) {
-                healthWarnings
+                // 后台检查只更新固定入口的摘要，不在操作区前面插入提示。
                 actionRow
                 if station.link.serial == nil && station.link.remoteConnected {
-                    Text("远程 MCP 已连接。投屏、截屏和录屏需通过 USB 或同一 Wi-Fi 连接 adb。")
+                    Text("远程连接可截屏、保持亮屏和开关手电筒。投屏、录屏与灯光跟随声音需要 USB 或同一 Wi-Fi 连接。")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -26,23 +26,29 @@ struct MainPage: View {
                     StationRows.navigationRow("连接与配对", symbol: "wifi") { station.page = .connection }
                     StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted",
-                                              detail: station.mcp.summary) { station.page = .mcp }
+                                              detail: station.mcp.summary, detailLineLimit: 1,
+                                              needsAttention: station.link.isConnected && !station.mcp.listening && !station.mcp.remoteChecking) {
+                        station.page = .mcp
+                    }
                     StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("adb 命令", symbol: "terminal") { station.page = .commands }
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.clipboard.summary) {
+                    StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.clipboard.summary,
+                                              detailLineLimit: 1, needsAttention: station.clipboard.shared && station.clipboard.blocker != nil) {
                         station.page = .clipboard
                     }
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.notifications.summary) {
+                    StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.notifications.summary,
+                                              detailLineLimit: 1, needsAttention: notificationsNeedAttention) {
                         station.page = .notifications
                     }
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail) {
+                    StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
                         station.page = .files
                     }
                     StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("更多工具与设置", symbol: "slider.horizontal.3") {
+                    StationRows.navigationRow("更多工具与设置", symbol: "slider.horizontal.3", detail: settingsDetail,
+                                              detailLineLimit: 1, needsAttention: !station.health.issues.isEmpty) {
                         station.page = .more
                     }
                 }
@@ -53,70 +59,20 @@ struct MainPage: View {
         }
     }
 
-    @ViewBuilder private var healthWarnings: some View {
-        if !station.health.issues.isEmpty {
-            Group {
-                if station.health.issues.count > 1 {
-                    ScrollView { issueRows }.frame(height: 190)
-                } else { issueRows }
-            }.padding(12).elevatedGroup()
-        }
-        if let failure = station.health.failure {
-            Text(failure).font(.caption).foregroundStyle(StationPalette.caution)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if station.link.isConnected && !station.mcp.listening {
-            StationRows.navigationRow("MCP 服务尚未连通", symbol: "exclamationmark.triangle",
-                detail: "共享剪贴板与手机通知需要 MCP") { station.page = .mcp }
-                .elevatedGroup()
-        }
-        if station.notifications.connected, station.notifications.snapshot?.enabled == true,
-           (!station.notifications.receiving || station.notifications.permission != .authorized) {
-            StationRows.navigationRow("手机通知需要处理", symbol: "exclamationmark.triangle",
-                detail: station.notifications.summary) { station.page = .notifications }
-                .elevatedGroup()
-        }
-        if station.clipboard.shared, station.clipboard.blocker == nil,
-           !station.clipboard.connected, station.mcp.listening,
-           !station.health.issues.contains(where: { $0.id == "clipboard" || $0.id == "shizuku" }) {
-            StationRows.navigationRow("共享剪贴板", symbol: "exclamationmark.triangle",
-                detail: station.clipboard.summary) { station.page = .clipboard }
-                .elevatedGroup()
-        }
+    private var notificationsNeedAttention: Bool {
+        if station.health.issues.contains(where: { $0.destination == "notifications" }) { return true }
+        guard station.notifications.connected, let snapshot = station.notifications.snapshot, snapshot.enabled else { return false }
+        return !snapshot.accessGranted || snapshot.selectedCount == 0 || !snapshot.listenerConnected
+            || (station.notifications.receiving && station.notifications.permission != .authorized)
     }
 
-    private var issueRows: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(station.health.issues) { issue in
-                    Button { openIssue(issue) } label: {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundStyle(StationPalette.caution).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(issue.title).font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(StationPalette.caution)
-                                Text(issue.detail).font(.caption).foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text(issue.destination == "permissions" && station.link.serial != nil
-                                     ? "打开手机权限页" : "查看处理方法")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "chevron.right").font(.caption)
-                                .foregroundStyle(.secondary).accessibilityHidden(true)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                }
-            }
-    }
-
-    private func openIssue(_ issue: DeviceIssue) {
-        switch issue.destination {
-        case "permissions": station.setup.openPermissions(serial: station.link.serial)
-        case "clipboard": station.page = .clipboard
-        case "notifications": station.page = .notifications
-        case "remoteRelay": station.page = .remoteRelay
-        default: station.page = .mcp
+    private var settingsDetail: String {
+        if !station.health.issues.isEmpty { return "\(station.health.issues.count) 项需要处理" }
+        if station.health.failure != nil { return "手机状态暂未确认" }
+        if station.remoteControls.failure != nil || (station.remoteControls.reading != nil && station.remoteControls.reason != nil) {
+            return "查看远程控制状态"
         }
+        return "权限、应用更新与设置"
     }
 
     private var recentFilesDetail: String {
@@ -137,8 +93,8 @@ struct MainPage: View {
                 station.screen.isMirroring ? station.screen.stopMirror() : station.screen.startMirror()
             }
             ActionTile(title: "截取画面", symbol: "camera", active: false,
-                       tint: StationPalette.connected, enabled: station.canOperate) {
-                station.screen.screenshot()
+                       tint: StationPalette.connected, enabled: station.canScreenshot) {
+                station.screenshot()
             }
             ActionTile(
                 title: station.screen.isRecording
@@ -155,10 +111,10 @@ struct MainPage: View {
 
     private var controlGroup: some View {
         VStack(spacing: 0) {
-            StationRows.toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canOperate)
+            StationRows.toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
             StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
-            StationRows.toggleRow("手电筒", symbol: station.torch.torchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                                  isOn: torchBinding, enabled: station.canOperate || station.torch.torchBeat)
+            StationRows.toggleRow("手电筒", symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
+                                  isOn: torchBinding, enabled: station.canTorch || station.torch.torchBeat)
             StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
             StationRows.toggleRow("灯光跟随声音", symbol: "waveform",
                                   subtitle: "跟随这台 Mac 正在播放的声音",
@@ -249,11 +205,11 @@ struct MainPage: View {
     }
 
     private var stayAwakeBinding: Binding<Bool> {
-        Binding(get: { station.link.stayAwake }, set: { station.link.setStayAwake($0) })
+        Binding(get: { station.link.serial != nil ? station.link.stayAwake : station.remoteControls.stayAwake }, set: { station.setStayAwake($0) })
     }
 
     private var torchBinding: Binding<Bool> {
-        Binding(get: { station.torch.torchOn }, set: { station.torch.setTorch($0) })
+        Binding(get: { station.link.serial != nil || station.torch.isBeating ? station.torch.torchOn : station.remoteControls.torchOn }, set: { station.setTorch($0) })
     }
 
     private var beatBinding: Binding<Bool> {

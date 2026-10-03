@@ -110,6 +110,7 @@ public final class FileMcpService extends Service {
     @Override
     public void onDestroy() {
         SharedClipboard.close();
+        ShizukuTorch.close();
         listening = false;
         publishListening(false);
         McpHttp running = server;

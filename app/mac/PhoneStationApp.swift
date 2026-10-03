@@ -224,10 +224,13 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
 
 extension PhoneStationApp: NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
+        station.remoteControls.monitoring = true
+        station.remoteControls.refresh()
         installDismissMonitors()
     }
 
     func popoverDidClose(_ notification: Notification) {
+        station.remoteControls.monitoring = false
         removeDismissMonitors()
         station.files.dismissPreview()
         station.page = .main

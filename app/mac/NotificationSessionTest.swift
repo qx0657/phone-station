@@ -127,6 +127,15 @@ enum NotificationSessionTest {
         pausedIcon.iconWaiting?.resume(returning: Data("{\"available\":false}".utf8))
         try? await Task.sleep(nanoseconds: 20_000_000)
         expect(pausedIcon.delivered.isEmpty, "pausing during icon fetch suppresses the late banner")
+        let remote = Fake(), remoteSession = remote.session()
+        remoteSession.remote = { true }
+        await tick(remoteSession)
+        let completed = remote.calls.count
+        remoteSession.refresh(background: true)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(remote.calls.count == completed, "remote background notification polls wait after the prior response")
+        await tick(remoteSession)
+        expect(remote.calls.count > completed, "explicit refresh is not delayed by the background cooldown")
         print("Mac 手机通知权限、去重、暂停和断线恢复通过")
     }
     static func expect(_ value: Bool, _ message: String) { if !value { fatalError(message) } }

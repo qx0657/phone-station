@@ -1,6 +1,6 @@
 ---
 name: phone-mcp
-description: 连接 Android 手机上「手机工位」的 MCP，使用 adb 本地通道或自行配置并配对的远程通道。读取或修改内部存储里的普通文件，查看剩余空间和手机状态，用系统查看器打开文件，开关保持亮屏，发一条会话提醒，读取、写入或双向共享剪贴板，通过已授权的 Shizuku 执行远程 shell，或上传 APK 安装升级、在 AI 修改需求后远程更新手机工位。用户要操作手机文件、远程执行命令、安装更新 APK 或要这些手机侧动作时使用。截取当前画面用 scripts/screenshot.sh，图库里已有的截图走 screenshot-cleanup。
+description: 连接 Android 手机上「手机工位」的 MCP，使用 adb 本地通道或自行配置并配对的远程通道。读取或修改普通文件、查看空间与状态、打开文件、开关保持亮屏、远程截屏和手电筒、发提醒、共享剪贴板，通过已授权的 Shizuku 执行远程 shell，或上传 APK 安装升级、在 AI 修改需求后远程更新手机工位。用户要这些手机侧动作时使用。本地截取当前画面用 scripts/screenshot.sh；远程控件见本 skill，图库里已有的截图走 screenshot-cleanup。
 ---
 
 # 手机工位 MCP
@@ -62,3 +62,13 @@ curl -sS -X POST "$MCP" \
 安装入口支持一个 APK 或完整 base + split 集合，保留数据升级，不自动卸载解决签名冲突。记录输出的安装任务编号。更新手机工位自身会短暂断线，助手会启动后台服务并默认打开主页；只恢复后台用 `install-apk.sh --no-open <APK>`。`verified` 只代表 APK 内容一致，`completed: true` 才能报告整个升级与自动恢复完成。启动失败或未确认时，即使安装成功也要单独说明，不因后来手动打开就声称自动恢复通过。脚本仅通过原任务查询等待重连；结果未知时先 `./scripts/install-apk.sh --status <任务编号>`，不得重复安装。远程不可用时 `--remote` 会停止；没有既有远程入口的首次安装才使用原 adb 流程。长说明在 `docs/remote-ops.md`。
 
 电脑上的路径不能当成手机路径。
+
+## 远程控件
+
+用户要求远程截屏、保持亮屏或手电筒时，先只读调用 `station_controls_status`，核实 PGT-AN20、各项可用状态及原因。保持亮屏复用 `station_stay_awake`；截图和手电筒需要已经启动并授权的 Shizuku，不自动申请权限或启动它。
+
+- 截屏：给 `station_screen_capture` 一个新的 UUID `requestId`。按返回的 path、size、targetVersion 分块读取 PNG，核对完整大小与 SHA-256 后保存到 Mac；下载完成后调用 `station_screen_capture_release` 清理同一编号的临时截图。单次最多 32 MiB。丢失应答时先查 `Download/手机工位/.captures/<UUID>.png`，不重拍、不复用编号。安全界面仍可能是黑屏。
+- 手电筒：`station_torch` 的 `on` 为 true 开灯、false 关灯。手机端独立的 Shizuku UserService 持续持灯；普通远程 shell 不保留后台进程，不能照搬 `torch.sh` 的后台命令。手机工位或 Shizuku 停止、升级后灯会灭，重连不自动重开。
+- 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。投屏、录屏和灯光跟随声音仍要求本机 adb。
+
+实现与验证见 `docs/remote-controls.md`。

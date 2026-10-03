@@ -86,7 +86,11 @@ enum ClipboardSessionTest {
         fake.copy("copy-3"); session.refresh()
         precondition(session.mac.text == "copy-3", "latest copy stays current during a delayed request")
         fake.time = 103; session.refresh()
-        precondition(!session.connected && session.summary == "正在核对剪贴板", "a stalled exchange cannot claim sync is ready")
+        precondition(session.connected && !session.checking && session.summary == "自动双向同步",
+                     "ordinary latency must not disconnect a confirmed clipboard session")
+        fake.time = 107; session.refresh()
+        precondition(session.connected && session.checking && session.summary == "同步响应较慢",
+                     "a slow reply is distinguished from a failed exchange")
         fake.holdState = true
         fake.time = 112
         fake.exchangeWait!.resume(throwing: NSError(domain: "handover", code: 1)); fake.exchangeWait = nil
@@ -145,6 +149,8 @@ enum ClipboardSessionTest {
         precondition(configuration["shared"] as? Bool == true && configuration["automatic"] as? Bool == true,
                      "the single share switch always enables automatic syncing")
         await imageTests()
+        await remotePollingTests()
+        await schedulerTests()
         print("ClipboardSessionTest passed")
     }
     @MainActor
@@ -171,6 +177,9 @@ enum ClipboardSessionTest {
         precondition(fake.imageReads == 1 && fake.calls.last!.1["macImage"] == nil, "idle heartbeat never uploads pixels again")
         fake.holdExchange = true; fake.local.count += 1
         session.refresh(); await waitFor { fake.exchangeWait != nil }
+        fake.time += 20; session.refresh()
+        precondition(session.connected && !session.checking && session.summary == "自动双向同步",
+                     "an image upload uses its own longer latency budget")
         let reads = fake.imageReads
         fake.exchangeWait!.resume(throwing: NSError(domain: "image-result-unknown", code: 1)); fake.exchangeWait = nil
         await waitFor { !session.connected }
@@ -194,5 +203,41 @@ enum ClipboardSessionTest {
         oldSession.refresh(); await waitFor { oldSession.connected }
         precondition(oldPhone.calls.last!.1["macKind"] as? String == "unsupported" && oldPhone.imageReads == 0,
                      "old phone versions receive the existing unsupported kind")
+    }
+    @MainActor static func remotePollingTests() async {
+        let fake = Fake(), session = fake.session()
+        session.remote = { true }
+        session.refresh(); await waitFor { session.connected }
+        let count = fake.calls.count
+        session.refresh()
+        for _ in 0..<100 { await Task.yield() }
+        precondition(fake.calls.count == count, "remote idle polls wait after completing the last request")
+        fake.copy("new-copy")
+        session.refresh(); await waitFor { fake.calls.count > count }
+        precondition(fake.calls.last!.1["macText"] as? String == "new-copy", "new copies bypass the idle delay")
+    }
+    @MainActor static func schedulerTests() async {
+        let queue = StationRPCQueue()
+        var order: [String] = []
+        var release: CheckedContinuation<Data, Error>?
+        let first = Task {
+            try await queue.run(priority: 2) {
+                order.append("first")
+                return try await withCheckedThrowingContinuation { release = $0 }
+            }
+        }
+        await waitFor { release != nil }
+        let diagnostic = Task { try await queue.run(priority: 2) { order.append("diagnostic"); return Data() } }
+        while await queue.waitingCount != 1 { await Task.yield() }
+        let cancelled = Task { try await queue.run(priority: 0) { order.append("cancelled-write"); return Data() } }
+        while await queue.waitingCount != 2 { await Task.yield() }
+        cancelled.cancel()
+        do { _ = try await cancelled.value; preconditionFailure("queued cancellation must throw") } catch {}
+        let action = Task { try await queue.run(priority: 0) { order.append("action"); return Data() } }
+        while await queue.waitingCount != 2 { await Task.yield() }
+        precondition(order == ["first"], "queue time must not start the next request's transport")
+        release!.resume(returning: Data())
+        _ = try! await first.value; _ = try! await action.value; _ = try! await diagnostic.value
+        precondition(order == ["first", "action", "diagnostic"], "user action precedes diagnostics; cancelled writes never execute")
     }
 }

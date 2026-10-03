@@ -22,7 +22,7 @@ App 是菜单栏辅助程序（`LSUIElement`），没有 Dock 图标。应用内
 
 macOS 26 的控制中心另外按 bundle id 记一份允许名单。它在 `~/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist` 的 `trackedApplications` 里，值本身又是一份二进制 plist，由 cfprefsd 缓存。直接改这个文件会被缓存写回去。2026-09-30 这台机器上，`com.qx0657.phonestation` 自己的记录是 `isAllowed` true，但 `com.openai.codex` 的记录是 `isAllowed` false，并且它的 `menuItemLocations` 里还有 `com.qx0657.phonestation`。控制中心日志会出现 `Moving host to blocked list`，窗口停在菜单栏外面（例如 `{{0, -17}}`），进程仍在。把本 App 的 bundle id 从这份已禁用记录的 `menuItemLocations` 里去掉，经带有 `group.com.apple.controlcenter` application-group 权限的进程用 `UserDefaults` 写回，再重启控制中心，图标才出现在菜单栏上。其他 App 的 `isAllowed` 保持原样。
 
-状态读取使用 `adb devices -l`，按完整序列号解析（包括 mDNS 名称里的空格），有重复记录时按 `ro.serialno` 核实是否同一台设备；确认同一台才合并显示，同时由 `connect.sh` 整理重复通道。真正有多台设备时停用 adb 操作。首次识别还会读 `ro.product.model`。只允许 `PGT-AN20` 执行设备操作。其他型号、无法识别型号、多台在线或等待 USB 授权时，adb 设备操作停用；远程也不可用时，面板显示原因并用未连接图标。无线连接既可能以 `IP:端口`、也可能以 `._adb-tls-connect._tcp` mDNS 名称出现在 adb 序列号里；这台 PGT-AN20 当前是后一种。打开面板时会重新读连接、息屏时间、闪光灯状态和电量，这些读取不会改设置，也不会触发截屏、投屏、录屏或手机提醒。电量来自 `dumpsys battery` 的 `level`、`scale` 和 `status`；`status` 为 2 时算充电中。菜单栏那次定时检查只决定图标，不代替打开面板时的这几项读取。MCP 状态通过 `mcp.sh watch` 接收网关推送；远程最近 6 秒有成功应答才同步为首页和菜单栏的已连接，长操作没有新应答时显示确认中；只返回地址和令牌时还不能确认远程在线，启动成功后会再读一次状态。投屏、录屏、闪光灯和 adb 命令仍要求已验证的 adb 序列号，远程在线只改变连接显示。
+状态读取使用 `adb devices -l`，按完整序列号解析（包括 mDNS 名称里的空格），有重复记录时按 `ro.serialno` 核实是否同一台设备；确认同一台才合并显示，同时由 `connect.sh` 整理重复通道。真正有多台设备时停用 adb 操作。首次识别还会读 `ro.product.model`。只允许 `PGT-AN20` 执行设备操作。其他型号、无法识别型号、多台在线或等待 USB 授权时，adb 设备操作停用；远程也不可用时，面板显示原因并用未连接图标。无线连接既可能以 `IP:端口`、也可能以 `._adb-tls-connect._tcp` mDNS 名称出现在 adb 序列号里；这台 PGT-AN20 当前是后一种。打开面板时会重新读连接、息屏时间、闪光灯状态和电量，这些读取不会改设置，也不会触发截屏、投屏、录屏或手机提醒。电量来自 `dumpsys battery` 的 `level`、`scale` 和 `status`；`status` 为 2 时算充电中。菜单栏那次定时检查只决定图标，不代替打开面板时的这几项读取。MCP 状态通过 `mcp.sh watch` 接收网关推送；远程最近 6 秒有成功应答才同步为首页和菜单栏的已连接，长操作没有新应答时显示确认中；只返回地址和令牌时还不能确认远程在线，启动成功后会再读一次状态。投屏、录屏、灯光跟随声音和 adb 命令要求已验证的 adb 序列号。截屏、保持亮屏和手电筒在只有远程连接时使用 MCP，按机型、权限和实际状态分别启用，见 [remote-controls.md](remote-controls.md)。
 
 主页在「连接与配对」和「更多工具与设置」之间有「adb 命令」。一条命令是名称，加上 `adb -s 序列号` 后面的参数。点一行就在当前这台已验证的手机上执行；铅笔进入编辑。参数在 App 里按引号拆开，交给 `adb` 的参数数组，不经过本机 shell，所以不会展开 `$` 和通配符。管道写在一对引号里才会在手机上执行，例如 `shell "dumpsys window | grep mCurrentFocus"`。参数里不要再写 `-s` 或 `--serial`。超过 15 秒会停，输出只留末尾 12 行，可以复制。列表存在本机偏好 `adbCommands.v1`。第一次使用放了「前台应用」和「唤醒」；删掉之后不会再自动加回来。电量不在这条列表里。「在终端中打开 shell」启动「终端」，用 AppleScript 的 `quoted form` 把 adb 路径和序列号放进 `adb -s <序列号> shell`。未连接或未验证时，执行和打开终端变淡并且不能点；编辑和新建仍然可以。
 
@@ -51,3 +51,13 @@ macOS 26 的控制中心另外按 bundle id 记一份允许名单。它在 `~/Li
 2026-10-02 的剪贴板版为 Mac 0.1.0 (3)，随包与实机 APK 都为 42，已安装并启动 `/Applications/手机工位.app`。主页新增「共享剪贴板」，可查看两端当前文字、手动复制和开关自动双向同步。后台交换在面板收起后继续，退出 App 时停止；使用 MCP 网关自动选择的本地或远程通道。开启状态由手机保存，Mac 重启后读取，同步首次建立基线。当前内容不写本机偏好；复制 MCP Authorization 时附带 ConcealedType，防止它自动同步。实测与边界见 [clipboard.md](clipboard.md)。旧 Mac App 保留在忽略的 `build/.phone-station/backups/clipboard-before-42.app`。
 
 Mac 0.1.0 (10) 与 Android 50 将共享剪贴板改为单一开关和自动同步状态页，移除两端正文与手动复制按钮；手机入口移到首页。Mac 显示本次运行中最近一次实际同步的方向与时间，基线核对和心跳不计为同步。当前流程与验证见 [clipboard.md](clipboard.md)。
+
+Mac 0.1.0 (14) 与 Android 58 为远程首页接通截屏、保持亮屏和手电筒。两端构建、远程实机调用与安装后 Mac 首页操作已验证，步骤和结果见 [remote-controls.md](remote-controls.md)。
+
+Mac 0.1.0 (15) 移除首页顶部随后台状态增删的剪贴板、通知、MCP 和权限提示卡。状态只更新既有功能行的单行摘要，长摘要截断并可悬停查看；权限问题在「更多工具与设置」显示待处理项数，详情与原处理动作移到该页，另保留固定「手机权限」入口。远程控制检查的原因也放到该页，后台核对不挤动首页操作区。原生 `NSHostingView` 模拟就绪、剪贴板核对、权限阻塞、诊断失败、长摘要、MCP 离线和远程控制异常七种状态，浅色与深色共 14 组：首页均为 612.5pt，操作块顶部均为 62pt，开关组顶部均为 172.5pt。修改前剪贴板核对使操作块下移 56pt，两项权限诊断下移 226pt。布局采样不读取真实剪贴板、不修改手机权限，记录在忽略的 `build/.phone-station/home-stability-review/`；完整 Mac 构建及现有测试通过。
+
+2026-10-03 已替换并启动 `/Applications/手机工位.app` 的 15 版，签名、版本和安装后的可执行文件与构建包一致。旧 App 保留在忽略的 `build/.phone-station/backups/home-stability-before-15.app`。启动日志确认菜单栏入口位于可见区域，连接状态恢复为已连接；网关只读核实为远程在线且已验证。本次未安装手机应用、未更改手机权限或剪贴板设置。CUA 获取已安装面板两次超时，未完成新版实机点击验证；上述布局与状态切换验证来自不使用真实手机数据的原生 fixture。
+
+Mac 0.1.0 (16) 整改剪贴板误报恢复和远程请求拥塞：App 统一调度 MCP 请求，超时从实际发出开始计时；正常排队保持同步状态，真实慢响应、失败与断线分开。网关忙碌导致确认过期时保留发送通道，实际离线仍停用。远程剪贴板与通知空闲轮询等待上次完成后至少 2 秒，新 Mac 复制立即进入调度；远程健康诊断降到完成后至少 15 秒。远程控制只在面板显示期间定时核实，修正了每次状态/RTT 更新都会额外发起控制检查的问题。可取消队列、真实 HTTP 排队及恢复回归见 [clipboard.md](clipboard.md#mac-16-的请求调度与慢响应)。
+
+2026-10-03 已安装启动 Mac 16，并保留原有签名的钥匙串助手；构建、安装包签名、代码与版本核对通过，旧 App 保留在忽略的 `build/.phone-station/backups/clipboard-scheduling-before-16.app`。安装后约 90.8 秒、每 2 秒的 46 次本机网关采样全部为远程在线且已验证，未采到确认中；新版四个调度日志窗口累计完成 120 个 App 请求、失败 0、最多 1 个等待请求，没有剪贴板恢复循环或超过 6 秒的慢响应日志。这是短时实机后台观察，不代表所有未来网络环境；原始状态采样在忽略的 `build/.phone-station/clipboard-scheduling-review/live-status.json`。本次不改变手机权限、共享设置或真实剪贴板，不安装手机 APK。

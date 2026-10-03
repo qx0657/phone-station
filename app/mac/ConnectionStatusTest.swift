@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import CryptoKit
 
 private final class ProbeSequence: @unchecked Sendable {
     let started = DispatchSemaphore(value: 0)
@@ -48,6 +50,11 @@ struct ConnectionStatusTest {
         precondition(!McpStatus("off").gatewayReady)
         let stale = McpStatus("{\"ready\":true,\"mode\":\"remote\",\"localOnline\":false,\"remoteOnline\":true,\"remoteVerified\":false,\"remoteChecking\":true,\"remoteConfigured\":true}")
         precondition(!stale.listening && !stale.remoteConnected && stale.remoteChecking)
+        let busy = McpStatus("{\"ready\":true,\"mode\":\"remote\",\"localOnline\":false,\"remoteOnline\":true,\"remoteVerified\":false,\"remoteChecking\":true,\"endpoint\":\"\(endpoint)\",\"token\":\"test\"}")
+        precondition(!busy.listening && !busy.remoteConnected && busy.requestAvailable && busy.endpoint == endpoint,
+                     "a busy relay retains its dispatch route without claiming a fresh connection")
+        let expired = McpStatus("{\"ready\":true,\"mode\":\"remote\",\"localOnline\":false,\"remoteOnline\":true,\"remoteVerified\":false,\"remoteChecking\":false,\"endpoint\":\"\(endpoint)\",\"token\":\"test\"}")
+        precondition(!expired.requestAvailable && expired.endpoint.isEmpty, "stale idle and unavailable routes are not dispatched")
         for output in ["off", "", "\(endpoint)\nchannel=offline relay=online"] {
             let unavailable = McpStatus(output)
             precondition(!unavailable.listening && !unavailable.remoteConnected)
@@ -92,6 +99,70 @@ struct ConnectionStatusTest {
         sequence.release.signal()
         await probe.value
         precondition(racing.serial == nil && enabledSerials.isEmpty, "断线事件后的旧探测不能重新启用操作")
+        await remoteControlsTest()
         print("ConnectionStatusTest ok")
+    }
+
+    @MainActor static func remoteControlsTest() async {
+        let feedback = StationFeedback()
+        var route: (String, String)? = ("test-endpoint", "test-token")
+        var model = "PGT-AN20"
+        var torchOn = false
+        var writes = 0
+        var reads = 0
+        let controls = RemoteControlsSession(feedback: feedback, startTimer: false, rpc: { _, _, name, args in
+            if name == "station_torch" {
+                writes += 1
+                torchOn = args["on"] as! Bool // 操作已生效，但应答丢失。
+                throw ClipboardRPC.Failure(message: "response lost")
+            }
+            precondition(name == "station_controls_status")
+            reads += 1
+            return try JSONSerialization.data(withJSONObject: ["model": model, "verified": true,
+                "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
+                "screenshotAvailable": true, "screenshotReason": "",
+                "torch": ["on": torchOn, "available": true, "reason": ""]])
+        })
+        controls.route = { route }
+        controls.refresh()
+        for _ in 0..<100 where controls.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(controls.canCapture && controls.canStayAwake && controls.canTorch && controls.stayAwake)
+        controls.setTorch(true)
+        precondition(!controls.canCapture, "忙时不得重复发起操作")
+        for _ in 0..<100 where feedback.activity != nil || reads < 2 { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(writes == 1 && controls.torchOn && feedback.notice?.contains("结果可能已生效") == true,
+                     "丢失应答后只能读取实际状态，不能重放开关")
+        route = nil
+        precondition(!controls.canCapture && !controls.canTorch, "断线立即禁用控件")
+        controls.refresh()
+        route = ("another-endpoint", "another-token")
+        model = "unsupported"
+        controls.refresh()
+        for _ in 0..<100 where controls.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(!controls.canCapture && !controls.canStayAwake && !controls.canTorch,
+                     "服务器字段不能为未验证型号启用操作")
+
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 4, bitsPerPixel: 32)!
+        bitmap.setColor(.red, atX: 0, y: 0)
+        let png = bitmap.representation(using: .png, properties: [:])!
+        let id = UUID().uuidString.lowercased()
+        let info = RemoteCapture.Info(requestId: id, path: "/storage/emulated/0/Download/手机工位/.captures/\(id).png",
+            size: png.count, targetVersion: "one", sha256: SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined())
+        try! RemoteCapture.validate(info, id: id)
+        try! RemoteCapture.verify(png, info: info)
+        let page = RemoteCapture.Page(offset: 0, length: png.count,
+                                      hex: png.map { String(format: "%02x", $0) }.joined(), targetVersion: "one")
+        precondition(try! RemoteCapture.decode(page, info: info, offset: 0) == png)
+        var badPage = page; badPage.targetVersion = "changed"
+        do { _ = try RemoteCapture.decode(badPage, info: info, offset: 0); preconditionFailure("changed file") } catch {}
+        badPage = page; badPage.length = 0
+        do { _ = try RemoteCapture.decode(badPage, info: info, offset: 0); preconditionFailure("empty page") } catch {}
+        var badInfo = info; badInfo.path = "/storage/emulated/0/Download/another.png"
+        do { try RemoteCapture.validate(badInfo, id: id); preconditionFailure("wrong path") } catch {}
+        var broken = png; broken[broken.count - 1] ^= 1
+        do { try RemoteCapture.verify(broken, info: info); preconditionFailure("corrupt PNG") } catch {}
+        print("RemoteControls tests ok")
     }
 }

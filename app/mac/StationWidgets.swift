@@ -78,19 +78,22 @@ enum StationRows {
     }
 
     static func navigationRow(_ title: String, symbol: String, detail: String? = nil,
+                              detailLineLimit: Int? = nil, needsAttention: Bool = false,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .frame(width: 18)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                     if let detail {
                         Text(detail)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
+                            .lineLimit(detailLineLimit)
+                            .help(detail)
                     }
                 }
                 Spacer(minLength: 8)

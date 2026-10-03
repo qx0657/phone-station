@@ -63,6 +63,11 @@ CLIPBOARD_SESSION_TEST="$ROOT/build/.phone-station/clipboard-session-test"
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
   "$ROOT/app/mac/ClipboardSessionTest.swift" -o "$CLIPBOARD_SESSION_TEST"
 "$CLIPBOARD_SESSION_TEST"
+CLIPBOARD_TRANSPORT_TEST="$ROOT/build/.phone-station/clipboard-transport-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
+  "$ROOT/app/mac/ClipboardTransportTest.swift" -o "$CLIPBOARD_TRANSPORT_TEST"
+"$CLIPBOARD_TRANSPORT_TEST"
 HEALTH_TEST="$ROOT/build/.phone-station/device-health-session-test"
 "$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/DeviceHealthSession.swift" \

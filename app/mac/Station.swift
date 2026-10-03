@@ -37,6 +37,7 @@ final class Station: ObservableObject {
     let clipboard: ClipboardSession
     let notifications: NotificationSession
     let health: DeviceHealthSession
+    let remoteControls: RemoteControlsSession
     @Published var page: StationPage = .main
     private var subscriptions = Set<AnyCancellable>()
 
@@ -54,6 +55,7 @@ final class Station: ObservableObject {
         clipboard = ClipboardSession()
         notifications = NotificationSession()
         health = DeviceHealthSession()
+        remoteControls = RemoteControlsSession(feedback: feedback)
         wire()
         watch(feedback)
         watch(link)
@@ -67,6 +69,7 @@ final class Station: ObservableObject {
         watch(clipboard)
         watch(notifications)
         watch(health)
+        watch(remoteControls)
     }
 
     private func watch<Object: ObservableObject>(_ object: Object) {
@@ -77,6 +80,13 @@ final class Station: ObservableObject {
 
     var canOperate: Bool { link.serial != nil && feedback.activity == nil }
     var canStartScreen: Bool { canOperate && !screen.isMirroring && !screen.isRecording }
+    var canScreenshot: Bool { canOperate || remoteControls.canCapture }
+    var canStayAwake: Bool { canOperate || remoteControls.canStayAwake }
+    var canTorch: Bool { canOperate || remoteControls.canTorch }
+
+    func screenshot() { link.serial != nil ? screen.screenshot() : remoteControls.screenshot() }
+    func setStayAwake(_ on: Bool) { link.serial != nil ? link.setStayAwake(on) : remoteControls.setStayAwake(on) }
+    func setTorch(_ on: Bool) { link.serial != nil || torch.isBeating ? torch.setTorch(on) : remoteControls.setTorch(on) }
 
     var feedbackText: String? {
         if let activity = feedback.activity, !activity.isEmpty { return activity }
@@ -92,6 +102,7 @@ final class Station: ObservableObject {
         }
         files.refresh()
         health.refresh()
+        remoteControls.refresh()
         Task { await link.probe(readingControls: true) }
     }
 
@@ -113,18 +124,26 @@ final class Station: ObservableObject {
     }
 
     private func wire() {
+        remoteControls.route = { [weak self] in
+            guard let self, self.link.serial == nil, self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
+        remoteControls.onFinishedCapture = { [weak self] in self?.files.refresh() }
         health.route = { [weak self] in
-            guard let self, self.mcp.listening else { return nil }
+            guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
         clipboard.route = { [weak self] in
-            guard let self, self.mcp.listening else { return nil }
+            guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
         notifications.route = { [weak self] in
-            guard let self, self.mcp.listening else { return nil }
+            guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
+        clipboard.remote = { [weak self] in self?.mcp.channel == "remote" }
+        notifications.remote = { [weak self] in self?.mcp.channel == "remote" }
+        health.remote = { [weak self] in self?.mcp.channel == "remote" }
         link.allow = { [weak self] in self?.canOperate ?? false }
         screen.allow = { [weak self] in self?.canOperate ?? false }
         screen.allowStart = { [weak self] in self?.canStartScreen ?? false }
@@ -140,7 +159,13 @@ final class Station: ObservableObject {
             self?.mcp.noteSerial(serial)
         }
         mcp.onRemoteConnection = { [weak self] connected in
-            self?.link.noteRemoteConnection(connected)
+            guard let self else { return }
+            let changed = self.link.remoteConnected != connected
+            self.link.noteRemoteConnection(connected)
+            // RTT/status updates must not start another controls read each time.
+            if !self.mcp.requestAvailable || (changed && self.remoteControls.monitoring) {
+                self.remoteControls.refresh()
+            }
         }
         mcp.allowRemotePair = { [weak self] in self?.canOperate ?? false }
         mcp.onRemoteChecking = { [weak self] checking in

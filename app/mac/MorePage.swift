@@ -46,11 +46,18 @@ struct MorePage: View {
                     .disabled(station.feedback.activity != nil)
                     .opacity(station.feedback.activity == nil ? 1 : 0.4)
                     StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
+                    StationRows.navigationRow("手机权限", symbol: "checkmark.shield",
+                                              detail: "查看手机上的权限设置") {
+                        station.setup.openPermissions(serial: station.link.serial)
+                    }
+                    StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
                     StationRows.navigationRow("关于", symbol: "info.circle", detail: "版本 \(StationRows.appVersion())") {
                         station.page = .about
                     }
                 }
                 .elevatedGroup()
+
+                phoneStatus
 
                 VStack(alignment: .leading, spacing: 6) {
                     StationRows.sectionTitle("本机工具")
@@ -95,6 +102,63 @@ struct MorePage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { station.login.refresh() }
+    }
+
+    @ViewBuilder private var phoneStatus: some View {
+        if !station.health.issues.isEmpty || station.health.failure != nil || station.remoteControls.reason != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                StationRows.sectionTitle("手机权限与状态")
+                if !station.health.issues.isEmpty {
+                    Group {
+                        if station.health.issues.count > 1 {
+                            ScrollView { issueRows }.frame(height: 190)
+                        } else { issueRows }
+                    }.padding(12).elevatedGroup()
+                }
+                if let failure = station.health.failure {
+                    Text(failure).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if station.link.serial == nil, let reason = station.remoteControls.reason {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var issueRows: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(station.health.issues) { issue in
+                Button { openIssue(issue) } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(StationPalette.caution).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(issue.title).font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(StationPalette.caution)
+                            Text(issue.detail).font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(issue.destination == "permissions" && station.link.serial != nil
+                                 ? "打开手机权限页" : "查看处理方法")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.caption)
+                            .foregroundStyle(.secondary).accessibilityHidden(true)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(PressFadeStyle())
+            }
+        }
+    }
+
+    private func openIssue(_ issue: DeviceIssue) {
+        switch issue.destination {
+        case "permissions": station.setup.openPermissions(serial: station.link.serial)
+        case "clipboard": station.page = .clipboard
+        case "notifications": station.page = .notifications
+        case "remoteRelay": station.page = .remoteRelay
+        default: station.page = .mcp
+        }
     }
 
     private var loginBinding: Binding<Bool> {

@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class McpSession: ObservableObject {
     @Published private(set) var listening = false
+    @Published private(set) var requestAvailable = false
     @Published private(set) var endpoint = ""
     @Published private(set) var token = ""
     @Published private(set) var channel = ""
@@ -270,6 +271,7 @@ final class McpSession: ObservableObject {
         if token != status.token { token = status.token }
         if channel != status.channel { channel = status.channel }
         if listening != status.listening { listening = status.listening }
+        if requestAvailable != status.requestAvailable { requestAvailable = status.requestAvailable }
         if gatewayReady != status.gatewayReady { gatewayReady = status.gatewayReady }
         let local = status.localOnline ?? (status.channel == "local")
         if localOnline != local { localOnline = local }

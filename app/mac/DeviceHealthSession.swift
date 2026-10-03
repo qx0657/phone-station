@@ -13,8 +13,10 @@ final class DeviceHealthSession: ObservableObject {
     @Published private(set) var issues: [DeviceIssue] = []
     @Published private(set) var failure: String?
     var route: () -> (String, String)? = { nil }
+    var remote: () -> Bool = { false }
     private var inFlight = false
     private var timer: Timer?
+    private var nextPoll = Date.distantPast
     private let rpc: (String, String, String, [String: Any]) async throws -> Data
     private struct Report: Decodable {
         struct Health: Decodable { var issues: [DeviceIssue] }
@@ -25,18 +27,19 @@ final class DeviceHealthSession: ObservableObject {
         self.rpc = rpc ?? ClipboardRPC.call
         if startTimer {
             let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.refresh() }
+                Task { @MainActor in self?.refresh(background: true) }
             }
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
         }
     }
-    func refresh() {
-        guard let (endpoint, token) = route() else { issues = []; failure = nil; return }
+    func refresh(background: Bool = false) {
+        guard let (endpoint, token) = route() else { issues = []; failure = nil; nextPoll = .distantPast; return }
+        guard !background || Date() >= nextPoll else { return }
         guard !inFlight else { return }
         inFlight = true
         Task {
-            defer { inFlight = false }
+            defer { inFlight = false; nextPoll = Date().addingTimeInterval(remote() ? 15 : 3) }
             do {
                 let data = try await rpc(endpoint, token, "station_device_status", [:])
                 guard let current = route(), current.0 == endpoint, current.1 == token else { return }

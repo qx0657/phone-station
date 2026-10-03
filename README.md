@@ -1,6 +1,6 @@
 # 手机工位
 
-电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。闪光灯和投屏走 adb；文件等 MCP 功能还能经自行配置并配对的远程通道访问。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
+电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。Mac App 的截屏、保持亮屏和手电筒，以及文件等 MCP 功能，还能经自行配置并配对的远程通道访问。投屏、录屏和灯光跟随声音仍走 adb。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
 
 章节按事情排。还没有 `adb`，或还没配对，先看 [准备](#准备) 和 [连接](#连接)。
 
@@ -259,7 +259,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 ## 屏幕
 
-投屏、录屏、截取当前画面都用 [scrcpy](https://github.com/Genymobile/scrcpy)。菜单栏主页上有同样的入口。三个脚本都会先走 `connect.sh`。参数可以接在命令后面，原样传给 scrcpy。选项以 scrcpy 自己的说明为准。
+投屏和录屏用 [scrcpy](https://github.com/Genymobile/scrcpy)，截屏脚本用 adb 的 `screencap`。菜单栏主页上有同样的入口。这三个脚本都会先走 `connect.sh`；投屏与录屏的额外参数原样传给 scrcpy。Mac App 在只有远程连接时，也可截屏、保持亮屏和开关手电筒，见 [远程控件](docs/remote-controls.md)。
 
 窗口开着时，scrcpy 的 `--stay-awake` 会让充电中的手机暂时不熄屏。关掉窗口之后，息屏仍按系统设置。要一直亮着，用 [保持亮屏](#保持亮屏)。
 
@@ -289,7 +289,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 ./scripts/screenshot.sh ~/Pictures/scrcpy/demo.png
 ```
 
-保存 PNG，并用预览打开。默认目录是 `~/Pictures/scrcpy/`。
+保存 PNG，并用预览打开。默认目录是 `~/Pictures/scrcpy/`。Mac App 的「截取画面」在无 adb 时使用远程 MCP：手机需要运行并授权 Shizuku、允许所有文件访问；传回的 PNG 会校验后保存到同一 Mac 目录，并出现在「最近文件」。
 
 这是电脑这一次抓下来的画面。手机相册里已经存着的截图，见 [图库里的截图](#图库里的截图)。
 
@@ -300,7 +300,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 ./scripts/stay-awake.sh off
 ```
 
-`on` 把息屏时间设为 `2147483647` 毫秒（约 24.8 天），充电（交流电、USB、无线充）时不熄屏。`off` 恢复为 60 秒息屏，充电也按系统超时。这是系统设置，不是投屏窗口附带的那一次常亮。
+`on` 把息屏时间设为 `2147483647` 毫秒（约 24.8 天），充电（交流电、USB、无线充）时不熄屏。`off` 恢复为 60 秒息屏，充电也按系统超时。这是系统设置，不是投屏窗口附带的那一次常亮。Mac App 的同名开关也支持远程连接，沿用手机已授予的写系统设置权限，不要求 Shizuku。
 
 ## 准备
 
