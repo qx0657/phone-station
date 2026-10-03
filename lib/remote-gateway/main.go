@@ -25,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -37,6 +38,8 @@ const (
 	localTimeout  = time.Second
 	remoteFresh   = 6 * time.Second
 )
+
+var rpcIntegerID = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
 type config struct {
 	GatewayToken   string `json:"gatewayToken"`
@@ -259,7 +262,7 @@ func runRemoteCLI(value config, input io.Reader, output io.Writer,
 		ID      json.RawMessage `json:"id"`
 	}
 	if json.Unmarshal(body, &request) != nil || request.JSONRPC != "2.0" ||
-		request.Method == "" || len(request.ID) == 0 || string(request.ID) == "null" {
+		request.Method == "" || !validRPCID(request.ID) {
 		return errors.New("需要带 id 的 JSON-RPC 2.0 请求")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -632,6 +635,10 @@ func ensureConfig() (config, error) {
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !allowedLoopbackRequest(r) {
+		writeMCPError(w, nil, http.StatusForbidden, "Host 或 Origin 不允许")
+		return
+	}
 	value, err := g.config()
 	if err != nil {
 		writeMCPError(w, nil, http.StatusInternalServerError, "网关配置不可用")
@@ -649,6 +656,15 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.URL.Path == "/mcp" && r.Method != http.MethodPost {
+		if !authorized(r, value.GatewayToken) {
+			writeMCPError(w, nil, http.StatusUnauthorized, "需要本机网关令牌")
+			return
+		}
+		w.Header().Set("Allow", "POST")
+		writeMCPError(w, nil, http.StatusMethodNotAllowed, "本服务不提供 MCP SSE 流，请使用 POST")
+		return
+	}
 	if r.Method != http.MethodPost || (r.URL.Path != "/mcp" && r.URL.Path != "/__remote-call") {
 		writeMCPError(w, nil, http.StatusNotFound, "unknown endpoint")
 		return
@@ -660,6 +676,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r.Body, maxBody)
 	if err != nil {
 		writeMCPError(w, nil, http.StatusRequestEntityTooLarge, "请求过大或无法读取")
+		return
+	}
+	if !utf8.Valid(body) || !json.Valid(body) {
+		writeRPCError(w, nil, http.StatusOK, -32700, "请求必须是 UTF-8 JSON")
 		return
 	}
 	if r.URL.Path == "/__remote-call" {
@@ -685,6 +705,64 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "手机暂时没有可用通道")
 	}
+}
+
+func loopbackAuthority(authority string) (*url.URL, bool) {
+	if authority == "" || strings.ContainsAny(authority, "/?#@\\") || strings.HasSuffix(authority, ":") {
+		return nil, false
+	}
+	parsed, err := url.Parse("http://" + authority)
+	if err != nil || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "127.0.0.1", "localhost", "::1":
+	default:
+		return nil, false
+	}
+	if parsed.Port() != "" {
+		port, err := strconv.Atoi(parsed.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return nil, false
+		}
+	}
+	return parsed, true
+}
+func boundaryPort(address *url.URL) string {
+	if address.Port() == "" {
+		return "80"
+	}
+	value, _ := strconv.Atoi(address.Port())
+	return strconv.Itoa(value)
+}
+func allowedLoopbackRequest(r *http.Request) bool {
+	target, valid := loopbackAuthority(r.Host)
+	if !valid {
+		return false
+	}
+	origins := r.Header.Values("Origin")
+	if len(origins) == 0 {
+		return true
+	}
+	if len(origins) != 1 || strings.ContainsAny(origins[0], "?#") {
+		return false
+	}
+	source, err := url.Parse(origins[0])
+	if err != nil || source.Scheme != "http" || source.User != nil || source.Path != "" || source.RawQuery != "" || source.Fragment != "" {
+		return false
+	}
+	checked, valid := loopbackAuthority(source.Host)
+	return valid && boundaryPort(checked) == boundaryPort(target)
+}
+func validRPCID(id json.RawMessage) bool {
+	if len(id) == 0 {
+		return false
+	}
+	if id[0] == '"' {
+		var text string
+		return json.Unmarshal(id, &text) == nil
+	}
+	return rpcIntegerID.Match(id)
 }
 
 func (g *gateway) monitor() {
@@ -963,13 +1041,29 @@ func (g *gateway) localRequestFailed(parent context.Context, w http.ResponseWrit
 }
 
 func safeToReplay(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var batch []json.RawMessage
+		if json.Unmarshal(body, &batch) != nil || len(batch) == 0 || len(batch) > 64 {
+			return false
+		}
+		for _, item := range batch {
+			value := bytes.TrimSpace(item)
+			if len(value) == 0 || value[0] == '[' || !safeToReplay(item) {
+				return false
+			}
+		}
+		return true
+	}
 	var request struct {
-		Method string `json:"method"`
-		Params struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  struct {
 			Name string `json:"name"`
 		} `json:"params"`
 	}
-	if json.Unmarshal(body, &request) != nil {
+	if json.Unmarshal(body, &request) != nil || request.JSONRPC != "2.0" || !validRPCID(request.ID) {
 		return false
 	}
 	switch request.Method {
@@ -1332,7 +1426,11 @@ func durationMs(value time.Duration) int64 {
 
 func authorized(r *http.Request, want string) bool {
 	const prefix = "Bearer "
-	got := r.Header.Get("Authorization")
+	headers := r.Header.Values("Authorization")
+	if len(headers) != 1 || want == "" {
+		return false
+	}
+	got := headers[0]
 	if !strings.HasPrefix(got, prefix) {
 		return false
 	}
@@ -1361,29 +1459,32 @@ func validMCPReply(body []byte) bool {
 		Result  json.RawMessage `json:"result"`
 		Error   json.RawMessage `json:"error"`
 	}
-	if json.Unmarshal(body, &value) != nil || value.JSONRPC != "2.0" || len(value.ID) == 0 {
+	if json.Unmarshal(body, &value) != nil || value.JSONRPC != "2.0" || !validRPCID(value.ID) {
 		return false
 	}
-	return len(value.Result) > 0 || len(value.Error) > 0
+	return (len(value.Result) > 0) != (len(value.Error) > 0)
 }
 
 func requestID(body []byte) json.RawMessage {
 	var value struct {
 		ID json.RawMessage `json:"id"`
 	}
-	if json.Unmarshal(body, &value) != nil || len(value.ID) == 0 {
+	if json.Unmarshal(body, &value) != nil || !validRPCID(value.ID) {
 		return json.RawMessage("null")
 	}
 	return value.ID
 }
 
 func writeMCPError(w http.ResponseWriter, id json.RawMessage, status int, message string) {
+	writeRPCError(w, id, status, -32001, message)
+}
+func writeRPCError(w http.ResponseWriter, id json.RawMessage, status, code int, message string) {
 	if len(id) == 0 {
 		id = json.RawMessage("null")
 	}
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": id,
-		"error": map[string]any{"code": -32001, "message": message},
+		"error": map[string]any{"code": code, "message": message},
 	})
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

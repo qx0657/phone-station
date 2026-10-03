@@ -56,9 +56,13 @@ Accept: application/json, text/event-stream
 Authorization: Bearer <mcp.sh 打印的令牌>
 ```
 
-当前 `initialize` 返回协议版本 `2025-03-26`，`serverInfo.name` 为「手机工位」，`serverInfo.version` 为手机 APK 的版本名。成功之后就可以 `tools/list` 和 `tools/call`；实际工具集合以这次的 `tools/list` 为准。没有 `Mcp-Session-Id`。没有 `id` 或 `id` 为 null 的通知回 HTTP 202。手机服务在读取正文前鉴权；单行请求头上限 8 KiB、全部请求头上限 64 KiB，超过即时回 431。包括排队在内的请求读取绝对期限为 20 秒，超时回 408，逐字节发送不能续期；拒绝重复长度和分块编码。手机服务请求体上限 8 MiB；中继与桌面网关上限 18 MiB。别的路径或方法回 405，正文是「只接受 POST /mcp」。
+当前 `initialize` 返回协议版本 `2025-03-26`，`serverInfo.name` 为「手机工位」，`serverInfo.version` 为手机 APK 的版本名。成功之后就可以 `tools/list` 和 `tools/call`；实际工具集合以这次的 `tools/list` 为准。没有 `Mcp-Session-Id`，也不提供 SSE：已鉴权的 `GET /mcp` 回 405，并带 `Allow: POST`；未知路径回 404。
 
-工具失败写在结果里，`isError` 为真，正文是 `{"error":"…"}`。JSON 解析失败才是协议错误，例如 `-32700`。
+请求必须是 JSON-RPC 2.0，`id` 为字符串或整数，不能为 null；`params` 若存在必须是对象。没有 `id` 的合法通知，以及合法客户端应答，只接受并忽略，回 HTTP 202 空正文，不执行工具。支持 1–64 项批次，各请求结果保留原编号，通知不占应答项；混有无效帧时逐项返回协议错误。同一批次请求编号重复时，在执行任何一项前拒绝整个批次。JSON 重复字段或解析失败回 `-32700`，无效帧回 `-32600`，错误参数回 `-32602`，未知方法回 `-32601`。工具执行失败仍写在结果里，`isError` 为真，正文是 `{"error":"…"}`。
+
+手机服务和桌面网关检查每个请求的 Host 与 Origin：Host 只允许 `localhost`、`127.0.0.1`、`[::1]`，支持 adb 转发端口；Origin 若存在，必须为使用相同端口的 HTTP 回环来源。远端 Host、跨站或跨端口 Origin 回 403，即使 Bearer 令牌正确也不能通过；原生客户端可以不发 Origin。手机拒绝重复 Host、Origin、Authorization 和长度头，不接受分块编码；正文严格按 UTF-8 解码。来源校验和 GET 行为依据 [MCP 2025-03-26 HTTP 传输规范](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)，帧与批次规则依据 [基础消息规范](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
+
+手机服务在读取正文前鉴权；单行请求头上限 8 KiB、全部请求头上限 64 KiB，超过即时回 431。包括排队在内的请求读取绝对期限为 20 秒，超时回 408，逐字节发送不能续期。手机服务请求体上限 8 MiB；中继与桌面网关上限 18 MiB。
 
 调用方始终使用 `mcp.sh` 打印的统一网关地址和令牌。adb 转发消失时，已配对且在线的远程通道仍可继续提供 MCP。手机本地令牌重启后会换，本机网关令牌则保存在用户配置中。
 
@@ -84,7 +88,7 @@ Authorization: Bearer <mcp.sh 打印的令牌>
 
 令牌不放进 `Settings.Secure`。那项设置任何应用都能读，和本机监听放在一起就会被拿走。
 
-Android 15 上，清单里没有 `exported` 的前台服务，shell 直接 `am start-foreground-service` 会被拒绝：`not exported from uid`。所以 `FileMcpService` 是 exported，类型是 `specialUse`。别的应用能把服务拉起来，读不到令牌。返回值是 `START_NOT_STICKY`。
+Android 15 上，清单里没有 `exported` 的前台服务，shell 直接 `am start-foreground-service` 会被拒绝：`not exported from uid`。所以 `FileMcpService` 是 exported，类型是 `specialUse`，同时要求系统 DUMP 权限；普通第三方应用不能启动或停止它。同 UID 的应用内调用和 adb shell 仍可用。返回值是 `START_NOT_STICKY`。
 
 ## 配对和重连的兼容处理
 
@@ -337,3 +341,7 @@ MCP 前台服务、MCP 开关与提醒广播入口均由系统 `android.permissi
 MCP 网关所有 App、CLI 和探测请求共用最多 64 项队列。状态、任务查询、剪贴板与通知优先，字节上传下载在后；连续三次交互请求后让最早的等待请求前进，避免大文件饥饿。排队取消后不得迟到执行，配置变化时拒绝尚未派发的旧请求。健康探测仅在队列空闲时发起，不把忙碌当离线。
 
 后台任务使用 32 位小写十六进制 jobId，同编号同参数只返回原回执，不同参数拒绝。一个工作线程、最多四项等待，排队超过 10 秒的任务不再执行。回执最多 256 个，私有目录 0700、文件 0600，保留 24 小时；只存请求摘要与有界结果，不保存 shell 命令原文。应用重起后未完成任务返回 `result_unknown`，查询不触发执行；超出保留窗口仍不可自动重提旧任务。`station_shell_exec` 与 `station_screen_capture` 留作旧客户端同步接口，新客户端优先后台接口。
+
+### 59 版协议边界本地验证
+
+2026-10-03，Android 59 与 Mac 构建 17 的本地测试覆盖：带有效 Bearer 的恶意 Host/Origin 仍被拒绝，adb 转发端口和无 Origin 的原生客户端可用；GET 返回 405 与 Allow 头；重复头、畸形 UTF-8、非法 JSON-RPC 帧、重复字段与重复编号批次拒绝，合法混合批次保留各项编号，通知不执行文件写入。网关测试还覆盖只读批次可恢复、含修改项的批次不重放。以上在电脑回环测试和构建中验证，尚未安装到手机或替换已安装的 Mac App，不代表新增真机或公网中继验证。

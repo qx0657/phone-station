@@ -65,6 +65,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/ScreenCapture.java" \
   "$here/src/dev/phonestation/adbkeep/FileOps.java" \
   "$here/src/dev/phonestation/adbkeep/McpProtocol.java" \
+  "$here/src/dev/phonestation/adbkeep/LoopbackBoundary.java" \
   "$here/src/dev/phonestation/adbkeep/McpHttp.java" \
   "$here/test/KeeperPolicyTest.java" \
   "$here/test/WirelessControlTest.java" \
@@ -86,6 +87,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/FileOpsTest.java" \
   "$here/test/StayAwakeTest.java" \
   "$here/test/ScreenCaptureTest.java" \
+  "$here/test/McpProtocolTest.java" \
   "$here/test/McpHttpTest.java" \
   "$here/test/McpLoopbackTest.java" \
   "$here/test/OperationJobsTest.java" \
@@ -113,6 +115,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.StayAwakeTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ScreenCaptureTest
+java -cp "$work/policy" dev.phonestation.adbkeep.McpProtocolTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpHttpTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpLoopbackTest
 java -cp "$work/policy" dev.phonestation.adbkeep.OperationJobsTest

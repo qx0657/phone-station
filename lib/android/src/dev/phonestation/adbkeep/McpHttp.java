@@ -152,10 +152,13 @@ final class McpHttp {
         String[] parts = requestLine.split(" ", 3);
         String method = parts.length > 0 ? parts[0] : "";
         String target = parts.length > 1 ? parts[1] : "";
+        if (parts.length != 3 || (!"HTTP/1.1".equals(parts[2]) && !"HTTP/1.0".equals(parts[2]))) { throw new HttpFailure(400); }
         int query = target.indexOf('?');
         if (query >= 0) {
             target = target.substring(0, query);
         }
+        String hostHeader = null;
+        String origin = null;
         String authorization = null;
         int contentLength = -1;
         int headerBytes = requestLine.length() + 2;
@@ -165,18 +168,23 @@ final class McpHttp {
                 return;
             }
             headerBytes += line.length() + 2;
-            if (headerBytes > 65536) {
-                write(client.getOutputStream(), 400, "{\"error\":\"请求头太大\"}");
-                return;
-            }
+            if (headerBytes > HEADER_LIMIT) { throw new HttpFailure(431); }
             if (line.isEmpty()) {
                 break;
             }
             int colon = line.indexOf(':');
             if (colon <= 0) { throw new HttpFailure(400); }
-            String name = line.substring(0, colon).trim().toLowerCase(Locale.US);
+            String name = line.substring(0, colon);
+            if (!name.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) { throw new HttpFailure(400); }
+            name = name.toLowerCase(Locale.US);
             String value = line.substring(colon + 1).trim();
-            if ("authorization".equals(name)) {
+            if ("host".equals(name)) {
+                if (hostHeader != null) { throw new HttpFailure(400); }
+                hostHeader = value;
+            } else if ("origin".equals(name)) {
+                if (origin != null) { throw new HttpFailure(400); }
+                origin = value;
+            } else if ("authorization".equals(name)) {
                 if (authorization != null) { throw new HttpFailure(400); }
                 authorization = value;
             } else if ("content-length".equals(name)) {
@@ -188,14 +196,15 @@ final class McpHttp {
             }
         }
         OutputStream output = client.getOutputStream();
-        if (!"POST".equals(method) || !"/mcp".equals(target)) {
-            write(output, 405, "{\"error\":\"只接受 POST /mcp\"}");
-            return;
+        if (!LoopbackBoundary.allowed(hostHeader, origin)) {
+            write(output, 403, "{\"error\":\"Host 或 Origin 不允许\"}"); return;
         }
+        if (!"/mcp".equals(target)) { write(output, 404, "{\"error\":\"没有这个入口\"}"); return; }
         if (!McpProtocol.authorized(authorization, token)) {
             write(output, 401, "{\"error\":\"需要 Authorization: Bearer\"}");
             return;
         }
+        if (!"POST".equals(method)) { write(output, 405, "{\"error\":\"只接受 POST /mcp\"}"); return; }
         if (contentLength < 0) {
             write(output, 400, "{\"error\":\"需要 Content-Length\"}");
             return;
@@ -205,8 +214,10 @@ final class McpHttp {
             return;
         }
         byte[] body = readExact(input, contentLength);
-        McpProtocol.Reply reply = McpProtocol.handle(
-                new String(body, StandardCharsets.UTF_8), authorization, token, files, host, version);
+        String text;
+        try { text = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(body)).toString(); }
+        catch (java.nio.charset.CharacterCodingException invalid) { write(output, 400, "{\"error\":\"请求必须使用 UTF-8\"}"); return; }
+        McpProtocol.Reply reply = McpProtocol.handle(text, authorization, token, files, host, version);
         write(output, reply.status, reply.body);
     }
 
@@ -237,7 +248,8 @@ final class McpHttp {
     }
 
     private static String readLine(InputStream input, int limit) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(256, Math.max(0, limit)));
+        if (limit < 2) { throw new HttpFailure(431); }
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(256, limit));
         while (true) {
             int value = input.read();
             if (value < 0) {
@@ -248,7 +260,7 @@ final class McpHttp {
                 if (input.read() != '\n') { throw new HttpFailure(400); }
                 return out.toString("US-ASCII");
             }
-            if (value < 32 || value > 126) { throw new HttpFailure(400); }
+            if ((value < 32 && value != '\t') || value > 126) { throw new HttpFailure(400); }
             if (out.size() >= limit - 2) { throw new HttpFailure(431); }
             out.write(value);
         }
@@ -280,6 +292,10 @@ final class McpHttp {
             reason = "Bad Request";
         } else if (status == 401) {
             reason = "Unauthorized";
+        } else if (status == 403) {
+            reason = "Forbidden";
+        } else if (status == 404) {
+            reason = "Not Found";
         } else if (status == 405) {
             reason = "Method Not Allowed";
         } else if (status == 408) {
@@ -292,6 +308,8 @@ final class McpHttp {
             reason = "Error";
         }
         String headers = "HTTP/1.1 " + status + " " + reason + "\r\n"
+                + (status == 405 ? "Allow: POST\r\n" : "")
+                + "Cache-Control: no-store\r\n"
                 + "Content-Type: application/json; charset=utf-8\r\n"
                 + "Content-Length: " + payload.length + "\r\n"
                 + "Connection: close\r\n\r\n";

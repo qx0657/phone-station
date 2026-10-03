@@ -66,6 +66,11 @@ final class Json {
         return put(key, bool(v));
     }
 
+    boolean isObject() { return kind == Kind.OBJ; }
+    boolean isArray() { return kind == Kind.ARR; }
+    boolean isString() { return kind == Kind.STR; }
+    boolean isInteger() { return kind == Kind.NUM && ((String) value).matches("-?(0|[1-9][0-9]*)"); }
+
     boolean isNull() {
         return kind == Kind.NUL;
     }
@@ -297,6 +302,7 @@ final class Json {
                 String key = string();
                 skip();
                 expect(':');
+                if (obj.has(key)) { throw new IllegalArgumentException("JSON 对象字段重复"); }
                 obj.put(key, value(depth + 1));
                 skip();
                 if (peek('}')) {

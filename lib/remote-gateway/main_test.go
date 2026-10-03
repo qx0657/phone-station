@@ -27,6 +27,7 @@ func testGateway(address string, remote func(context.Context, config, []byte) (r
 
 func callGateway(g *gateway, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	r.Host = "127.0.0.1:18765"
 	r.Header.Set("Authorization", "Bearer test")
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, r)
@@ -186,6 +187,7 @@ func TestBusyRelayCannotDelayLocalFailureOrOverwriteHealth(t *testing.T) {
 		t.Fatal("local failure waited for busy relay")
 	}
 	r := httptest.NewRequest(http.MethodGet, "/__status", nil)
+	r.Host = "127.0.0.1:18765"
 	r.Header.Set("Authorization", "Bearer test")
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, r)
@@ -236,16 +238,16 @@ func TestUnsafeMethodsNeverReplay(t *testing.T) {
 }
 
 func TestShellStatusCanReplay(t *testing.T) {
-	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_shell_status"}}`)) {
+	if !safeToReplay([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_shell_status"}}`)) {
 		t.Fatal("read-only Shizuku status should be safe to replay")
 	}
 }
 
 func TestNotificationReplayPolicy(t *testing.T) {
-	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_notification_status"}}`)) {
+	if !safeToReplay([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_notification_status"}}`)) {
 		t.Fatal("notification status should be safe to replay")
 	}
-	if !safeToReplay([]byte(`{"method":"tools/call","params":{"name":"station_notification_icon"}}`)) {
+	if !safeToReplay([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_notification_icon"}}`)) {
 		t.Fatal("read-only app icon should be safe to replay")
 	}
 	for _, name := range []string{"station_notification_poll", "station_notification_configure"} {

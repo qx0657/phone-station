@@ -18,28 +18,59 @@ final class McpProtocol {
         } catch (IllegalArgumentException error) {
             return rpcError(null, -32700, "JSON 无法解析");
         }
-        Json id;
-        try {
-            id = message.get("id");
-        } catch (IllegalArgumentException error) {
-            return rpcError(null, -32600, "请求要是对象");
+        if (message.isArray()) {
+            java.util.List<Json> batch = message.array();
+            if (batch.isEmpty() || batch.size() > 64) { return rpcError(null, -32600, "批量请求需要 1 到 64 项"); }
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            for (Json item : batch) {
+                if (item.isObject() && item.get("method") != null && validID(item.get("id"))
+                        && !ids.add(normalizedID(item.get("id")))) {
+                    return rpcError(null, -32600, "批量请求编号不能重复");
+                }
+            }
+            Json replies = Json.arr();
+            for (Json item : batch) {
+                Reply reply = message(item, files, host, version);
+                if (!reply.body.isEmpty()) { replies.add(Json.parse(reply.body)); }
+            }
+            return replies.array().isEmpty() ? new Reply(202, "") : new Reply(200, replies.emit());
         }
-        if (id == null || id.isNull()) {
+        return message(message, files, host, version);
+    }
+
+    private static boolean validID(Json id) { return id != null && (id.isString() || id.isInteger()); }
+
+    private static String normalizedID(Json id) {
+        String value = id.emit();
+        return "-0".equals(value) ? "0" : value;
+    }
+
+    private static Reply message(Json message, FileOps files, StationHost host, String version) {
+        if (!message.isObject()) { return rpcError(null, -32600, "请求要是对象"); }
+        Json id = message.get("id");
+        Json safeID = validID(id) ? id : null;
+        Json rpcVersion = message.get("jsonrpc");
+        if (rpcVersion == null || !rpcVersion.isString() || !"2.0".equals(rpcVersion.string())) {
+            return rpcError(safeID, -32600, "需要 JSON-RPC 2.0");
+        }
+        Json methodValue = message.get("method");
+        if (methodValue == null) {
+            // 服务不发起请求，合法客户端应答只接受并忽略，不能解释成工具调用。
+            if (!validID(id) || message.has("result") == message.has("error")) { return rpcError(safeID, -32600, "无效应答"); }
+            Json error = message.get("error");
+            if (error != null && (!error.isObject() || error.get("code") == null || !error.get("code").isInteger()
+                    || error.get("message") == null || !error.get("message").isString())) { return rpcError(safeID, -32600, "无效错误应答"); }
+            if (message.has("result") && !message.get("result").isObject()) { return rpcError(safeID, -32600, "应答结果要是对象"); }
             return new Reply(202, "");
         }
-        String method;
-        try {
-            if (message.get("method") == null) {
-                return rpcError(id, -32600, "请求不完整");
-            }
-            method = message.get("method").string();
-        } catch (IllegalArgumentException error) {
-            return rpcError(id, -32600, "请求不完整");
+        if (!methodValue.isString() || methodValue.string().isEmpty() || message.has("result") || message.has("error")) {
+            return rpcError(safeID, -32600, "请求不完整");
         }
+        if (message.has("id") && !validID(id)) { return rpcError(null, -32600, "请求 id 需要字符串或整数，不能为 null"); }
         Json params = message.get("params");
-        if (params != null && params.isNull()) {
-            params = null;
-        }
+        if (params != null && !params.isObject()) { return rpcError(safeID, -32602, "params 需要对象"); }
+        if (!message.has("id")) { return new Reply(202, ""); }
+        String method = methodValue.string();
         try {
             if ("initialize".equals(method)) {
                 return rpc(id, initialize(version));
