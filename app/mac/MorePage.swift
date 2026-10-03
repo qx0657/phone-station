@@ -46,6 +46,18 @@ struct MorePage: View {
                     .disabled(station.feedback.activity != nil)
                     .opacity(station.feedback.activity == nil ? 1 : 0.4)
                     StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
+                    if let id = station.setup.installJobID {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("上次安装任务").font(.caption).foregroundStyle(.secondary)
+                            Text(id).font(.caption.monospaced()).textSelection(.enabled)
+                            HStack {
+                                Button("查询原任务") { station.setup.queryInstall() }
+                                    .disabled(station.feedback.activity != nil)
+                                Button("复制编号") { station.setup.copyInstallJobID() }
+                            }.buttonStyle(.borderless)
+                        }.padding(10)
+                        StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
+                    }
                     StationRows.navigationRow("手机权限", symbol: "checkmark.shield",
                                               detail: "查看手机上的权限设置") {
                         station.setup.openPermissions(serial: station.link.serial)

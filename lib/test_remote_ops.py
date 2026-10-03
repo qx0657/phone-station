@@ -117,6 +117,30 @@ class RemoteOpsTest(unittest.TestCase):
         self.assertEqual(result["state"], "unconfirmed")
         self.assertFalse(result["verified"])
 
+    def test_pending_job_after_kill_or_reboot_is_not_running_forever(self):
+        job_id = "a" * 32
+        record = {"jobId": job_id, "package": "dev.test.app", "sha256": ["a" * 64]}
+        for helper in ("expired", "exited", "unknown"):
+            for installed in (False, True):
+                with self.subTest(helper=helper, installed=installed):
+                    class Client:
+                        def checked_shell(self, cmd):
+                            if "request.json" in cmd: return json.dumps(record) + "\n pending\nlog".replace(" pending", "pending")
+                            if "lifecycle" in cmd: return helper
+                            return ("a" if installed else "b") * 64 + " /data/app/base.apk\n"
+                    result = ops.install_status(Client(), job_id)
+                    self.assertEqual(result["state"], "installed" if installed else "result_unknown")
+                    self.assertEqual(result["completed"], installed)
+
+    def test_expired_recovery_keeps_installed_fact(self):
+        job, client = self.status_client({"state": "pending"})
+        original = client.checked_shell
+        client.checked_shell = lambda cmd: "expired" if "lifecycle" in cmd else original(cmd)
+        result = ops.install_status(client, job)
+        self.assertEqual(result["state"], "installed_restart_unconfirmed")
+        self.assertTrue(result["verified"])
+        self.assertFalse(result["completed"])
+
     def test_install_session_failure_preserves_app_and_abandons_session(self):
         for failure in (False, True):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
@@ -199,6 +223,7 @@ esac
                 self.commands.append(cmd)
                 if "request.json" in cmd: return json.dumps(record) + "\n0\nSuccess\n"
                 if "recovery.json" in cmd: return json.dumps(observed)
+                if "lifecycle" in cmd: return "running"
                 return "c" * 64 + " /data/app/base.apk\n"
             def rpc(self, method, params):
                 self.rpc_calls += 1

@@ -272,11 +272,15 @@ def installer_script(apks: list[dict], job: str, inbox: str, open_app: bool = Tr
                      previous_pid: str = "") -> str:
     total = sum(item["size"] for item in apks)
     lines = ["#!/system/bin/sh", "umask 077", f"cd {shlex.quote(job)} || exit 1",
-             "session=", "rc=1", "committed=0",
+             "mkdir launch.lock || exit 1",  # Never start the same task twice.
+             "epoch=$(date +%s)", "boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)",
+             "up=$(cut -d . -f 1 /proc/uptime 2>/dev/null || echo 0)",
+             'printf "%s %s %s %s %s\\n" "$$" "$boot" "$epoch" "$((epoch + 180))" "$((up + 180))" > lifecycle.tmp',
+             "mv lifecycle.tmp lifecycle", "session=", "rc=1", "committed=0",
              "finish() {",
              '  if [ -n "$session" ] && [ "$committed" != 1 ]; then pm install-abandon "$session" >/dev/null 2>&1; fi',
              '  printf "%s\\n" "$rc" > exit_code.tmp; mv exit_code.tmp exit_code',
-             f"  rm -f ./*.apk; rm -rf {shlex.quote(inbox)}", "}", "trap finish EXIT",
+             f"  rm -f ./*.apk; rm -rf {shlex.quote(inbox)}", "}", "trap finish EXIT", "trap 'rc=124; exit 124' TERM INT HUP",
              "touch started", "sleep 2",  # Let the initiating MCP reply leave before replacing its own APK.
              f"pm install-create -r --user current -S {total} > create_result 2>&1", "rc=$?", "cat create_result",
              '[ "$rc" = 0 ] || exit "$rc"',
@@ -298,6 +302,7 @@ def installer_script(apks: list[dict], job: str, inbox: str, open_app: bool = Tr
 def prepare(client: Client, apks: list[dict], job_id: str, open_app: bool = True):
     inbox = f"{UPLOAD_ROOT}/install-{job_id}"
     job = f"{JOB_ROOT}/{job_id}"
+    client.checked_shell(f"test ! -e {job} || exit 1")
     client.tool("station_file_access_policy")
     client.tool("station_file_create_directory", {"path": inbox})
     for index, apk in enumerate(apks):
@@ -334,9 +339,24 @@ def prepare(client: Client, apks: list[dict], job_id: str, open_app: bool = True
 def start_install(client: Client, job: str):
     # Separate session survives both ShellRunner's group cleanup and Shizuku's APK-change cleanup.
     # The handshake ensures detachment has completed before returning from station_shell_exec.
-    client.checked_shell(f"/system/bin/setsid /system/bin/timeout -s KILL 180 /system/bin/sh {job}/install.sh "
+    client.checked_shell(f"/system/bin/setsid /system/bin/timeout -s TERM -k 5 175 /system/bin/sh {job}/install.sh "
                          f"</dev/null >{job}/output 2>&1 &\n"
                          f"for n in $(seq 1 100); do test -f {job}/started && exit 0; sleep 0.05; done; exit 1")
+
+
+def install_lifecycle(client: Client, job: str) -> str:
+    # A positive proof is required for "running". Boot/uptime also reject reused PIDs.
+    raw = client.checked_shell(
+        f"if test ! -f {job}/lifecycle; then echo unknown; exit 0; fi; "
+        f"read pid boot epoch deadline endup < {job}/lifecycle; "
+        "nowboot=$(cat /proc/sys/kernel/random/boot_id); up=$(cut -d . -f 1 /proc/uptime); "
+        'if [ "$boot" != "$nowboot" ] || [ "$up" -ge "$endup" ]; then echo expired; '
+        f"elif kill -0 \"$pid\" 2>/dev/null && tr '\\0' ' ' < /proc/$pid/cmdline | grep -Fq {shlex.quote(job + '/install.sh')}; "
+        "then echo running; else echo exited; fi")
+    state = raw.strip()
+    if state not in {"running", "expired", "exited", "unknown"}:
+        raise RemoteError("安装助手状态无效，请保留任务编号核实。")
+    return state
 
 
 def install_status(client: Client, job_id: str) -> dict:
@@ -359,17 +379,29 @@ def install_status(client: Client, job_id: str) -> dict:
                        "verified": False, "completed": False})
     except (ValueError, KeyError, TypeError) as error:
         raise RemoteError("安装状态记录不完整，请保留任务编号继续核实。") from error
-    if code == "0":
+    lifecycle = None
+    if code == "pending":
+        lifecycle = install_lifecycle(client, job)
+        result["helperState"] = lifecycle
+        if lifecycle != "running": result["state"] = "result_unknown"
+    if code != "pending" or lifecycle != "running":
         installed = client.checked_shell(f"pm path --user current {shlex.quote(package)} | "
                                          "sed 's/^package://' | while IFS= read -r apk; do sha256sum \"$apk\" || exit; done")
         hashes = [line.split()[0] for line in installed.splitlines() if line.strip()]
         result["verified"] = sorted(hashes) == sorted(result["sha256"])
         if not result["verified"]:
-            result["state"] = "unconfirmed"
+            result["state"] = "unconfirmed" if code == "0" else "result_unknown" if code == "pending" else "failed"
         elif package == PACKAGE:
+            result["state"] = "installed"
             check_recovery(client, job, result)
         else:
-            result["completed"] = True
+            result.update(state="installed", completed=True)
+        if result["state"] == "recovering":
+            lifecycle = lifecycle or install_lifecycle(client, job)
+            result["helperState"] = lifecycle
+            if lifecycle != "running":
+                result.update(state="installed_restart_unconfirmed", completed=False)
+                result["recovery"].update(state="unconfirmed", reason="安装助手已结束或过期；查询原任务，不要重装。")
     return result
 
 
@@ -456,6 +488,7 @@ def main(argv=None) -> int:
     install.add_argument("--check", action="store_true", help="只检查远程安装通道；不可用返回 75")
     install.add_argument("--status", metavar="JOB_ID", help="只读查询先前的安装结果")
     install.add_argument("--wait-seconds", type=int, default=210, help="等待结果的秒数，默认 210")
+    install.add_argument("--job-id", help="调用方预先保存的唯一任务编号；不能重复使用")
     install.add_argument("--no-open", action="store_true", help="更新手机工位时只恢复后台服务，不打开主页")
     install.add_argument("apks", nargs="*")
     args = parser.parse_args(argv)
@@ -467,6 +500,8 @@ def main(argv=None) -> int:
         install.error("选择 APK 文件、--check 或 --status 之一；等待时间为 1 到 600 秒")
     if args.mode == "install" and args.no_open and not args.apks:
         install.error("--no-open 仅与 APK 文件一起使用")
+    if args.mode == "install" and args.job_id and (not args.apks or not re.fullmatch(r"[0-9a-f]{32}", args.job_id)):
+        install.error("--job-id 需要 APK 与唯一的 32 位小写十六进制编号")
     job_id = None
     try:
         client = Client()
@@ -495,7 +530,7 @@ def main(argv=None) -> int:
         if args.check:
             print("远程安装通道已就绪（Shizuku shell）。")
             return 0
-        job_id = uuid.uuid4().hex
+        job_id = args.job_id or uuid.uuid4().hex
         print(f"安装任务 {job_id}", file=sys.stderr, flush=True)
         job = prepare(client, apks, job_id, not args.no_open)
         print("APK 校验通过，提交安装。更新手机工位时自动拉起并确认远程恢复。", file=sys.stderr, flush=True)

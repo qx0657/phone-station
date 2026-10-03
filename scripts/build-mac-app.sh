@@ -89,6 +89,10 @@ BANNER_TEST="$ROOT/build/.phone-station/notification-banner-test"
 "$BANNER_TEST"
 python3 "$ROOT/lib/test_notify_mcp.py"
 python3 "$ROOT/lib/test_remote_ops.py"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/InstallTask.swift" "$ROOT/app/mac/InstallTaskTest.swift" \
+  -o "$ROOT/build/.phone-station/install-task-test"
+"$ROOT/build/.phone-station/install-task-test"
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"

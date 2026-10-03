@@ -84,7 +84,7 @@ print("tap", (x1 + x2) // 2, (y1 + y2) // 2)
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "用法: android.sh"
-  print -r -- "      android.sh --remote"
+  print -r -- "      android.sh --remote [--job-id <32位编号>]"
   print -r -- "      android.sh --adb"
   print -r -- "      android.sh status"
   print -r -- "      android.sh --remove"
@@ -96,14 +96,28 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "界面顶部是电脑有没有连上。"
   exit 0
 fi
-if [[ $# -gt 1 ]]; then
-  print -u2 -- "不认识的参数: $2"
-  exit 1
+remote_job_args=()
+mode=""
+while (( $# )); do
+  case "$1" in
+    --job-id)
+      if (( $# < 2 )) || ! print -r -- "$2" | rg -q '^[0-9a-f]{32}$' || (( ${#remote_job_args} )); then
+        print -u2 -- "--job-id 需要唯一的 32 位小写十六进制编号。"
+        exit 2
+      fi
+      remote_job_args=(--job-id "$2")
+      shift 2 ;;
+    status|--remove|--remote|--adb)
+      if [[ -n $mode ]]; then print -u2 -- "只能选一种操作。"; exit 2; fi
+      mode=$1; shift ;;
+    *) print -u2 -- "不认识的参数: $1"; exit 2 ;;
+  esac
+ done
+if (( ${#remote_job_args} )) && [[ $mode == status || $mode == --remove || $mode == --adb ]]; then
+  print -u2 -- "--job-id 仅用于远程安装。"
+  exit 2
 fi
-if [[ -n ${1:-} && ${1:-} != status && ${1:-} != --remove && ${1:-} != --remote && ${1:-} != --adb ]]; then
-  print -u2 -- "不认识的参数: $1"
-  exit 1
-fi
+if [[ -n $mode ]]; then set -- "$mode"; else set --; fi
 
 # Check before any APK write or install. Once remote deployment begins, a lost
 # response must never fall back to a second adb installation.
@@ -118,7 +132,7 @@ if [[ -z ${1:-} || ${1:-} == --remote ]]; then
       print -u2 -- "找不到手机工位的安装包。"
       exit 1
     fi
-    exec "$DIR/install-apk.sh" "$remote_apk"
+    exec "$DIR/install-apk.sh" "${remote_job_args[@]}" "$remote_apk"
   else
     remote_check_code=$?
     if [[ ${1:-} == --remote || $remote_check_code != 75 ]]; then
