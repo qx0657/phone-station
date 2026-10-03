@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.phonestation.adbkeep"
-    android:versionCode="59"
-    android:versionName="59">
+    android:versionCode="60"
+    android:versionName="60">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
 
@@ -159,6 +159,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="dev.phonestation.adbkeep.MCP" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".StayAwakeReceiver"
+            android:permission="android.permission.DUMP"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.phonestation.adbkeep.STAY_AWAKE" />
             </intent-filter>
         </receiver>
 

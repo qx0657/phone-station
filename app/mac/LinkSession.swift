@@ -387,9 +387,9 @@ final class LinkSession: ObservableObject {
 
     private nonisolated static func stayAwakeEnabled(_ serial: String) -> Bool {
         guard let adb = StationRunner.executable("adb") else { return false }
-        let result = StationRunner.capture(adb, ["-s", serial, "shell", "settings", "get", "system", "screen_off_timeout"], timeout: 8)
-        let value = Int(result.output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-        return result.succeeded && value >= 3_600_000
+        let result = StationRunner.capture(adb, ["-s", serial, "shell",
+            "settings get system screen_off_timeout; settings get global stay_on_while_plugged_in"], timeout: 8)
+        return result.succeeded && StayAwakeReport.held(result.output)
     }
 
     private func bumpControls() -> Int {

@@ -121,3 +121,11 @@ enum BatteryReport {
         return Reading(percent: percent, charging: status == 2)
     }
 }
+
+/// 与手机 StayAwake.held 一致；长息屏时间本身不代表工位已接管。
+enum StayAwakeReport {
+    static func held(_ output: String) -> Bool {
+        let values = output.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        return values == ["2147483647", "7"]
+    }
+}

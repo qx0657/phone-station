@@ -1,10 +1,5 @@
 #!/bin/zsh
-# 说明见仓库根目录 README.md
-# 拉长息屏时间，并在充电时保持亮屏。
-#   adb shell settings put system screen_off_timeout 2147483647
-#   adb shell settings put global stay_on_while_plugged_in 7
-# 用法: stay-awake.sh        # 开启
-#       stay-awake.sh off    # 恢复为 60 秒息屏，充电也按系统超时
+# adb 与 MCP 共用手机应用持久化的原设置，说明见 README.md。
 set -euo pipefail
 DIR=${0:A:h}
 source "$DIR/../lib/common.sh"
@@ -12,40 +7,33 @@ source "$DIR/../lib/common.sh"
 mode="${1:-on}"
 if [[ "$mode" == "-h" || "$mode" == "--help" ]]; then
   print -r -- "用法: stay-awake.sh [on|off]"
-  print -r -- "on   息屏时间设为 2147483647 毫秒，充电（交流电、USB、无线充）时不熄屏"
-  print -r -- "off  息屏恢复为 60 秒，并关掉充电时常亮"
+  print -r -- "on   保留原设置后开启保持亮屏（需要 Android 60 或更新版及写系统设置权限）"
+  print -r -- "off  恢复开启前的设置，保留中途手动改过的值"
   exit 0
+fi
+case "$mode" in
+  on) enabled=true ;;
+  off|restore) enabled=false ;;
+  *) print -u2 -- "用法: stay-awake.sh [on|off]"; exit 1 ;;
+esac
+if (( $# > 1 )); then
+  print -u2 -- "用法: stay-awake.sh [on|off]"
+  exit 1
 fi
 
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
-
-put() {
-  "$ADB" -s "$SERIAL" shell settings put "$1" "$2" "$3"
-}
-
-get() {
-  "$ADB" -s "$SERIAL" shell settings get "$1" "$2" | tr -d '\r'
-}
-
-case "$mode" in
-  on)
-    put system screen_off_timeout 2147483647
-    put global stay_on_while_plugged_in 7
-    ;;
-  off|restore)
-    put system screen_off_timeout 60000
-    put global stay_on_while_plugged_in 0
-    ;;
-  *)
-    print -u2 -- "用法: stay-awake.sh [on|off]"
-    exit 1
-    ;;
-esac
-
-timeout=$(get system screen_off_timeout)
-plugged=$(get global stay_on_while_plugged_in)
+if ! result=$("$ADB" -s "$SERIAL" shell am broadcast -f 0x00400000 \
+    -n dev.phonestation.adbkeep/.StayAwakeReceiver \
+    -a dev.phonestation.adbkeep.STAY_AWAKE --ez on "$enabled" 2>&1); then
+  print -u2 -- "亮屏操作应答丢失，请先核实手机状态；未自动重试。"
+  exit 1
+fi
+if ! print -r -- "$result" | /usr/bin/grep -Eq 'Broadcast completed: result=1([,[:space:]]|$)'; then
+  print -u2 -- "亮屏操作未确认，请检查 Android 60 或更新版与写系统设置权限。"
+  print -u2 -r -- "$result"
+  exit 1
+fi
 print -r -- "设备 $SERIAL"
-print -r -- "screen_off_timeout=$timeout"
-print -r -- "stay_on_while_plugged_in=$plugged"
+print -r -- "亮屏设置已确认"

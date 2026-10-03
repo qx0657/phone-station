@@ -134,23 +134,9 @@ final class StationBridge implements StationHost {
 
     @Override
     public Json stayAwake(boolean on) {
-        requireVerifiedModel();
-        boolean timeoutOk = Settings.System.putInt(
-                context.getContentResolver(),
-                Settings.System.SCREEN_OFF_TIMEOUT,
-                StayAwake.timeout(on));
-        boolean pluggedOk = Settings.Global.putInt(
-                context.getContentResolver(),
-                Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
-                StayAwake.plugged(on));
-        if (!timeoutOk || !pluggedOk) {
-            throw new FileFailure("写不了息屏设置");
-        }
+        StayAwakeController.set(context, on);
         int timeout = systemInt(Settings.System.SCREEN_OFF_TIMEOUT);
         int plugged = globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN);
-        if (timeout != StayAwake.timeout(on) || plugged != StayAwake.plugged(on)) {
-            throw new FileFailure("息屏设置没有写成");
-        }
         return Json.obj()
                 .put("stayAwake", StayAwake.held(timeout, plugged))
                 .put("screenOffTimeoutMs", timeout)

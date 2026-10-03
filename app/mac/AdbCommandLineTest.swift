@@ -10,6 +10,10 @@ enum AdbCommandLineTest {
         checkEmpty()
         checkBackslash()
         checkBattery()
+        precondition(StayAwakeReport.held("2147483647\r\n7\r\n"))
+        for output in ["3600000\n7", "2147483647\n0", "2147483647", "null\n7", "2147483647\n7\nextra"] {
+            precondition(!StayAwakeReport.held(output))
+        }
         print("adb command line ok")
     }
 
