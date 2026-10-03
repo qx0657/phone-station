@@ -35,10 +35,9 @@ fi
 mv -f "$ROOT/build/.phone-station/.phone-relay-gateway-$$" "$ROOT/build/.phone-station/phone-relay-gateway"
 python3 "$ROOT/lib/test_mcp_pair.py"
 python3 "$ROOT/lib/test_mcp_stop.py"
-"$SWIFTC" -O -target "$TARGET" -sdk "$SDK" -framework Security \
-  -o "$ROOT/build/.phone-station/.phone-relay-keychain-$$" \
-  "$ROOT/lib/remote-gateway/keychain/main.swift"
-mv -f "$ROOT/build/.phone-station/.phone-relay-keychain-$$" "$ROOT/build/.phone-station/phone-relay-keychain"
+python3 "$ROOT/lib/build_keychain.py" --compiler "$SWIFTC" --target "$TARGET" --sdk "$SDK" \
+  --source "$ROOT/lib/remote-gateway/keychain/main.swift" \
+  --binary "$ROOT/build/.phone-station/phone-relay-keychain"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 \
   -target "$TARGET" -sdk "$SDK" \
