@@ -31,4 +31,4 @@ description: 把 notify.sh 接到 Codex、Claude、Grok 的用户级 hook，或�
 
 ## 和手动响一声分开
 
-一轮完成、权限确认和中途询问由这条全局 hook 播放，并在下拉栏里更新同一条通知。标题是这件事，内容是目录名加这件事。各事件的文字在 `docs/notify.md`。Codex 的 `SessionEnd` 不接入，避免会话空闲退出时重复或延迟提醒。用户要现在就响，或只要震动，用 README「会话提醒」里的 `notify.sh` 或 `vibrate.sh`。
+一轮完成、权限确认和中途询问由这条全局 hook 提醒，不再手动补跑。下拉通知覆盖最新一条还是逐条保留，由手机「通知 → 电脑提醒 → 手机 → 显示方式」决定。标题是这件事，内容是目录名加这件事。各事件的文字在 `docs/notify.md`。Codex 的 `SessionEnd` 不接入，避免会话空闲退出时重复或延迟提醒。用户要现在就响，或只要震动，用 README「会话提醒」里的 `notify.sh` 或 `vibrate.sh`。

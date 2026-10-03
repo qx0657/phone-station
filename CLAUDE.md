@@ -17,9 +17,15 @@
 
 `.grok/skills/` 和 `.claude/skills/` 里的同名目录是指到 `.agents/skills/` 的软链接，不要在那两处另写一份。
 
-目前只在荣耀 PGT-AN20（Android 15）上验证过。下面「已验证设备上的命令差异」都来自这台手机。换机或认不出型号时先跑 `scripts/status.sh`。型号仍是 PGT-AN20 就按本文做。不是这台机器时停下来，说明震动、铃声、闪光灯、截屏和 MCP服务这些差异还没在这台上验证过，不要套用。
+目前只在荣耀 PGT-AN20（Android 15）上验证过。下面「已验证设备上的命令差异」都来自这台手机。需要操作设备而型号未知时，本地通道用 `scripts/status.sh`，远程通道用会返回 `model` 的只读 `station_controls_status` 或对应入口的机型检查，不为了确认机型强行连接 adb。不是这台机器时暂停依赖机型的设备操作，说明哪些差异尚未验证；源码检查、本机构建和测试仍可继续。
 
 Android CLI 是隔壁工具，安装见 `docs/android-cli.md`，不要把它当成这些通道的依赖。`~/dev/skills/reverse-skill` 是作者机器上的另一份仓库，不放进本仓库，也不跑它的总控。
+
+## 执行与完成
+
+- 结合当前任务和已有授权判断下一步。用户已要求修复、验证或安装时，不为同一范围内的必要步骤反复确认；只要求审阅时保留只读范围。代码检查本身不包含手机通知、截屏、剪贴板交换或安装。
+- 中断后先核对工作区、提交和原任务回执，再继续未完成部分。聊天标题和旧计划不能代替实际完成记录；有副作用的操作应答丢失时查询原编号，不重新提交。
+- 报告时区分源码修复、本机测试、构建、推送和设备部署。测试通过不代表已部署；安装内容一致也不代表后台服务和远程通道已恢复。只把已核实的层次写成完成。
 
 ## 沉淀
 
@@ -70,6 +76,10 @@ PGT-AN20 会在 Wi-Fi 断开或闲置后把无线调试关掉。电脑没有 USB
 - 闪光灯的灯节点 shell 写不了，`settings put secure flashlight_enabled` 也点不亮。`torch.sh` 用 `CameraManager`，调用进程退出后灯会灭，所以开着要留一个 `app_process`。档数读 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL`，这台后置是 4 档；`torch.sh` 不要把 4 写死成唯一合法范围。跟随声音时不要按拍 `setTorchMode(false)`：这会拆掉闪光灯会话，高通相机服务连续开关大约一分钟后会自己退出。短暂停顿保持上一档，安静大约 0.8 秒才关灯。`turnOnTorchWithStrengthLevel` 失败，或相机编号暂时失效时，不要退出监听进程，重新找闪光灯再试。见 `docs/torch.md`。
 
 ## 验证
+
+统一本机检查用 `scripts/check.sh`：文档镜像、项目 Skill 软链接、shell/Python 语法、Python/Java/Go race/Swift 回归和 Mac 全量源码编译。它不连接手机、不启动真实网关、不使用发布签名；非 Mac 可用 `--core`，结果会明确排除 Swift。新增 Swift 测试要登记到 `lib/check.py`，漏登会失败。Android 资源和完整 APK 仍用下面的构建入口验证。CI 使用同一检查命令。
+
+AI 调用 MCP 优先用已连接的工具，或 `scripts/mcp.sh call` 从标准输入提交 JSON-RPC，凭据由进程内部读取。`scripts/mcp.sh status --safe` 只读已有网关状态且不输出令牌；需要启动 MCP 时用 `scripts/mcp.sh >/dev/null`。默认启动、普通 `status` 及内部 `snapshot/watch` 的输出可能含授权头，不能直接贴到聊天、日志或仓库。
 
 `scripts/status.sh` 只读，可以随时跑。`scripts/notify.sh`、`scripts/agent-notify-hook.sh`、`scripts/vibrate.sh`、`scripts/screenshot.sh`、`scripts/mirror.sh`、`scripts/record.sh`、`scripts/stay-awake.sh`、`scripts/torch.sh` 会让手机出声、震动、截屏、投屏、改息屏设置或开关闪光灯。用户或当前任务明确要求其中一件时，直接跑对应的那一个。没有这件要求时不要跑，包括不要为了看看环境而跑。改完某个脚本、要确认它还能用时，可以跑那一个。
 
