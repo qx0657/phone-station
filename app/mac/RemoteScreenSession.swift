@@ -148,7 +148,13 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
             if display.status == .failed { display.flush() }
             // Let the hardware decoder consume reference frames even when the window is occluded.
             display.enqueue(live)
-            if !receivedVideo { receivedVideo = true; onReady() }
+            if !receivedVideo {
+                receivedVideo = true
+                // Connection setup can outlast the audio grace period. Start that
+                // period with the first video so late AAC metadata is retained.
+                if awaitingRecording { requestedRecordingAt = Date() }
+                onReady()
+            }
         } else if audio.isReadyForMoreMediaData { audio.enqueue(live) }
         if awaitingRecording && isVideo && packet.keyFrame && (audioKnown || Date().timeIntervalSince(requestedRecordingAt ?? Date()) > 2) { try beginRecording(format: format, pts: packet.microseconds) }
         if let writer, let base = recordOrigin {

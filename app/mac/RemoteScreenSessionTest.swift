@@ -47,6 +47,32 @@ import Foundation
         var packets = 0
         while let sample = decoded.copyNextSampleBuffer() { precondition(CMSampleBufferGetNumSamples(sample) > 0); packets += 1 }
         precondition(packets > 0 && audioReader.status == .completed, "AAC must decode into PCM")
+
+        // A slow remote connection must not consume the audio metadata grace
+        // period before the first video frame arrives.
+        let delayedFile = dir.appendingPathComponent("delayed-audio.mp4"), delayed = RemoteScreenSession()
+        var delayedDone = false, delayedSaved: URL?
+        delayed.onRecordingEnded = { _, url in delayedDone = true; delayedSaved = url }
+        try delayed.receive(packet(channel: 1, flags: 1 << 62, bytes: hex(json["videoConfig"] as! String)))
+        try delayed.receive(ScreenPacket(Data([2]) + ScreenPacket.bigEndian(0x00616163, bytes: 4)))
+        delayed.startRecording(delayedFile)
+        try await Task.sleep(nanoseconds: 2_100_000_000)
+        let events = json["events"] as! [[String: Any]]
+        let firstKey = events.first { ($0["channel"] as! Int) == 1 && ($0["key"] as! Bool) }!
+        try delayed.receive(packet(channel: 1, flags: UInt64(firstKey["pts"] as! Int) | 1 << 61, bytes: hex(firstKey["hex"] as! String)))
+        try delayed.receive(packet(channel: 3, flags: 1 << 62, bytes: hex(json["audioConfig"] as! String)))
+        for value in events {
+            let flags = UInt64((value["pts"] as! Int) + 1_000_000) | ((value["key"] as! Bool) ? 1 << 61 : 0)
+            try delayed.receive(packet(channel: UInt8(value["channel"] as! Int), flags: flags, bytes: hex(value["hex"] as! String)))
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        delayed.stopRecording()
+        let delayedDeadline = Date().addingTimeInterval(8)
+        while !delayedDone && Date() < delayedDeadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        precondition(delayedSaved == delayedFile, "delayed audio MP4 did not finalize")
+        let delayedAsset = AVURLAsset(url: delayedFile)
+        let delayedAudio = try await delayedAsset.loadTracks(withMediaType: .audio)
+        precondition(delayedAudio.count == 1, "slow setup must preserve a late AAC track")
         print("Remote screen native H.264/AAC and MP4 tests ok")
     }
 }

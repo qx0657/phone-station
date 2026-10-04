@@ -1,6 +1,6 @@
 # 远程实时投屏与录屏
 
-Android 63、Mac 0.1.0 (24)、公网中继 3 配合使用时，Mac 首页的「打开投屏」「开始录屏」可在只有远程连接时使用。需要已经配置的远程中继、已运行并授权的 Shizuku 13+，以及 PGT-AN20 / Android 15。旧手机不会启用远程投屏；旧中继返回明确的通道不可用错误。构建与本机回归通过不代表已完成设备安装或真机验收。
+Android 63、Mac 0.1.0 (25)、公网中继 3 配合使用时，Mac 首页的「打开投屏」「开始录屏」可在只有远程连接时使用。需要已经配置的远程中继、已运行并授权的 Shizuku 13+，以及 PGT-AN20 / Android 15。旧手机不会启用远程投屏；旧中继返回明确的通道不可用错误。构建与本机回归通过不代表已完成设备安装或真机验收。
 
 本地 adb 在线时继续使用 scrcpy 脚本。只有远程连接时打开原生 Mac 窗口，窗口保持在菜单栏面板外，收起面板不会停止投屏。点击、拖动和滚轮传到手机；右键或 Esc 返回，Home 键回首页，方向键、回车、退格和普通文字按 Android 输入能力处理。安全界面可能是黑屏，不改变安全标记。
 
@@ -20,13 +20,13 @@ Android 63、Mac 0.1.0 (24)、公网中继 3 配合使用时，Mac 首页的「�
 
 打开会话时唤醒手机，息屏时间继续使用既有设置。scrcpy 用 MediaCodec 编码 H.264 与 AAC，默认最长边 1600、30 fps、视频 2 Mbps、音频 128 kbps。独立连接传输完整编码帧；单个消息最多 4 MiB，写入阻塞超过 5 秒时结束，避免堆积旧画面或丢失参考帧。手机每 5 秒验证视频连接，最长会话为 1 小时。输入只接受按键、文字、触摸、滚动和返回消息，不转发 scrcpy 的剪贴板同步或文件操作。
 
-Mac 使用 AVSampleBufferDisplayLayer 和 AVSampleBufferAudioRenderer 同步播放；录屏使用 AVAssetWriter 直接封装压缩数据，避免重复编码。AAC 的 Android AudioSpecificConfig 转为 Core Audio ES descriptor，音频 packet description 使用一个压缩包，不能将 PCM 帧数误作描述项数。
+Mac 使用 AVSampleBufferDisplayLayer 和 AVSampleBufferAudioRenderer 同步播放；录屏使用 AVAssetWriter 直接封装压缩数据，避免重复编码。首次视频到达后才开始计算音频元数据的两秒等待期限，避免连接建立较慢时过早创建无音轨的 MP4。AAC 的 Android AudioSpecificConfig 转为 Core Audio ES descriptor，音频 packet description 使用一个压缩包，不能将 PCM 帧数误作描述项数。
 
 网络断开、关闭窗口、手机远程开关关闭或配置更换、手机 MCP 停止、手机应用或 Shizuku 退出都会结束采集。辅助程序的 stdin 保持打开作为服务租期，服务死亡关闭管道后停止 scrcpy；同一会话不自动重连或重建。Mac 下次启动新投屏前只清理尚未确认关闭的旧编号。
 
 ## 发布与验证边界
 
-先准备并验证中继 3、Android 63、Mac 24 的产物。公网中继升级保留原配置、证书、角色令牌及完整持久状态目录；MCP 状态格式仍为 durable-epochs-v1，与中继 2 兼容。实际切换遵循 [发布与回滚](releases.md) 的停机授权和回执规则。已有反向代理须透传 WebSocket Upgrade；直连既有 TLS 中继无需增加端口。
+先准备并验证中继 3、Android 63、Mac 25 的产物。公网中继升级保留原配置、证书、角色令牌及完整持久状态目录；MCP 状态格式仍为 durable-epochs-v1，与中继 2 兼容。实际切换遵循 [发布与回滚](releases.md) 的停机授权和回执规则。已有反向代理须透传 WebSocket Upgrade；直连既有 TLS 中继无需增加端口。
 
 本机验证包含真实 WebSocket 双向转发、角色隔离、重复连接与旧编号拒绝、关服清理、scrcpy 4.1 session 元数据与帧边界、输入白名单，以及原生 H.264/AAC 写入 MP4 后再解码。真机延迟、蜂窝切换、声音和点击效果应在部署回执中单独登记。
 
