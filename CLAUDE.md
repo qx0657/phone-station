@@ -6,7 +6,7 @@
 
 ## 项目与阅读入口
 
-本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb 和灯光跟随声音仍要求本机 adb；Mac 23、手机 62、中继 3 起，远程实时投屏与录屏使用独立 WSS，见 `docs/remote-screen.md`。
+本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb 和灯光跟随声音仍要求本机 adb；Mac 24、手机 63、中继 3 起，远程实时投屏与录屏使用独立 WSS，见 `docs/remote-screen.md`。
 
 给人看的用法在 [README.md](README.md)，组件、身份和能力矩阵在 [docs/architecture.md](docs/architecture.md)。按当前任务读取对应文档，不把全部历史或全站自检当成前置步骤：
 

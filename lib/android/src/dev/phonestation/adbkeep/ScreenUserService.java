@@ -26,7 +26,7 @@ public final class ScreenUserService extends Binder {
         }
         if (code != CALL) { return super.onTransact(code, data, reply, flags); }
         data.enforceInterface(DESCRIPTOR);
-        if (Binder.getCallingUid() != ownerUid || (Process.myUid() != 2000 && Process.myUid() != 0)) { throw new SecurityException("owner/identity"); }
+        if (Binder.getCallingUid() != ownerUid || (Process.myUid() != 2000 && Process.myUid() != 0)) { throw new SecurityException("caller=" + Binder.getCallingUid() + ", owner=" + ownerUid + ", service=" + Process.myUid()); }
         Json result;
         boolean opening = false;
         try {
@@ -40,10 +40,15 @@ public final class ScreenUserService extends Binder {
                     id = wanted; frames = 0; state = "starting";
                     String executable = ShellAssets.extract(context, "screen-arm64", true);
                     String server = ShellAssets.extract(context, "scrcpy-server", false);
-                    helper = new ProcessBuilder(executable).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+                    // Android's libcore does not provide the desktop JDK DISCARD field.
+                    helper = new ProcessBuilder(executable).start();
+                    final java.lang.Process active = helper;
+                    Thread errors = new Thread(() -> {
+                        try (InputStream in = active.getErrorStream()) { byte[] buffer = new byte[4096]; while (in.read(buffer) != -1) {} }
+                        catch (IOException ignored) {}
+                    }, "station-screen-errors"); errors.setDaemon(true); errors.start();
                     request.put("server", server);
                     lease = helper.getOutputStream(); lease.write((request.emit() + "\n").getBytes(StandardCharsets.UTF_8)); lease.flush();
-                    final java.lang.Process active = helper;
                     Thread reader = new Thread(() -> {
                         try (BufferedReader in = new BufferedReader(new InputStreamReader(active.getInputStream(), StandardCharsets.UTF_8))) {
                             String line;

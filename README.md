@@ -1,6 +1,6 @@
 # 手机工位
 
-电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。Mac App 的截屏、保持亮屏和手电筒，以及文件等 MCP 功能，还能经自行配置并配对的远程通道访问。Mac 23、手机 62 和中继 3 起，实时投屏与录屏也支持远程连接；灯光跟随声音仍走 adb。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
+电脑通过 [adb](https://developer.android.com/tools/adb) 操作一台 Android 手机。手机在线之后，这台电脑就有一条到它的通道：无线调试配对过一次并且开着，或者 USB 已经插上。Mac App 的截屏、保持亮屏和手电筒，以及文件等 MCP 功能，还能经自行配置并配对的远程通道访问。Mac 24、手机 63 和中继 3 起，实时投屏与录屏也支持远程连接；灯光跟随声音仍走 adb。脚本在 `scripts/`，按自己的位置找 `lib/`，克隆到哪个目录都能跑。目前只在荣耀 PGT-AN20（Android 15）上验证过。
 
 章节按事情排。还没有 `adb`，或还没配对，先看 [准备](#准备) 和 [连接](#连接)。
 
@@ -266,7 +266,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 ## 屏幕
 
-本地投屏和录屏用 [scrcpy](https://github.com/Genymobile/scrcpy)，截屏脚本用 adb 的 `screencap`。菜单栏主页上有同样的入口。这三个脚本都会先走 `connect.sh`；投屏与录屏的额外参数原样传给 scrcpy。Mac App 在只有远程连接时，也可实时投屏并录屏（Mac 23、手机 62、中继 3），见 [远程屏幕](docs/remote-screen.md)；截屏、保持亮屏和手电筒见 [远程控件](docs/remote-controls.md)。
+本地投屏和录屏用 [scrcpy](https://github.com/Genymobile/scrcpy)，截屏脚本用 adb 的 `screencap`。菜单栏主页上有同样的入口。这三个脚本都会先走 `connect.sh`；投屏与录屏的额外参数原样传给 scrcpy。Mac App 在只有远程连接时，也可实时投屏并录屏（Mac 24、手机 63、中继 3），见 [远程屏幕](docs/remote-screen.md)；截屏、保持亮屏和手电筒见 [远程控件](docs/remote-controls.md)。
 
 窗口开着时，scrcpy 的 `--stay-awake` 会让充电中的手机暂时不熄屏。关掉窗口之后，息屏仍按系统设置。要一直亮着，用 [保持亮屏](#保持亮屏)。
 

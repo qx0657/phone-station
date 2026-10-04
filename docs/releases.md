@@ -103,3 +103,7 @@ PGT-AN20 / Android 15 的实际远程验收确认 PTY、目录与环境保留、
 Android 62、Mac 0.1.0 (23)、公网中继 3 增加仅远程连接时的实时投屏、手机音频、鼠标/键盘输入和 Mac MP4 保存，详见 [远程屏幕](remote-screen.md)。视频连接与 MCP 队列分开；公网服务保留 durable-epochs-v1 状态格式、原回执与配对。中继 2 能继续提供原 MCP 功能，但不能承载新屏幕连接。
 
 候选产物先由 `scripts/check.sh`、`lib/android/build.sh`、`scripts/build-mac-app.sh` 和 `scripts/build-relay.sh` 验证。公网切换需要覆盖中继 3 停启的具体授权，再保留原程序与完整持久目录并升级，随后通过远程安装 Android 62、替换 Mac 23，验收仅远程投屏、声音、控制、录屏和关闭后的进程清理。切换失败时恢复能读取同一状态格式的中继 2；不删除回执、不回到内存版。尚未完成部署和真机屏幕验收，不能将候选源码与产物描述为已上线。
+
+## Android 63 / Mac 24 真机修复候选
+
+2026-10-04：仅远程真机部署时发现 Android 62 的采集 UserService 引用了桌面 JDK 的 `ProcessBuilder.Redirect.DISCARD`，Android 15 没有该字段，服务退出后返回 DeadObjectException。改为独立线程排空错误流，资产读取使用有界循环，并区分 Binder 身份错误与连接中断。修复后的临时 APK 已在完全断开 adb 时完成实时 H.264/AAC 收流、18.3 秒 MP4 保存与会话结束；音频当时为静音，实际声音与控制验收继续进行。正式修复版本为 Android 63、Mac 24；视频默认 2 Mbps，为远程控制与 MCP 留出带宽，打开投屏时沿用 scrcpy 的唤醒行为。正式产物安装与三端恢复另记验收回执。

@@ -82,3 +82,50 @@ func TestInputBoundary(t *testing.T) {
 		t.Fatal("text")
 	}
 }
+
+func TestAudioUnavailableKeepsSessionUntilCancelled(t *testing.T) {
+	for _, code := range []byte{0, 1} {
+		t.Run(string(rune('0'+code)), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			received := make(chan []byte, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer c.CloseNow()
+				_, packet, err := c.Read(ctx)
+				if err == nil {
+					received <- packet
+				}
+				<-ctx.Done()
+			}))
+			defer server.Close()
+			c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.CloseNow()
+			done := make(chan error, 1)
+			go func() { done <- stream(ctx, c, bytes.NewReader([]byte{0, 0, 0, code}), 2, nil) }()
+			select {
+			case packet := <-received:
+				if !bytes.Equal(packet, []byte{2, 0, 0, 0, 0}) {
+					t.Fatal("audio failure was exposed as an unsupported codec")
+				}
+			case <-ctx.Done():
+				t.Fatal("missing disabled audio marker")
+			}
+			select {
+			case <-done:
+				t.Fatal("optional audio ended the live session")
+			default:
+			}
+			cancel()
+			if err = <-done; err != context.Canceled {
+				t.Fatal(err)
+			}
+		})
+	}
+}

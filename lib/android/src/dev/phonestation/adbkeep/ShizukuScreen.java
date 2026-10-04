@@ -22,7 +22,7 @@ final class ShizukuScreen {
             close();
             if (!start) { return Json.obj().put("sessionId", id).put("state", "lost"); }
             serviceArgs = new Shizuku.UserServiceArgs(new ComponentName(context, ScreenUserService.class))
-                    .tag("station-screen").processNameSuffix("screen").daemon(false).version(62);
+                    .tag("station-screen").processNameSuffix("screen").daemon(false).version(63);
             connection = new Connection();
             try {
                 Shizuku.bindUserService(serviceArgs, connection);
@@ -42,8 +42,10 @@ final class ShizukuScreen {
             Json result = Json.parse(output.readString());
             if (result.get("error") != null) { throw new FileFailure(result.get("error").string()); }
             return result;
-        } catch (android.os.RemoteException | SecurityException error) {
-            close(); throw new FileFailure("投屏连接中断；查询原会话，不重发输入");
+        } catch (SecurityException error) {
+            close(); throw new FileFailure("投屏服务身份检查未通过：" + error.getMessage());
+        } catch (android.os.RemoteException error) {
+            close(); throw new FileFailure("投屏服务连接中断（" + error.getClass().getSimpleName() + "）；查询原会话，不重发输入");
         } finally { input.recycle(); output.recycle(); }
     }
     static synchronized void close() {

@@ -119,7 +119,7 @@ func run(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "/system/bin/app_process", "/", "com.genymobile.scrcpy.Server", "4.1",
 		fmt.Sprintf("scid=%08x", scid), "tunnel_forward=true", "send_dummy_byte=false", "send_device_meta=false",
 		"video_codec=h264", "audio_codec=aac", "audio=true", "control=true", "clipboard_autosync=false",
-		"max_size=1600", "max_fps=30", "video_codec_options=i-frame-interval=1", "video_bit_rate=4000000", "audio_bit_rate=128000", "cleanup=false", "power_on=false", "log_level=error")
+		"max_size=1600", "max_fps=30", "video_codec_options=i-frame-interval=1", "video_bit_rate=2000000", "audio_bit_rate=128000", "cleanup=false", "power_on=true", "log_level=error")
 	cmd.Env = append(os.Environ(), "CLASSPATH="+p.Server)
 	// Do not forward backend stderr: errors may contain environment or device content.
 	cmd.Stdout = io.Discard
@@ -198,10 +198,15 @@ func stream(ctx context.Context, ws *websocket.Conn, r io.Reader, channel byte, 
 		}
 		return err
 	}
+	audioDisabled := channel == 2 && binary.BigEndian.Uint32(codec[:]) < 2
+	if audioDisabled {
+		// Both backend error and disabled audio become the native client's optional-audio marker.
+		codec = [4]byte{}
+	}
 	if err := send(ctx, ws, append([]byte{channel}, codec[:]...)); err != nil {
 		return err
 	}
-	if channel == 2 && binary.BigEndian.Uint32(codec[:]) < 2 {
+	if audioDisabled {
 		// Audio capture is optional; do not end the video when Android refuses audio.
 		<-ctx.Done()
 		return ctx.Err()

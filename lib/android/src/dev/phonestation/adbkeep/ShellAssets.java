@@ -16,7 +16,14 @@ final class ShellAssets {
         try (ZipFile apk = new ZipFile(context.getApplicationInfo().sourceDir)) {
             ZipEntry entry = apk.getEntry("assets/" + name);
             if (entry == null || entry.getSize() < 1 || entry.getSize() > 16 * 1024 * 1024) { throw new java.io.IOException("asset"); }
-            try (InputStream in = apk.getInputStream(entry)) { bytes = in.readNBytes(16 * 1024 * 1024 + 1); }
+            try (InputStream in = apk.getInputStream(entry); java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192]; int count;
+                while ((count = in.read(buffer)) != -1) {
+                    if (out.size() + count > 16 * 1024 * 1024) { throw new java.io.IOException("asset size"); }
+                    out.write(buffer, 0, count);
+                }
+                bytes = out.toByteArray();
+            }
             if (bytes.length > 16 * 1024 * 1024) { throw new java.io.IOException("asset size"); }
         }
         String hash = FileOps.toHex(MessageDigest.getInstance("SHA-256").digest(bytes));
