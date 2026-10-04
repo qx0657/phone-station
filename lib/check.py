@@ -13,6 +13,8 @@ from doc_links import check as check_doc_links
 
 ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
+    "RemoteScreenSession": ["ClipboardProtocol", "ScreenVideoProtocol", "RemoteScreenSession"],
+    "ScreenVideoProtocol": ["ScreenVideoProtocol"],
     "ReconnectPolicy": ["Reconnect"],
     "AdbCommandLine": ["AdbCommandLine"],
     "CommandSession": ["StationState", "StationRunner", "ClipboardProtocol", "AdbCommandLine", "CommandSession"],
@@ -86,8 +88,10 @@ def main():
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "server/relay", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "lib/android/terminal", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/android/screen", "test", "-race", "./..."])
         terminal_env = {**os.environ, "GOOS": "android", "GOARCH": "arm64", "CGO_ENABLED": "0"}
         run(["go", "-C", ROOT / "lib/android/terminal", "build", "-trimpath", "-o", work / "terminal-arm64", "."], env=terminal_env)
+        run(["go", "-C", ROOT / "lib/android/screen", "build", "-trimpath", "-o", work / "screen-arm64", "."], env=terminal_env)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "-tags", "relaycontract", "-run", "^(TestRelayContractHarness|TestRepositoryRelayContract)$", "."])
         gateway = work / "phone-relay-gateway"
         run(["go", "-C", ROOT / "lib/remote-gateway", "build", "-o", gateway, "."])

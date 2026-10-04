@@ -117,6 +117,8 @@ trap 'rm -rf "$STAGING"' EXIT INT TERM
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES/scripts" "$RESOURCES/lib"
 cp "$ROOT/app/mac/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/README.md" "$RESOURCES/README.md"
+mkdir -p "$RESOURCES/licenses"
+cp "$ROOT/docs/licenses/"*.txt "$RESOURCES/licenses/"
 for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh terminal.sh install-apk.sh; do
   cp "$ROOT/scripts/$name" "$RESOURCES/scripts/$name"
 done

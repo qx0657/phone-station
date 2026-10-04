@@ -13,9 +13,12 @@ flowchart LR
   Phone --> Files[普通文件与应用能力]
   Phone --> Shizuku[已授权 Shizuku UserService]
   App --> ADB[本机 adb / scrcpy]
+  Phone -->|WSS 视频与音频| Relay
+  Relay -->|独立屏幕连接| Gateway
+  Gateway -->|WebSocket| App
 ```
 
-手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。
+手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，中继 3 另提供独立 WSS 屏幕连接；不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。
 
 | 组件 | 源码 | 职责与交付 |
 |---|---|---|
@@ -31,7 +34,8 @@ flowchart LR
 | shell 与 APK 更新 | adb 或 MCP | MCP 后台任务与安装助手 | Shizuku 已运行且已授权；首次安装仍需要现有安装途径 |
 | Mac 截屏、保持亮屏、手电筒 | 本地脚本 | MCP 控件 | 截屏/手电筒需要 Shizuku；亮屏需要写设置权限 |
 | 交互式 shell | adb 终端 | MCP PTY 会话 | 手机 61+，Shizuku 已运行且授权；Mac 22+ 提供菜单入口 |
-| 投屏、录屏、灯光跟随声音 | adb / scrcpy | 不提供 | 本机 adb 在线；声音采集另需 macOS 授权 |
+| 投屏、录屏 | adb / scrcpy | 独立 WSS 与原生 Mac 播放/MP4 保存 | Android 62、Mac 23、中继 3；已授权 Shizuku，见 [远程屏幕](remote-screen.md) |
+| 灯光跟随声音 | adb | 不提供 | 本机 adb 在线；声音采集另需 macOS 授权 |
 | 自动剪贴板 | MCP | 同一 MCP | 手机后台读取需要 Shizuku；Mac App 持续运行 |
 
 机型相关操作目前只在荣耀 PGT-AN20 / Android 15 验证。远程机型检查使用 `station_controls_status`，不为核实型号强行连接 adb。

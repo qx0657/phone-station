@@ -177,6 +177,24 @@ mkdir -p "$work/assets"
 GOOS=android GOARCH=arm64 CGO_ENABLED=0 go -C "$here/terminal" build -trimpath -ldflags='-s -w' -o "$work/assets/terminal-arm64" .
 (cd "$work" && zip -q unsigned.apk assets/terminal-arm64)
 
+print -r -- "构建远程视频桥…"
+go -C "$here/screen" test -race ./...
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go -C "$here/screen" build -trimpath -ldflags='-s -w' -o "$work/assets/screen-arm64" .
+screen_server=$repo/build/third_party/scrcpy/scrcpy-server-4.1
+screen_sha=deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae
+mkdir -p "${screen_server:h}"
+if [[ ! -f "$screen_server" ]]; then
+  curl -fsSL https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-server-v4.1 -o "$screen_server.tmp"
+  mv "$screen_server.tmp" "$screen_server"
+fi
+if [[ $(shasum -a 256 "$screen_server" | cut -d ' ' -f 1) != "$screen_sha" ]]; then
+  print -u2 -- "scrcpy-server 4.1 摘要不匹配"; exit 1
+fi
+cp "$screen_server" "$work/assets/scrcpy-server"
+cp "$repo/docs/licenses/scrcpy.txt" "$work/assets/scrcpy-license.txt"
+cp "$repo/docs/licenses/coder-websocket.txt" "$work/assets/coder-websocket-license.txt"
+(cd "$work" && zip -q unsigned.apk assets/screen-arm64 assets/scrcpy-server assets/scrcpy-license.txt assets/coder-websocket-license.txt)
+
 mkdir -p "$repo/build"
 # 签过名的钥匙不放进 build/。删掉构建目录或换一台电脑时，把这一份拷到同一路径再编，才不用卸掉重装。
 ks_dir=${PHONE_STATION_KEY_DIR:-$HOME/.phonestation}

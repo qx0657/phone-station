@@ -76,6 +76,7 @@ type gateway struct {
 	readConfig  func() (config, error)
 	readClients func() (clientRegistry, error)
 	callRemote  func(context.Context, config, []byte) (relayResponse, error)
+	screenToken func(config) (string, error)
 }
 
 // One bounded queue shared by App, CLI, and health probes. FIFO within each priority.
@@ -178,7 +179,7 @@ func remotePriority(body []byte) int {
 	}
 	switch request.Params.Name {
 	case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll",
-		"station_operation_status", "station_device_status", "station_controls_status", "station_terminal_read":
+		"station_operation_status", "station_device_status", "station_controls_status", "station_terminal_read", "station_screen_status":
 		return 2
 	case "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes":
 		return 0
@@ -703,6 +704,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMCPError(w, nil, http.StatusInternalServerError, "网关配置不可用")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/__screen/") {
+		g.screen(w, r, value)
+		return
+	}
 	if (r.URL.Path == "/__status" || r.URL.Path == "/__events") && r.Method == http.MethodGet {
 		if !authorized(r, value.GatewayToken) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -1159,7 +1164,7 @@ func safeToReplay(body []byte) bool {
 		return true
 	case "tools/call":
 		switch request.Params.Name {
-		case "station_operation_status", "station_controls_status", "station_screen_capture_status", "station_terminal_read",
+		case "station_operation_status", "station_controls_status", "station_screen_capture_status", "station_terminal_read", "station_screen_status",
 			"station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
 			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
 			"station_file_search", "station_file_search_text":

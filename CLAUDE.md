@@ -6,7 +6,7 @@
 
 ## 项目与阅读入口
 
-本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb、投屏、录屏和灯光跟随声音仍要求本机 adb。
+本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb 和灯光跟随声音仍要求本机 adb；Mac 23、手机 62、中继 3 起，远程实时投屏与录屏使用独立 WSS，见 `docs/remote-screen.md`。
 
 给人看的用法在 [README.md](README.md)，组件、身份和能力矩阵在 [docs/architecture.md](docs/architecture.md)。按当前任务读取对应文档，不把全部历史或全站自检当成前置步骤：
 
@@ -46,7 +46,7 @@ Shell 使用已运行并授权的 Shizuku 13+，不回退到应用 UID，不擅�
 
 ## 连接与凭据
 
-手机 MCP 只监听手机 `127.0.0.1:8765/mcp`；电脑固定访问网关 `127.0.0.1:18765/mcp`，adb 转发使用 18766。中继只承载 MCP，不能代替完整无线 adb。手机工具都在本应用服务中扩展。
+手机 MCP 只监听手机 `127.0.0.1:8765/mcp`；电脑固定访问网关 `127.0.0.1:18765/mcp`，adb 转发使用 18766。中继承载 MCP 和独立 WSS 屏幕会话，不能代替完整无线 adb。手机工具都在本应用服务中扩展。
 
 AI 优先使用已连接 MCP 工具，或 `mcp.sh call` 从 stdin 提交 JSON-RPC；进程内部读取凭据。`mcp.sh status --safe` 只读已有网关且不输出令牌。需要启动服务时用 `mcp.sh >/dev/null`。默认启动、普通 status 和内部 snapshot/watch 可能包含授权头，不能直接贴到聊天、日志或仓库。普通 status 还会刷新 adb 转发与手机令牌，不是无副作用状态采集。
 

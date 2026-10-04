@@ -39,7 +39,7 @@ final class StationBridge implements StationHost {
     }
     static synchronized void closeJobs() {
         if (operationJobs != null) { operationJobs.close(); operationJobs = null; }
-        ShizukuTerminal.close(); terminalJobs = null;
+        ShizukuTerminal.close(); terminalJobs = null; ShizukuScreen.close();
     }
     private static synchronized TerminalJobs terminals(Context context) {
         if (terminalJobs == null) { terminalJobs = new TerminalJobs(jobs(context), (request, start) -> ShizukuTerminal.call(context, request, start)); }
@@ -63,6 +63,22 @@ final class StationBridge implements StationHost {
         return jobs(context).start(id, "capture", Json.obj().put("requestId", requestId), () -> screenCapture(requestId));
     }
     @Override public Json operationStatus(String id) { return jobs(context).status(id); }
+    @Override public Json screenOpen(String id) {
+        requireVerifiedModel();
+        if (!RemoteStore.enabled(context) || !RemoteStore.configured(context)) { throw new FileFailure("请先连接远程中继"); }
+        return jobs(context).start(id, "screen.open", Json.obj().put("sessionId", id), () -> {
+            String token;
+            try { token = RemoteStore.decryptToken(RemoteStore.encryptedToken(context)); }
+            catch (Exception e) { throw new FileFailure("远程凭据不可用"); }
+            Json addresses = Json.arr();
+            try { for (java.net.InetAddress address : java.net.InetAddress.getAllByName(new java.net.URL(RemoteStore.endpoint(context)).getHost())) { addresses.add(Json.str(address.getHostAddress())); } }
+            catch (Exception e) { throw new FileFailure("无法解析中继地址"); }
+            return ShizukuScreen.call(context, Json.obj().put("op", "open").put("sessionId", id)
+                    .put("endpoint", RemoteStore.endpoint(context)).put("pin", RemoteStore.pin(context)).put("token", token).put("addresses", addresses), true);
+        });
+    }
+    @Override public Json screenStatus(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "status").put("sessionId", id), false); }
+    @Override public Json screenClose(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "close").put("sessionId", id), false); }
     @Override public Json terminalOpen(String id, int columns, int rows) {
         requireVerifiedModel(); return terminals(context).open(id, columns, rows);
     }
@@ -100,6 +116,8 @@ final class StationBridge implements StationHost {
         Json lamp = verified ? ShizukuTorch.status(context) : Json.obj().put("available", false)
                 .put("on", Json.nul()).put("reason", unsupported);
         return Json.obj().put("model", Build.MODEL).put("verified", verified)
+                .put("screenAvailable", verified && shell.get("available").boolValue() && RemoteStore.enabled(context) && RemoteStore.configured(context))
+                .put("screenProtocol", 1)
                 .put("stayAwake", StayAwake.held(systemInt(Settings.System.SCREEN_OFF_TIMEOUT), globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN)))
                 .put("stayAwakeAvailable", verified && settings)
                 .put("stayAwakeReason", !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")

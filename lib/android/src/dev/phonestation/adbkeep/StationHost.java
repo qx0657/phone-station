@@ -41,6 +41,9 @@ interface StationHost {
     default Json shellStart(String jobId, ShellRequest request) { throw new FileFailure("请更新手机工位以支持后台任务"); }
     default Json captureStart(String jobId, String requestId) { throw new FileFailure("请更新手机工位以支持后台任务"); }
     default Json operationStatus(String jobId) { throw new FileFailure("请更新手机工位以支持后台任务"); }
+    default Json screenOpen(String id) { throw new FileFailure("请更新手机工位以支持远程投屏"); }
+    default Json screenStatus(String id) { throw new FileFailure("请更新手机工位以支持远程投屏"); }
+    default Json screenClose(String id) { throw new FileFailure("请更新手机工位以支持远程投屏"); }
     default Json terminalOpen(String id, int columns, int rows) { throw new FileFailure("请更新手机工位以支持远程终端"); }
     default Json terminalRead(String id, long offset) { throw new FileFailure("请更新手机工位以支持远程终端"); }
     default Json terminalInput(String id, long sequence, String hex) { throw new FileFailure("请更新手机工位以支持远程终端"); }

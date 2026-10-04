@@ -140,6 +140,9 @@ final class McpProtocol {
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
+        if ("station_screen_open".equals(name)) { return host(host).screenOpen(required(args, "sessionId")); }
+        if ("station_screen_status".equals(name)) { return host(host).screenStatus(required(args, "sessionId")); }
+        if ("station_screen_close".equals(name)) { return host(host).screenClose(required(args, "sessionId")); }
         if ("station_terminal_open".equals(name)) { return host(host).terminalOpen(required(args, "sessionId"), optionalInt(args, "columns", 80), optionalInt(args, "rows", 24)); }
         if ("station_terminal_read".equals(name)) { return host(host).terminalRead(required(args, "sessionId"), optionalLong(args, "offset", 0)); }
         if ("station_terminal_input".equals(name)) { return host(host).terminalInput(required(args, "sessionId"), optionalLong(args, "sequence", -1), required(args, "hex")); }
@@ -523,6 +526,9 @@ final class McpProtocol {
                         .put("command", text("用户要求执行的手机 shell 命令。"))
                         .put("timeoutMs", integer("超时毫秒数。", 100, 60000))
                         .put("maxOutputBytes", integer("总输出保留上限。", 1, 65536)))));
+        tools.add(tool("station_screen_open", "明确要求实时投屏时，启动独立视频会话。先保存 sessionId；回执保留 24 小时，同编号不重建。使用 screen_status 查询，断线后结束采集，不自动恢复。", false, false, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("投屏 UUID")))));
+        tools.add(tool("station_screen_status", "只读查询原投屏状态和已发送视频帧数，不重新采集。", true, false, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("投屏 UUID")))));
+        tools.add(tool("station_screen_close", "结束原实时投屏并清理采集进程，可重复关闭。", false, false, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("投屏 UUID")))));
         tools.add(tool("station_terminal_open", "创建交互式 Shizuku PTY，立即返回创建任务回执。预先保存 sessionId；同编号不会重建。用 terminal_read 查询原会话。仅在用户要求终端时调用。最多 2 个会话，断线 60 秒或运行 1 小时后清理进程。",
                 false, true, schema(new String[] {"sessionId"}, Json.obj().put("sessionId", text("32 位小写十六进制唯一编号。"))
                         .put("columns", integer("列数，默认 80。", 20, 500)).put("rows", integer("行数，默认 24。", 5, 200)))));

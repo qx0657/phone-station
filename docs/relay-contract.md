@@ -1,6 +1,6 @@
 # 公网中继协议与恢复边界
 
-公网服务端源码在 [server/relay](../server/relay/README.md)，Mac 网关在 `lib/remote-gateway/`。这是三端共用的协议入口；个人运维记录只维护实际部署。当前持久协议为中继 2 / durable-epochs-v1，Mac 20 支持握手，Android 透传编号。
+公网服务端源码在 [server/relay](../server/relay/README.md)，Mac 网关在 `lib/remote-gateway/`。这是三端共用的协议入口；个人运维记录只维护实际部署。当前中继 3 沿用中继 2 的 durable-epochs-v1 持久协议，另增加 [独立屏幕连接](remote-screen.md)，Mac 20 支持握手，Android 透传编号。
 
 ## 接口与身份
 

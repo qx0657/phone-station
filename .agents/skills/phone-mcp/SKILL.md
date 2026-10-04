@@ -78,6 +78,6 @@ Mac 19 起，可为独立 MCP 客户端签发 `status`、`files.read`、`files.w
 
 - 截屏：生成并记录 UUID `requestId`，去掉连字符作为 `jobId`，用 `station_screen_capture_start` 提交、`station_operation_status` 查询。任务完成后按结果的 path、size、targetVersion 分块读取 PNG，核对完整大小与 SHA-256 后保存到 Mac，再用 `station_screen_capture_release` 幂等清理同一编号。单次最多 32 MiB。丢失应答时先查原任务；任务记录缺失或结果未知时，用 `station_screen_capture_status` 查原 `requestId` 的现有 PNG，不重拍、不复用编号。仅旧版没有后台接口时才用 `station_screen_capture`。安全界面仍可能是黑屏。
 - 手电筒：`station_torch` 的 `on` 为 true 开灯、false 关灯。手机端独立的 Shizuku UserService 持续持灯；普通远程 shell 不保留后台进程，不能照搬 `torch.sh` 的后台命令。手机工位或 Shizuku 停止、升级后灯会灭，重连不自动重开。
-- 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。投屏、录屏和灯光跟随声音仍要求本机 adb。
+- 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。灯光跟随声音与本地脚本仍要求本机 adb；Mac 23、手机 62、中继 3 的远程实时投屏与录屏见 `docs/remote-screen.md`，不为只读检查启动视频会话。
 
 实现与验证见 `docs/remote-controls.md`。

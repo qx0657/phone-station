@@ -33,9 +33,10 @@ type Config struct {
 }
 
 type Server struct {
-	config Config
-	device *device
-	store  *diskStore
+	config  Config
+	screens screenHub
+	device  *device
+	store   *diskStore
 }
 
 type device struct {
@@ -118,6 +119,7 @@ func Open(config Config) (*Server, error) {
 }
 
 func (s *Server) Close() error {
+	s.screens.close()
 	s.device.mu.Lock()
 	defer s.device.mu.Unlock()
 	if s.device.closed {
@@ -159,6 +161,10 @@ func (s *Server) persist(op *operation) bool {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/v1/screen/") {
+		s.screen(w, r)
+		return
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/phone/poll" {
 		if !s.authorized(w, r, s.config.PhoneToken) {
 			return

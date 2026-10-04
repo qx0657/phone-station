@@ -22,6 +22,7 @@ if [[ ${1:-} == --host ]]; then
 fi
 out="$ROOT/build/.phone-station/relay/$target_os-$target_arch"
 mkdir -p "$out"
+cp "$ROOT/docs/licenses/coder-websocket.txt" "$out/LICENSE-coder-websocket.txt"
 CGO_ENABLED=0 GOOS=$target_os GOARCH=$target_arch go -C "$ROOT/server/relay" build -trimpath -o "$out/.phone-relay-$$" ./cmd/phone-relay
 mv "$out/.phone-relay-$$" "$out/phone-relay"
 python3 "$ROOT/lib/release_manifest.py" relay "$out/phone-relay" "$out/manifest.json"

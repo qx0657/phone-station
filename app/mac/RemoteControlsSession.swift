@@ -3,6 +3,8 @@ import CryptoKit
 import Foundation
 
 struct RemoteControlsReading: Decodable {
+    let screenAvailable: Bool?
+    let screenProtocol: Int?
     struct Torch: Decodable { var available: Bool; var on: Bool?; var reason: String }
     var model: String
     var verified: Bool
@@ -99,6 +101,7 @@ final class RemoteControlsSession: ObservableObject {
               Date().timeIntervalSince(readAt) < 30, reading?.supportedModel == true else { return nil }
         return reading
     }
+    var canScreen: Bool { current?.screenAvailable == true && current?.screenProtocol == 1 && feedback.activity == nil }
     var canCapture: Bool { current?.screenshotAvailable == true && feedback.activity == nil && pendingCapture == nil }
     var canRecoverCapture: Bool {
         guard let pendingCapture, let currentRoute = route() else { return false }

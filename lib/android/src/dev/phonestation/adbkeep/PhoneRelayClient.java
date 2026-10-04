@@ -93,6 +93,7 @@ final class PhoneRelayClient implements Runnable {
     }
 
     void stop() {
+        ShizukuScreen.close();
         stopped.set(true);
         retry.changed();
         if (networkCallback != null) {

@@ -59,7 +59,7 @@ final class Station: ObservableObject {
     }
 
     var canOperate: Bool { link.serial != nil && feedback.activity == nil }
-    var canStartScreen: Bool { canOperate && !screen.isMirroring && !screen.isRecording }
+    var canStartScreen: Bool { (canOperate || remoteControls.canScreen) && (!screen.isMirroring || screen.usingRemote) && !screen.isRecording }
     var canScreenshot: Bool { canOperate || remoteControls.canCapture }
     var canStayAwake: Bool { canOperate || remoteControls.canStayAwake }
     var canTorch: Bool { canOperate || remoteControls.canTorch }
@@ -126,6 +126,10 @@ final class Station: ObservableObject {
         health.remote = { [weak self] in self?.mcp.channel == "remote" }
         link.allow = { [weak self] in self?.canOperate ?? false }
         screen.allow = { [weak self] in self?.canOperate ?? false }
+        screen.remoteRoute = { [weak self] in
+            guard let self, self.link.serial == nil, self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
         screen.allowStart = { [weak self] in self?.canStartScreen ?? false }
         torch.allow = { [weak self] in self?.canOperate ?? false }
         commands.allow = { [weak self] in self?.canOperate ?? false }

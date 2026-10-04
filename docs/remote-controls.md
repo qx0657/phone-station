@@ -1,6 +1,6 @@
 # Mac 远程截屏、亮屏与手电筒
 
-Mac 0.1.0 (14)、Android 58 起，首页这三项在只有已配置的远程中继时也可使用。`RemoteControlsSession` 只在没有已验证 adb 序列号时接管它们；本地操作继续使用原脚本。投屏、录屏、灯光跟随声音与交互式 adb 终端仍需要本机 adb。Mac 0.1.0 (21) 起，命令页保存的 `shell …` 可以通过远程 Shizuku 后台任务执行，见 [Mac 命令说明](mac-app.md)。
+Mac 0.1.0 (14)、Android 58 起，首页这三项在只有已配置的远程中继时也可使用。`RemoteControlsSession` 只在没有已验证 adb 序列号时接管它们；本地操作继续使用原脚本。本地脚本、灯光跟随声音与交互式 adb 终端仍需要本机 adb；Mac 23 的远程实时投屏与录屏见 [remote-screen.md](remote-screen.md)。Mac 0.1.0 (21) 起，命令页保存的 `shell …` 可以通过远程 Shizuku 后台任务执行，见 [Mac 命令说明](mac-app.md)。
 
 ## 可用状态
 

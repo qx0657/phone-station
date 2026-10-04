@@ -7,6 +7,9 @@ final class ScreenSession: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isStoppingRecording = false
 
+    var remoteRoute: () -> (String, String)? = { nil }
+    private let remoteScreen = RemoteScreenSession()
+    private(set) var usingRemote = false
     var allow: () -> Bool = { false }
     var allowStart: () -> Bool = { false }
     var onFinishedCapture: () -> Void = {}
@@ -22,6 +25,21 @@ final class ScreenSession: ObservableObject {
 
     init(feedback: StationFeedback) {
         self.feedback = feedback
+        remoteScreen.onReady = { [weak self] in self?.feedback.notice = "远程投屏已连接。" }
+        remoteScreen.onRecordingEnded = { [weak self] message, file in
+            guard let self else { return }
+            self.isRecording = false; self.isStoppingRecording = false
+            self.feedback.notice = file.map { "录屏已保存：\($0.lastPathComponent)" } ?? message
+            self.onFinishedCapture()
+            if self.quitAfterRecording {
+                self.quitAfterRecording = false; self.onQuitReady?(); self.onQuitReady = nil
+            }
+        }
+        remoteScreen.onEnded = { [weak self] message, _ in
+            guard let self else { return }
+            self.isMirroring = false; self.usingRemote = false
+            if !self.isRecording && self.feedback.notice?.hasPrefix("录屏已保存") != true { self.feedback.notice = message }
+        }
     }
 
     func screenshot() {
@@ -42,6 +60,11 @@ final class ScreenSession: ObservableObject {
     func startMirror() {
         guard allowStart() else { return }
         feedback.notice = nil
+        if let (endpoint, token) = remoteRoute() {
+            usingRemote = true; isMirroring = true
+            feedback.notice = "正在连接远程画面…"
+            remoteScreen.start(endpoint: endpoint, token: token, recording: nil); return
+        }
         let log = FileManager.default.temporaryDirectory.appendingPathComponent("phone-mirror-\(UUID().uuidString).log")
         do {
             let process = try StationRunner.startScript("mirror.sh", [], log: log) { [weak self] finished in
@@ -58,6 +81,7 @@ final class ScreenSession: ObservableObject {
     }
 
     func stopMirror() {
+        if usingRemote { remoteScreen.stop(); return }
         mirrorProcess?.interrupt()
     }
 
@@ -75,6 +99,16 @@ final class ScreenSession: ObservableObject {
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let filename = "\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(6)).mp4"
         let destination = folder.appendingPathComponent(filename)
+        if usingRemote {
+            isRecording = true; isStoppingRecording = false
+            feedback.notice = "等待关键帧开始录屏…"
+            remoteScreen.startRecording(destination); return
+        }
+        if let (endpoint, token) = remoteRoute() {
+            usingRemote = true; isMirroring = true; isRecording = true; isStoppingRecording = false
+            feedback.notice = "正在连接远程画面并录屏…"
+            remoteScreen.start(endpoint: endpoint, token: token, recording: destination); return
+        }
         let log = FileManager.default.temporaryDirectory.appendingPathComponent("phone-record-\(UUID().uuidString).log")
         feedback.notice = nil
         do {
@@ -96,6 +130,7 @@ final class ScreenSession: ObservableObject {
         guard isRecording && !isStoppingRecording else { return }
         isStoppingRecording = true
         feedback.notice = "正在结束录屏并保存文件…"
+        if usingRemote { remoteScreen.stopRecording(); return }
         recordProcess?.interrupt()
     }
 
