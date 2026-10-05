@@ -24,14 +24,28 @@ struct PhoneFeatureState: Decodable, Equatable, Sendable {
     }
     func allows(_ key: String) -> Bool { master && selected[key] == true }
     static func adb(_ output: String) -> PhoneFeatureState? {
-        let lines = output.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map(String.init)
-        guard lines.count == keys.count + 1, lines.allSatisfy({ $0 == "0" || $0 == "1" }) else { return nil }
+        let all = output.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map(String.init)
+        guard all.count == keys.count + 1 || all.count == keys.count + 3 else { return nil }
+        let lines = Array(all.prefix(keys.count + 1))
+        guard lines.allSatisfy({ $0 == "0" || $0 == "1" }) else { return nil }
         return PhoneFeatureState(master: lines[0] == "1", selected: Dictionary(uniqueKeysWithValues: zip(keys, lines.dropFirst().map { $0 == "1" })))
     }
 }
 
+/// Read-only settings already projected by the phone; unknown legacy choices stay unknown.
+struct PhoneConnectionPreferences: Equatable {
+    var localMcp: Bool?
+    var remote: Bool?
+    static func adb(_ output: String) -> PhoneConnectionPreferences? {
+        let lines = output.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map(String.init)
+        guard lines.count == PhoneFeatureState.keys.count + 3 else { return nil }
+        func flag(_ value: String) -> Bool? { value == "1" ? true : value == "0" ? false : nil }
+        return PhoneConnectionPreferences(localMcp: flag(lines[lines.count - 2]), remote: flag(lines[lines.count - 1]))
+    }
+}
+
 enum RemoteFeature {
-    case clipboard, notifications, screen, capture, controls, shell, install
+    case clipboard, notifications, screen, capture, controls, shell, install, fileAccess
     var scopes: [String] {
         switch self {
         case .clipboard, .notifications: return ["personal"]
@@ -40,6 +54,7 @@ enum RemoteFeature {
         case .controls: return ["controls"]
         case .shell: return ["shell"]
         case .install: return ["files.read", "files.write", "shell"]
+        case .fileAccess: return ["files.read", "files.write", "controls"]
         }
     }
     var title: String {
@@ -51,6 +66,7 @@ enum RemoteFeature {
         case .controls: return "远程手机控件"
         case .shell: return "远程 Shell"
         case .install: return "远程安装"
+        case .fileAccess: return "远程文件访问"
         }
     }
 }

@@ -20,9 +20,17 @@ final class Station: ObservableObject {
     let remoteControls: RemoteControlsSession
     private var navigation = StationNavigation()
     @Published var page: StationPage = .main {
-        didSet { navigation.changed(from: oldValue, to: page) }
+        didSet {
+            navigation.changed(from: oldValue, to: page)
+            if oldValue != page && feedback.activity == nil { feedback.notice = nil }
+        }
     }
     func goBack(fallback: StationPage = .main) { page = navigation.destination(fallback: fallback) }
+    @Published private(set) var featureGroup: PhoneFeatureGroup?
+    func openFeatures(_ group: PhoneFeatureGroup? = nil) {
+        featureGroup = group
+        page = .features
+    }
     @Published private(set) var permissionScopes: [String] = []
     private(set) var permissionReturnPage: StationPage = .more
     func openRemotePermissions(_ scopes: [String] = []) {
@@ -75,8 +83,25 @@ final class Station: ObservableObject {
         }.store(in: &subscriptions)
     }
 
-    var phoneFeatures: PhoneFeatureState? { link.phoneFeatures ?? (mcp.requestAvailable ? remoteControls.reading?.features : nil) }
+    var phoneFeatures: PhoneFeatureState? {
+        let readiness = mcp.requestAvailable ? remoteControls.reading?.features : nil
+        guard var local = link.phoneFeatures else { return readiness }
+        if let readiness, local.master == readiness.master && local.selected == readiness.selected {
+            local.reasons = readiness.reasons
+        }
+        return local
+    }
     func featureAllows(_ key: String) -> Bool { phoneFeatures?.allows(key) ?? true }
+    var mcpPresentation: McpServicePresentation {
+        let preferences = link.connectionPreferences
+        let local = mcp.localOnline && preferences?.localMcp != false
+        let remote = mcp.remoteOnline && preferences?.remote != false
+        return McpServicePresentation(paused: phoneFeatures?.master == false, gatewayReady: mcp.gatewayReady,
+            listening: mcp.listening && (local || remote), localOnline: local, localExpected: preferences?.localMcp == true,
+            remoteOnline: remote, remoteConfigured: preferences?.remote == false ? false : mcp.remoteConfigured,
+            remoteChecking: preferences?.remote != false && mcp.remoteChecking,
+            closed: preferences?.localMcp == false && preferences?.remote == false)
+    }
     var canOperate: Bool { link.serial != nil && feedback.activity == nil && (phoneFeatures?.master ?? true) }
     var canStartScreen: Bool { featureAllows("screen") && (canOperate || remoteControls.canScreen) && (!screen.isMirroring || screen.usingRemote) && !screen.isRecording }
     var canScreenshot: Bool { featureAllows("capture") && (canOperate || remoteControls.canCapture) }

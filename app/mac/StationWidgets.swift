@@ -70,7 +70,7 @@ enum StationRows {
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
@@ -79,6 +79,7 @@ enum StationRows {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .accessibilityLabel("返回")
+        .accessibilityHint("返回上一页，当前页面：\(title)")
     }
 
     static func navigationRow(_ title: String, symbol: String, detail: String? = nil,
@@ -97,6 +98,7 @@ enum StationRows {
                             .font(.caption)
                             .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
                             .lineLimit(detailLineLimit)
+                            .fixedSize(horizontal: false, vertical: true)
                             .help(detail)
                     }
                 }
@@ -171,6 +173,49 @@ enum StationRows {
         if short.isEmpty { return "未知" }
         if build.isEmpty || build == short { return short }
         return "\(short) (\(build))"
+    }
+}
+
+/// Keep operation feedback beside its controls; completed notices can be dismissed.
+struct StationOperationFeedback: View {
+    @ObservedObject var station: Station
+    var body: some View {
+        if let text = station.feedbackText {
+            HStack(alignment: .top, spacing: 8) {
+                StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
+                if station.feedback.activity == nil, station.feedback.notice != nil {
+                    Button { station.feedback.notice = nil } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .medium))
+                            .frame(width: 22, height: 22).contentShape(Rectangle())
+                    }.buttonStyle(.borderless).help("收起操作反馈").accessibilityLabel("收起操作反馈")
+                }
+            }
+        }
+    }
+}
+
+private struct StationContentHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Hug short pages, while keeping expanded help and long states within the screen.
+struct StationPageScroll<Content: View>: View {
+    var maxHeight: CGFloat = 560
+    @ViewBuilder var content: () -> Content
+    @StationViewState private var contentHeight: CGFloat = 300
+
+    var body: some View {
+        ScrollView {
+            content().frame(maxWidth: .infinity, alignment: .leading)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: StationContentHeight.self, value: geometry.size.height)
+                })
+        }
+        .frame(height: min(contentHeight, maxHeight, max(200, (NSScreen.main?.visibleFrame.height ?? 900) - 96)))
+        .onPreferenceChange(StationContentHeight.self) { height in
+            if height > 0 { contentHeight = height }
+        }
     }
 }
 
@@ -348,5 +393,32 @@ final class HoverWashView: NSView {
         fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer?.add(fade, forKey: "wash")
         layer?.backgroundColor = color
+    }
+}
+
+/// Shared install and receipt actions, with the same authorization checks at every entry.
+struct PhoneAppInstallControls: View {
+    @ObservedObject var station: Station
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { station.setup.install() } label: {
+                Label("安装或更新手机应用", systemImage: "arrow.down.app")
+                    .font(.body).padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(PressFadeStyle())
+                .disabled(station.feedback.activity != nil || !station.featureAllows("shell") || !station.featureAllows("files.read") || !station.featureAllows("files.write") || (station.link.serial == nil && station.remoteBlocker([.install]) != nil))
+            if station.link.serial == nil, let blocker = station.remoteBlocker([.install]) {
+                RemotePermissionHint(station: station, blocker: blocker).padding(12)
+            }
+            if let id = station.setup.installJobID {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("上次安装任务").font(.caption).foregroundStyle(.secondary)
+                    Text(id).font(.caption.monospaced()).textSelection(.enabled)
+                    HStack {
+                        Button("查询原任务") { station.setup.queryInstall() }.disabled(station.feedback.activity != nil)
+                        Button("复制编号") { station.setup.copyInstallJobID() }
+                    }.buttonStyle(.borderless)
+                }.padding(10)
+            }
+        }
     }
 }

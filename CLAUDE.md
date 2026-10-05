@@ -15,6 +15,7 @@
 | 普通手机文件、剪贴板、Shizuku shell、APK 安装、远程控件 | [.agents/skills/phone-mcp/SKILL.md](.agents/skills/phone-mcp/SKILL.md)，细节按其引用读取 |
 | 安装/卸下全局会话提醒 | [.agents/skills/agent-notify/SKILL.md](.agents/skills/agent-notify/SKILL.md)，事件见 [docs/notify.md](docs/notify.md) |
 | 图库截图的信息价值与去重 | [.agents/skills/screenshot-cleanup/SKILL.md](.agents/skills/screenshot-cleanup/SKILL.md) |
+| 界面、页面组织、交互与文案 | [DESIGN.md 开发约束](DESIGN.md#开发约束)、[功能语义](docs/features.md)、[界面改动验收](docs/validation.md#界面改动验收) |
 | Mac 构建与进程、Android 权限与无线调试保持 | [docs/mac-app.md](docs/mac-app.md)、[docs/adb-keep.md](docs/adb-keep.md) |
 | 中继服务端、协议与持久恢复 | [server/relay/README.md](server/relay/README.md)、[docs/relay-contract.md](docs/relay-contract.md) |
 | 状态异常、任务中断、版本与发布 | [docs/troubleshooting.md](docs/troubleshooting.md)、[docs/releases.md](docs/releases.md) |
@@ -58,9 +59,12 @@ AI 优先使用已连接 MCP 工具，或 `mcp.sh call` 从 stdin 提交 JSON-RP
 
 ## 布局与验证
 
+- 界面改动先读 [DESIGN.md 开发约束](DESIGN.md#开发约束)：核心能力保持可见，连接方式、服务与功能分层，开关选择与真实状态分离；正常说明折叠，阻塞项直接给出处理入口。
+- 页面重组保留用户选择和授权，避免重复控制与状态卡；入口迁移同时维护深链、返回路径、缺项跳转及文档。按 [界面改动验收](docs/validation.md#界面改动验收) 核对受影响情形，未验收项明确记录。
+
 `scripts/` 是用户入口，`lib/` 是内部实现，`app/mac/` 是原生 Mac，`lib/android/` 是手机应用，`server/relay/` 是公网服务端。新用户脚本用 zsh、`set -euo pipefail`、按自身目录 source `../lib/common.sh`，支持 `-h`；不用 zsh 中与 PATH 绑定的变量名 path。需要 adb 的操作先 connect.sh，再 online_serial 获取唯一在线设备；远程 shell/安装不 connect。mDNS 发现统一用 `lib/adb_mdns.py`。
 
-统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/两个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
+统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/四个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
 
 改 Android Java/资源后运行 `lib/android/build.sh`，只在电脑构建并测试，不碰手机。完整 Mac 包用 `scripts/build-mac-app.sh`，公网包用 `scripts/build-relay.sh`。android.sh 是设备安装入口，不用于单纯构建。改 notify-sound/PlayPcm.java 或 torch/Torch.java 时运行各自 build.sh，不手改 dex，不把 R8 jar 放仓库。灯光跟随声音的机型限制、持灯与暂停规则见 [docs/torch.md](docs/torch.md)，通知与媒体音量差异见 [docs/notify.md](docs/notify.md)。
 

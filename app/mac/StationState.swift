@@ -17,6 +17,26 @@ enum StationPage: Equatable {
     case notifications
 }
 
+enum PhoneFeatureGroup: String, CaseIterable {
+    case sharing, files, commands, screen
+    var title: String {
+        switch self {
+        case .sharing: return "通知与剪贴板"
+        case .files: return "文件访问"
+        case .commands: return "命令与安装"
+        case .screen: return "屏幕与手机控制"
+        }
+    }
+    var keys: [String] {
+        switch self {
+        case .sharing: return ["clipboard", "notifications", "alerts"]
+        case .files: return ["files.read", "files.write", "open"]
+        case .commands: return ["shell"]
+        case .screen: return ["capture", "screen", "awake", "torch"]
+        }
+    }
+}
+
 /// Return to the actual entry page; selecting an ancestor unwinds the path.
 struct StationNavigation {
     private var history: [StationPage] = []

@@ -12,8 +12,8 @@ struct RemoteRelayPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("远程中继") { station.goBack(fallback: .mcp) }
-            ScrollView {
+            StationRows.subpageHeader("远程接入") { station.goBack(fallback: .mcp) }
+            StationPageScroll(maxHeight: showsConfiguration ? (mcp.configurePhone ? 400 : 316) : 160) {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
@@ -23,13 +23,10 @@ struct RemoteRelayPage: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(mcp.remoteOnline ? StationPalette.connected : mcp.remoteChecking ? StationPalette.caution : Color.secondary)
                         }
-                        Text("通过互联网使用手机的 MCP 工具。两端填写相同的地址和指纹，各自使用不同的令牌。")
+                        Text("通过互联网使用手机工具；两端使用相同的地址和指纹，以及各自的令牌。")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("在手机「设置 → 远程访问范围」中授权需要的功能。")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("查看远程访问范围与处理步骤") { station.openRemotePermissions() }
+                                                Button("查看远程访问范围与处理步骤") { station.openRemotePermissions() }
                             .buttonStyle(.borderless)
                     }
                     if showsConfiguration {
@@ -71,7 +68,6 @@ struct RemoteRelayPage: View {
                 }
                 .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 16)
             }
-            .frame(height: showsConfiguration ? (mcp.configurePhone ? 400 : 316) : 180)
             VStack(alignment: .leading, spacing: 10) {
                 if let error = mcp.remoteError {
                     Text(error).font(.subheadline).foregroundStyle(StationPalette.recording)
@@ -96,9 +92,7 @@ struct RemoteRelayPage: View {
                             .disabled(busy).opacity(busy ? 0.4 : 1)
                     }
                 }
-                if let text = station.feedbackText {
-                    StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
-                }
+                StationOperationFeedback(station: station)
             }.padding(16)
         }
         .onAppear { mcp.refreshRemoteProfile() }

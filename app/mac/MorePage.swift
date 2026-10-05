@@ -6,18 +6,18 @@ struct MorePage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             StationRows.subpageHeader("设置") { station.goBack(fallback: .main) }
-            ScrollView {
+            StationPageScroll(maxHeight: 560) {
                 VStack(alignment: .leading, spacing: 16) {
                     phoneStatus
                     VStack(alignment: .leading, spacing: 6) {
-                        StationRows.sectionTitle("连接与权限")
+                        StationRows.sectionTitle("手机管理")
                         VStack(spacing: 0) {
-                            StationRows.navigationRow("连接与配对", symbol: "wifi") { station.page = .connection }
+                            StationRows.navigationRow("连接设置", symbol: "network") { station.page = .connection }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("电脑接入", symbol: "point.3.connected.trianglepath.dotted", detail: station.mcp.summary,
-                                                      detailLineLimit: 1, needsAttention: station.link.isConnected && !station.mcp.listening && !station.mcp.remoteChecking) { station.page = .mcp }
+                            StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted", detail: station.mcpPresentation.summary,
+                                                      needsAttention: station.mcpPresentation.needsAttention) { station.page = .mcp }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("手机功能管理", symbol: "switch.2", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : nil) { station.page = .features }
+                            StationRows.navigationRow("手机功能管理", symbol: "switch.2", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : nil) { station.openFeatures() }
                             StationRows.groupDivider.padding(.leading, 38)
                             StationRows.navigationRow("手机权限", symbol: "checkmark.shield") { station.setup.openPermissions(serial: station.link.serial) }
                             StationRows.groupDivider.padding(.leading, 38)
@@ -29,24 +29,7 @@ struct MorePage: View {
                         VStack(spacing: 0) {
                             StationRows.navigationRow("命令与终端", symbol: "terminal") { station.page = .commands }
                             StationRows.groupDivider.padding(.leading, 38)
-                            Button { station.setup.install() } label: {
-                                Label("安装或更新手机应用", systemImage: "arrow.down.app")
-                                    .font(.body).padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }.buttonStyle(PressFadeStyle())
-                                .disabled(station.feedback.activity != nil || !station.featureAllows("shell") || !station.featureAllows("files.read") || !station.featureAllows("files.write") || (station.link.serial == nil && station.remoteBlocker([.install]) != nil))
-                            if station.link.serial == nil, let blocker = station.remoteBlocker([.install]) {
-                                RemotePermissionHint(station: station, blocker: blocker).padding(12)
-                            }
-                            if let id = station.setup.installJobID {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("上次安装任务").font(.caption).foregroundStyle(.secondary)
-                                    Text(id).font(.caption.monospaced()).textSelection(.enabled)
-                                    HStack {
-                                        Button("查询原任务") { station.setup.queryInstall() }.disabled(station.feedback.activity != nil)
-                                        Button("复制编号") { station.setup.copyInstallJobID() }
-                                    }.buttonStyle(.borderless)
-                                }.padding(10)
-                            }
+                            PhoneAppInstallControls(station: station)
                         }.elevatedGroup()
                     }
                     VStack(alignment: .leading, spacing: 6) {
@@ -72,20 +55,20 @@ struct MorePage: View {
                                     Text(item.1 ? "已找到" : "未找到").foregroundStyle(.secondary)
                                 }.font(.subheadline)
                             }
-                            Text("会话提醒按项目说明安装一次。文件通过电脑接入服务访问。")
+                            Text("会话提醒按项目说明安装一次。手机文件通过 MCP 服务访问。")
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }.padding(.top, 8)
                     }.font(.subheadline)
-                    if let text = station.feedbackText { StationRows.feedbackBanner(text, busy: station.feedback.activity != nil) }
+                    StationOperationFeedback(station: station)
                     Button("退出手机工位") { station.quit() }.buttonStyle(.borderless)
                 }.padding(.horizontal, 16).padding(.bottom, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: min(560, max(280, (NSScreen.main?.visibleFrame.height ?? 900) - 96)))
+            }
         }.onAppear { station.login.refresh() }
     }
 
     @ViewBuilder private var phoneStatus: some View {
-        if !station.health.issues.isEmpty || station.health.failure != nil {
+        if station.phoneFeatures?.master != false && (!station.health.issues.isEmpty || station.health.failure != nil) {
             VStack(alignment: .leading, spacing: 8) {
                 StationRows.sectionTitle("手机权限与状态")
                 if !station.health.issues.isEmpty {

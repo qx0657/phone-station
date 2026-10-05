@@ -54,7 +54,7 @@ final class SetupSession: ObservableObject {
 
     func openPermissions(serial: String?) {
         guard let serial, let adb = StationRunner.executable("adb") else {
-            feedback.notice = "请在手机侧栏打开「权限与检查」，按提示启动或授权 Shizuku。"
+            feedback.notice = "请在手机「设置」打开「权限与检查」，按提示启动或授权 Shizuku。"
             return
         }
         guard feedback.activity == nil else { return }
@@ -65,22 +65,22 @@ final class SetupSession: ObservableObject {
             await MainActor.run {
                 self.feedback.activity = nil
                 self.feedback.notice = result.succeeded ? "已打开手机权限页，请在手机上按提示处理。"
-                    : "手机权限页未能打开，请从手机侧栏进入「权限与检查」。"
+                    : "手机权限页未能打开，请从手机「设置」进入「权限与检查」。"
             }
         }
     }
 
     func openFeatures(serial: String?) {
         guard let serial, let adb = StationRunner.executable("adb"), feedback.activity == nil else {
-            feedback.notice = "请在手机首页打开「功能开关」。"; return
+            feedback.notice = "请在手机「设置」打开「功能管理」。"; return
         }
-        feedback.activity = "正在打开手机功能开关…"
+        feedback.activity = "正在打开手机功能管理…"
         Task.detached(priority: .userInitiated) {
             let result = StationRunner.capture(adb, ["-s", serial, "shell", "am", "start", "-n",
                 "dev.phonestation.adbkeep/.MainActivity", "--es", "dev.phonestation.adbkeep.PAGE", "features"], timeout: 10)
             await MainActor.run {
                 self.feedback.activity = nil
-                self.feedback.notice = result.succeeded ? "已打开手机功能开关，请在手机上选择。" : "手机页面未能打开，请从手机首页进入。"
+                self.feedback.notice = result.succeeded ? "已打开手机功能管理，请在手机上选择。" : "手机页面未能打开，请从手机「设置 → 功能管理」进入。"
             }
         }
     }

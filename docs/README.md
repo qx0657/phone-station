@@ -2,7 +2,7 @@
 
 日常用法在 [../README.md](../README.md)。那篇按事情排：Mac 菜单栏、Android 应用，然后是共享剪贴板、会话提醒、闪光灯、远程命令与安装、文件、屏幕，最后是准备和连接。无线调试保持写在 Android 应用里。这里是命令表面看不出来的做法：当时怎么验证的、机型上的差异、失败时实际碰到的情况。机型差异写在各篇里，不另开「某台手机」的目录。
 
-两端原生界面的配色、字体、共用组件与配置布局记录在 [DESIGN.md](../DESIGN.md)，其原生元数据在 [.impeccable/design.json](../.impeccable/design.json)。
+界面开发先看 [DESIGN.md 开发约束](../DESIGN.md#开发约束)，页面分工、控制与状态语义以此为准；按 [界面改动验收](validation.md#界面改动验收) 核对受影响情形。配色、字体和共用组件也在 DESIGN.md，原生元数据在 [.impeccable/design.json](../.impeccable/design.json)。
 
 | 文档 | 对应 | 这篇里有什么 |
 | --- | --- | --- |

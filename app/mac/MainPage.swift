@@ -5,74 +5,83 @@ struct MainPage: View {
     @StationViewState private var showsControls: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("手机工位").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
-                Spacer()
-                Button { station.page = .more } label: {
-                    HStack(spacing: 5) {
-                        if !station.health.issues.isEmpty {
-                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(StationPalette.caution)
-                                .accessibilityHidden(true)
+        StationPageScroll(maxHeight: 640) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("手机工位").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button { station.page = .more } label: {
+                        HStack(spacing: 5) {
+                            if station.phoneFeatures?.master != false && !station.health.issues.isEmpty {
+                                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(StationPalette.caution)
+                                    .accessibilityHidden(true)
+                            }
+                            Image(systemName: "gearshape").font(.system(size: 15))
                         }
-                        Text("设置")
+                        .frame(minWidth: 28, minHeight: 28).contentShape(Rectangle())
+                    }.buttonStyle(.borderless).help("设置 · " + settingsDetail)
+                        .accessibilityLabel("设置，\(settingsDetail)")
+                }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
+                header
+                VStack(alignment: .leading, spacing: 12) {
+                    actionRow
+                    if station.phoneFeatures?.master == false {
+                        Button("已暂停 · 查看恢复方法") { station.openFeatures() }
+                            .buttonStyle(.borderless).font(.subheadline).foregroundStyle(StationPalette.caution)
+                    } else if station.link.serial == nil && station.link.remoteConnected {
+                        if let blocker = station.remoteBlocker([.screen, .capture, .controls]) {
+                            RemotePermissionHint(station: station, blocker: blocker)
+                        }
                     }
-                }.buttonStyle(.borderless).help(settingsDetail)
-                    .accessibilityLabel("设置，\(settingsDetail)")
-            }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
-            header
-            VStack(alignment: .leading, spacing: 12) {
-                if station.phoneFeatures?.master == false {
-                    Text("手机工位已暂停，在手机首页点「恢复使用」即可继续。")
-                        .font(.subheadline).foregroundStyle(StationPalette.caution).fixedSize(horizontal: false, vertical: true)
-                }
-                actionRow
-                if station.link.serial == nil && station.link.remoteConnected {
-                    if let blocker = station.remoteBlocker([.screen, .capture, .controls]) {
-                        RemotePermissionHint(station: station, blocker: blocker)
+                    if let pending = station.remoteControls.pendingCapture {
+                        HStack {
+                            Button(station.remoteControls.captureRecoveryTitle) { station.remoteControls.recoverCapture() }
+                            Button("放弃并清理") { station.remoteControls.discardCapture() }
+                        }.buttonStyle(.borderless).disabled(!station.remoteControls.canRecoverCapture)
+                        Text("截图编号：\(pending.id)").font(.caption.monospaced()).textSelection(.enabled)
                     }
-                }
-                if let pending = station.remoteControls.pendingCapture {
-                    HStack {
-                        Button(station.remoteControls.captureRecoveryTitle) { station.remoteControls.recoverCapture() }
-                        Button("放弃并清理") { station.remoteControls.discardCapture() }
-                    }.buttonStyle(.borderless).disabled(!station.remoteControls.canRecoverCapture)
-                    Text("截图编号：\(pending.id)").font(.caption.monospaced()).textSelection(.enabled)
-                }
-                controlGroup
-                if let text = station.feedbackText {
-                    StationRows.feedbackBanner(text, busy: station.feedback.activity != nil)
-                }
-                if station.torch.beatNeedsAudioPermission {
-                    Button("打开「系统录音」") { station.torch.openAudioCaptureSettings() }
-                        .buttonStyle(.bordered)
-                }
-                VStack(spacing: 0) {
-                    StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.clipboard.summary,
-                                              detailLineLimit: 1, needsAttention: station.clipboard.shared && station.clipboard.blocker != nil) {
-                        station.page = .clipboard
+                    if station.phoneFeatures?.master != false && (!station.featureAllows("screen") || !station.featureAllows("capture")) {
+                        Button("管理屏幕功能") { station.openFeatures(.screen) }
+                            .buttonStyle(.borderless).font(.subheadline)
                     }
-                    StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.notifications.summary,
-                                              detailLineLimit: 1, needsAttention: notificationsNeedAttention) {
-                        station.page = .notifications
+                    controlGroup
+                    StationOperationFeedback(station: station)
+                    if station.torch.beatNeedsAudioPermission {
+                        Button("打开「系统录音」") { station.torch.openAudioCaptureSettings() }
+                            .buttonStyle(.bordered)
                     }
-                    StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
-                        station.page = .files
+                    VStack(spacing: 0) {
+                        StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted",
+                            detail: station.mcpPresentation.summary + " · 文件、命令与屏幕",
+                            needsAttention: station.mcpPresentation.needsAttention) { station.page = .mcp }
+                        StationRows.groupDivider.padding(.horizontal, 10)
+                        StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : station.clipboard.summary,
+                                                  needsAttention: station.phoneFeatures?.master != false && station.clipboard.shared && station.clipboard.blocker != nil) {
+                            station.page = .clipboard
+                        }
+                        StationRows.groupDivider.padding(.horizontal, 10)
+                        StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : station.notifications.summary,
+                                                  needsAttention: notificationsNeedAttention) {
+                            station.page = .notifications
+                        }
+                        StationRows.groupDivider.padding(.horizontal, 10)
+                        StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
+                            station.page = .files
+                        }
                     }
+                    .elevatedGroup()
                 }
-                .elevatedGroup()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
-        }
-        .onAppear {
-            showsControls = stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
+            .onAppear {
+                showsControls = stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
+            }
         }
     }
 
     private var notificationsNeedAttention: Bool {
+        if station.phoneFeatures?.master == false { return false }
         if station.notifications.receiving, station.notifications.snapshot?.enabled == true,
            station.remoteBlocker([.notifications])?.canResolve == true { return true }
         if station.health.issues.contains(where: { $0.destination == "notifications" }) { return true }
@@ -82,7 +91,7 @@ struct MainPage: View {
     }
 
     private var settingsDetail: String {
-        if !station.health.issues.isEmpty { return "\(station.health.issues.count) 项需要处理" }
+        if station.phoneFeatures?.master != false && !station.health.issues.isEmpty { return "\(station.health.issues.count) 项需要处理" }
         if station.health.failure != nil { return "手机状态暂未确认" }
         if station.remoteControls.failure != nil || (station.remoteControls.reading != nil && station.remoteControls.reason != nil) {
             return "查看远程控制状态"
@@ -134,7 +143,7 @@ struct MainPage: View {
                 StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
                 StationRows.toggleRow("灯光跟随声音", symbol: "waveform",
                                       subtitle: "跟随 Mac 播放的声音，需要本地连接",
-                                      isOn: beatBinding, enabled: station.canTorch || station.torch.torchBeat)
+                                      isOn: beatBinding, enabled: (station.link.serial != nil && station.canTorch) || station.torch.torchBeat)
             }
         } label: {
             HStack {
@@ -165,12 +174,16 @@ struct MainPage: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 5) {
-                        if !station.link.isConnected && (station.link.isChecking || station.link.isReconnecting || station.link.remoteChecking) {
-                            ProgressView().controlSize(.mini).accessibilityHidden(true)
-                        }
-                        Text([station.link.statusLabel, station.link.connectionLine].filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.system(size: 12)).foregroundStyle(statusTint)
+                    HStack(spacing: 10) {
+                        connectionIndicator(station.link.serial != nil ? (station.link.transport == "USB 连接" ? "USB" : "无线") : "本地未连接",
+                            symbol: station.link.transport == "USB 连接" ? "cable.connector" : station.link.serial != nil ? "wifi" : "wifi.slash",
+                            online: station.link.serial != nil, checking: station.link.serial == nil && (station.link.isChecking || station.link.isReconnecting))
+                        connectionIndicator(station.mcp.remoteOnline ? "远程" : station.mcp.remoteChecking ? "远程确认中" : "远程未连接",
+                            symbol: "network",
+                            online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
+                    }
+                    if !station.link.isConnected && !station.link.connectionLine.isEmpty {
+                        Text(station.link.connectionLine).font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -184,6 +197,13 @@ struct MainPage: View {
         .elevatedGroup()
         .padding(.horizontal, 16).padding(.bottom, 12)
         .help("连接设置与配对")
+    }
+
+    private func connectionIndicator(_ title: String, symbol: String, online: Bool, checking: Bool) -> some View {
+        Label(title, systemImage: symbol).font(.system(size: 11))
+            .foregroundStyle(online ? StationPalette.connected : checking ? StationPalette.caution : Color.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(title + (online ? "已连接" : checking ? "，检查中" : ""))
     }
 
     private func batteryReadout(_ reading: BatteryReport.Reading) -> some View {
