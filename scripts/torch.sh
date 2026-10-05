@@ -33,6 +33,7 @@ fi
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
+if [[ "$cmd" != status && "$cmd" != off ]]; then require_station_feature "$ADB" "$SERIAL" torch; fi
 
 if [[ ! -f "$DIR/../lib/torch.dex" ]]; then
   print -u2 -- "缺少 $DIR/../lib/torch.dex"

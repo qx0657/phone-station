@@ -51,7 +51,12 @@ final class ShizukuShell {
     }
 
     static Json execute(Context context, ShellRequest request) {
+        return execute(context, request, () -> {});
+    }
+
+    static Json execute(Context context, ShellRequest request, Runnable authorize) {
         synchronized (EXECUTION) {
+            authorize.run();
             requireAvailable(context);
             Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
                     new ComponentName(context, ShellUserService.class))
@@ -66,6 +71,7 @@ final class ShizukuShell {
                     throw new FileFailure("Shizuku 执行服务没有连上，请检查手机上的 Shizuku 状态");
                 }
                 requireAvailable(context);
+                authorize.run();
                 Parcel input = Parcel.obtain();
                 Parcel output = Parcel.obtain();
                 try {

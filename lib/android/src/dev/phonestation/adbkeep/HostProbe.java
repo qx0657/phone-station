@@ -13,13 +13,17 @@ final class HostProbe {
     final boolean remoteConnected;
     final String connectionType;
     final boolean remoteChecking;
+    final boolean localConnected;
+    final String localTransport;
 
-    private HostProbe(String headline, boolean linked, boolean remoteConnected, String connectionType, boolean remoteChecking) {
+    private HostProbe(String headline, boolean linked, boolean remoteConnected, String connectionType, boolean remoteChecking, boolean localConnected, String localTransport) {
         this.headline = headline;
         this.linked = linked;
         this.remoteConnected = remoteConnected;
         this.connectionType = connectionType;
         this.remoteChecking = remoteChecking;
+        this.localConnected = localConnected;
+        this.localTransport = localTransport == null ? "" : localTransport;
     }
 
     static HostProbe current(Context context) {
@@ -42,6 +46,11 @@ final class HostProbe {
             Log.i(KeeperEngine.TAG, "host " + headline);
             lastHeadline = headline;
         }
-        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking);
+        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking, HostLink.linked(marked, now), transport);
+    }
+
+    static boolean remoteOnly(Context context) {
+        HostProbe host = current(context);
+        return host.remoteConnected && !host.localConnected;
     }
 }

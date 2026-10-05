@@ -13,6 +13,15 @@ final class NotificationSession: ObservableObject {
     @Published private(set) var previewing = false
     var route: () -> (String, String)? = { nil }
     var remote: () -> Bool = { false }
+    var access: () -> RemoteAccessState = { .legacy }
+    var remoteBlocker: RemotePermissionBlocker? {
+        guard remote() else { return nil }
+        if let blocker = access().blocker(for: [.notifications]) { return blocker }
+        if snapshot?.remoteAllowed == false {
+            return RemoteAccessState(checked: true, permissions: ["personal": false]).blocker(for: [.notifications])
+        }
+        return nil
+    }
     private var nextPoll = Date.distantPast
     private let clientID = UUID().uuidString
     private var policy = NotificationReceivePolicy()
@@ -61,11 +70,13 @@ final class NotificationSession: ObservableObject {
         }
     }
     var summary: String {
+        guard receiving else { return "这台 Mac 已暂停接收" }
         guard connected, let snapshot else { return "等待手机连接" }
         guard snapshot.enabled else { return "手机端未开启" }
         guard snapshot.accessGranted else { return "手机需授权通知使用权" }
         guard snapshot.selectedCount > 0 else { return "请在手机选择应用" }
         guard snapshot.listenerConnected else { return "等待手机通知服务" }
+        if receiving, let remoteBlocker { return remoteBlocker.title }
         guard receiving else { return "这台 Mac 已暂停接收" }
         guard permission == .authorized else { return "Mac 需允许显示通知" }
         return "正在接收 · \(snapshot.selectedCount) 个应用"
@@ -78,7 +89,8 @@ final class NotificationSession: ObservableObject {
         if !on { dismissBanners() }
         policy.disconnect()
         message = nil
-        refresh()
+        if on && permission == .notDetermined { requestPermission() }
+        else { refresh() }
     }
     func setCustomBanners(_ on: Bool) {
         customBanners = on
@@ -93,7 +105,7 @@ final class NotificationSession: ObservableObject {
             defer { previewing = false }
             var event = PhoneNotification(id: "preview", key: "preview", packageName: "preview",
                 app: "手机工位", title: "横幅预览", text: "这是界面验证示例，收到手机通知时会显示对应应用图标。")
-            if let (endpoint, token) = route(),
+            if remoteBlocker == nil, let (endpoint, token) = route(),
                let data = try? await rpc(endpoint, token, "station_notification_icon", [:]),
                let icon = try? JSONDecoder().decode(NotificationIcon.self, from: data),
                let png = icon.png, let app = icon.app, let pkg = icon.packageName {
@@ -122,11 +134,13 @@ final class NotificationSession: ObservableObject {
     }
     func configurePhone(_ enabled: Bool) {
         guard !busy, let (endpoint, token) = route() else { return }
+        if let remoteBlocker { message = remoteBlocker.detail; return }
         busy = true
         Task {
             while inFlight { try? await Task.sleep(nanoseconds: 50_000_000) }
             defer { busy = false; refresh() }
             do {
+                if let remoteBlocker { message = remoteBlocker.detail; return }
                 let data = try await rpc(endpoint, token, "station_notification_configure", ["enabled": enabled])
                 snapshot = try JSONDecoder().decode(NotificationSnapshot.self, from: data)
                 policy.disconnect()
@@ -157,7 +171,7 @@ final class NotificationSession: ObservableObject {
                 icons.removeAll(); iconRoute = (endpoint, token); dismissBanners()
             }
             let version = generation
-            let consume = receiving && permission == .authorized && snapshot?.enabled == true
+            let consume = receiving && permission == .authorized && snapshot?.enabled == true && remoteBlocker == nil
             var arguments: [String: Any] = [:]
             if consume {
                 arguments["clientId"] = clientID
@@ -175,12 +189,12 @@ final class NotificationSession: ObservableObject {
                 if !state.enabled || !state.accessGranted || !state.listenerConnected || state.selectedCount == 0 {
                     icons.removeAll(); dismissBanners()
                 }
-                if consume && receiving && permission == .authorized && version == generation {
+                if consume && receiving && permission == .authorized && version == generation && remoteBlocker == nil {
                     let events = policy.receive(state)
                     for event in events {
                         var presented = event
                         presented.iconPNG = await icon(for: event.packageName, endpoint: endpoint, token: token)
-                        guard receiving, permission == .authorized, version == generation, let current = route(),
+                        guard receiving, permission == .authorized, version == generation, remoteBlocker == nil, let current = route(),
                               current.0 == endpoint, current.1 == token else { policy.disconnect(); break }
                         do { try await deliver(presented) }
                         catch { message = "Mac 通知未显示，请检查系统通知设置" }
@@ -189,16 +203,18 @@ final class NotificationSession: ObservableObject {
             } catch {
                 connected = false; policy.disconnect()
                 dismissBanners()
-                message = "通知同步暂时未连接，请检查 MCP 服务并更新手机工位"
+                message = remoteBlocker?.detail ?? error.localizedDescription
             }
         }
     }
     private func icon(for packageName: String, endpoint: String, token: String) async -> String? {
+        guard remoteBlocker == nil else { return nil }
         if let cached = icons[packageName], Date().timeIntervalSince(cached.1) < (cached.0 == nil ? 30 : 600) {
             return cached.0
         }
         let data = try? await rpc(endpoint, token, "station_notification_icon", ["packageName": packageName])
         let value = data.flatMap { try? JSONDecoder().decode(NotificationIcon.self, from: $0) }
+        guard remoteBlocker == nil else { return nil }
         let png = value?.packageName == packageName ? value?.png : nil
         // 图标只缓存在内存；断线和暂停的在途结果不会显示。
         if icons.count >= 48 { icons.removeAll() }

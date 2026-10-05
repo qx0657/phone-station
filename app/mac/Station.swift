@@ -18,7 +18,24 @@ final class Station: ObservableObject {
     let notifications: NotificationSession
     let health: DeviceHealthSession
     let remoteControls: RemoteControlsSession
-    @Published var page: StationPage = .main
+    private var navigation = StationNavigation()
+    @Published var page: StationPage = .main {
+        didSet { navigation.changed(from: oldValue, to: page) }
+    }
+    func goBack(fallback: StationPage = .main) { page = navigation.destination(fallback: fallback) }
+    @Published private(set) var permissionScopes: [String] = []
+    private(set) var permissionReturnPage: StationPage = .more
+    func openRemotePermissions(_ scopes: [String] = []) {
+        if page != .remotePermissions { permissionReturnPage = page }
+        permissionScopes = scopes.filter { RemoteAccessState.scopes.contains($0) }
+        page = .remotePermissions
+        remoteControls.refresh()
+    }
+    func remoteBlocker(_ features: [RemoteFeature]) -> RemotePermissionBlocker? {
+        guard mcp.channel == "remote" else { return nil }
+        return remoteControls.accessState.blocker(for: features)
+    }
+
     private var subscriptions = Set<AnyCancellable>()
 
     init() {
@@ -58,11 +75,13 @@ final class Station: ObservableObject {
         }.store(in: &subscriptions)
     }
 
-    var canOperate: Bool { link.serial != nil && feedback.activity == nil }
-    var canStartScreen: Bool { (canOperate || remoteControls.canScreen) && (!screen.isMirroring || screen.usingRemote) && !screen.isRecording }
-    var canScreenshot: Bool { canOperate || remoteControls.canCapture }
-    var canStayAwake: Bool { canOperate || remoteControls.canStayAwake }
-    var canTorch: Bool { canOperate || remoteControls.canTorch }
+    var phoneFeatures: PhoneFeatureState? { link.phoneFeatures ?? (mcp.requestAvailable ? remoteControls.reading?.features : nil) }
+    func featureAllows(_ key: String) -> Bool { phoneFeatures?.allows(key) ?? true }
+    var canOperate: Bool { link.serial != nil && feedback.activity == nil && (phoneFeatures?.master ?? true) }
+    var canStartScreen: Bool { featureAllows("screen") && (canOperate || remoteControls.canScreen) && (!screen.isMirroring || screen.usingRemote) && !screen.isRecording }
+    var canScreenshot: Bool { featureAllows("capture") && (canOperate || remoteControls.canCapture) }
+    var canStayAwake: Bool { featureAllows("awake") && (canOperate || remoteControls.canStayAwake) }
+    var canTorch: Bool { featureAllows("torch") && (canOperate || remoteControls.canTorch) }
 
     func screenshot() { link.serial != nil ? screen.screenshot() : remoteControls.screenshot() }
     func setStayAwake(_ on: Bool) { link.serial != nil ? link.setStayAwake(on) : remoteControls.setStayAwake(on) }
@@ -104,8 +123,12 @@ final class Station: ObservableObject {
     }
 
     private func wire() {
+        remoteControls.accessMonitoring = { [weak self] in
+            guard let self else { return false }
+            return self.mcp.requestAvailable
+        }
         remoteControls.route = { [weak self] in
-            guard let self, self.link.serial == nil, self.mcp.requestAvailable else { return nil }
+            guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
         remoteControls.onFinishedCapture = { [weak self] in self?.files.refresh() }
@@ -121,18 +144,25 @@ final class Station: ObservableObject {
             guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
+        clipboard.access = { [weak self] in self?.remoteControls.accessState ?? RemoteAccessState() }
+        notifications.access = { [weak self] in self?.remoteControls.accessState ?? RemoteAccessState() }
+        setup.installBlocker = { [weak self] in
+            guard let self, self.link.serial == nil else { return nil }
+            return self.remoteBlocker([.install])
+        }
+        setup.queryInstallBlocker = { [weak self] in self?.remoteBlocker([.shell]) }
         clipboard.remote = { [weak self] in self?.mcp.channel == "remote" }
         notifications.remote = { [weak self] in self?.mcp.channel == "remote" }
         health.remote = { [weak self] in self?.mcp.channel == "remote" }
-        link.allow = { [weak self] in self?.canOperate ?? false }
-        screen.allow = { [weak self] in self?.canOperate ?? false }
+        link.allow = { [weak self] in self?.canStayAwake ?? false }
+        screen.allow = { [weak self] in self?.canScreenshot ?? false }
         screen.remoteRoute = { [weak self] in
             guard let self, self.link.serial == nil, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
         screen.allowStart = { [weak self] in self?.canStartScreen ?? false }
-        torch.allow = { [weak self] in self?.canOperate ?? false }
-        commands.allow = { [weak self] in self?.canOperate ?? false }
+        torch.allow = { [weak self] in self?.canTorch ?? false }
+        commands.allow = { [weak self] in (self?.canOperate ?? false) && (self?.featureAllows("shell") ?? false) }
         commands.serial = { [weak self] in self?.link.serial }
         commands.remoteRoute = { [weak self] in
             guard let self, self.link.serial == nil, self.mcp.channel == "remote", self.mcp.requestAvailable else { return nil }
@@ -155,7 +185,7 @@ final class Station: ObservableObject {
             let changed = self.link.remoteConnected != connected
             self.link.noteRemoteConnection(connected)
             // RTT/status updates must not start another controls read each time.
-            if !self.mcp.requestAvailable || (changed && self.remoteControls.monitoring) {
+            if !self.mcp.requestAvailable || changed {
                 self.remoteControls.refresh()
             }
             if !self.mcp.requestAvailable || (changed && self.commands.monitoring) {

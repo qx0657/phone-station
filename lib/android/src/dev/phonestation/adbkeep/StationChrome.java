@@ -18,6 +18,7 @@ import android.view.WindowInsets;
 import android.graphics.Insets;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -100,6 +101,79 @@ final class StationChrome {
         card.addView(title, matchWrap());
     }
 
+    boolean stackedRows() {
+        Configuration config = activity.getResources().getConfiguration();
+        return config.fontScale > 1.3f || config.screenWidthDp < 340;
+    }
+
+    /** Infrequent help stays available without filling the settings page. */
+    Disclosure disclosure(String title, boolean expanded) {
+        LinearLayout card = card();
+        return new Disclosure(card, title, expanded);
+    }
+
+    final class Disclosure {
+        final LinearLayout body;
+        final Link link;
+        final String title;
+        boolean expanded;
+
+        Disclosure(LinearLayout card, String title, boolean expanded) {
+            this.title = title;
+            this.expanded = expanded;
+            link = statusLinkRow(card, R.drawable.ic_status_about, title, view -> {
+                this.expanded = !this.expanded;
+                paint();
+            });
+            body = new LinearLayout(activity);
+            body.setOrientation(LinearLayout.VERTICAL);
+            card.addView(body, matchWrap());
+            hairline(body, 16);
+            paint();
+        }
+
+        private void paint() {
+            body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            link.chevron.setRotation(expanded ? 270 : 90);
+            link.row.setContentDescription(title + (expanded ? "，收起" : "，展开"));
+            link.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            if (Build.VERSION.SDK_INT >= 30) {
+                link.row.setStateDescription(expanded ? "已展开" : "已折叠");
+            }
+        }
+    }
+
+    /** 分组标题右侧的总开关；标题可换行，开关始终保留独立点击空间。 */
+    Switch groupSwitch(LinearLayout card, String label, String controlLabel) {
+        LinearLayout line = row();
+        line.setMinimumHeight(dp(60));
+        line.setPadding(dp(16), dp(6), dp(8), 0);
+        TextView title = text(20);
+        title.setText(label);
+        title.setTypeface(medium);
+        title.setIncludeFontPadding(false);
+        heading(title);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titleParams.setMarginEnd(dp(12));
+        line.addView(title, titleParams);
+        Switch toggle = new Switch(activity);
+        toggle.setId(View.generateViewId());
+        toggle.setContentDescription(controlLabel);
+        toggle.setMinimumWidth(dp(48));
+        toggle.setMinimumHeight(dp(48));
+        toggle.setSplitTrack(false);
+        tintSwitch(toggle);
+        title.setLabelFor(toggle.getId());
+        line.addView(toggle, wrap());
+        line.setClickable(true);
+        line.setOnClickListener(view -> { if (toggle.isEnabled()) { toggle.toggle(); } });
+        line.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ripple(line);
+        card.addView(line, matchWrap());
+        return toggle;
+    }
+
     void back(String label) {
         LinearLayout bar = row();
         bar.setMinimumHeight(dp(48));
@@ -126,6 +200,63 @@ final class StationChrome {
         column.addView(bar, matchWrap());
     }
 
+    void homeHeader(String label, View.OnClickListener settings) {
+        LinearLayout bar = row();
+        TextView title = text(22);
+        title.setText(label);
+        title.setTypeface(medium);
+        heading(title);
+        bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
+        ImageButton settingsButton = new ImageButton(activity);
+        settingsButton.setImageResource(R.drawable.ic_settings);
+        settingsButton.setImageTintList(ColorStateList.valueOf(ink()));
+        settingsButton.setScaleType(ImageView.ScaleType.CENTER);
+        settingsButton.setPadding(0, 0, 0, 0);
+        settingsButton.setBackground(null);
+        settingsButton.setMinimumWidth(dp(48));
+        settingsButton.setMinimumHeight(dp(48));
+        settingsButton.setContentDescription("设置");
+        settingsButton.setTooltipText("设置");
+        settingsButton.setOnClickListener(settings);
+        ripple(settingsButton);
+        bar.addView(settingsButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        column.addView(bar, matchWrap());
+    }
+
+    Button homeAction(String label, int iconRes, View.OnClickListener click) {
+        Button button = textAction(label, click);
+        button.setPadding(dp(12), dp(6), dp(12), dp(6));
+        button.setGravity(Gravity.CENTER);
+        button.setBackgroundResource(R.drawable.bg_home_action);
+        button.setBackgroundTintList(null);
+        button.setStateListAnimator(null);
+        button.setTextColor(new ColorStateList(new int[][] {
+                new int[] {-android.R.attr.state_enabled}, new int[] {}},
+                new int[] {muted(), ink()}));
+        setActionIcon(button, iconRes);
+        return button;
+    }
+
+    void setActionIcon(Button button, int iconRes) {
+        Drawable icon = activity.getDrawable(iconRes).mutate();
+        icon.setBounds(0, 0, dp(20), dp(20));
+        icon.setTintList(button.getTextColors());
+        button.setCompoundDrawablePadding(dp(8));
+        button.setCompoundDrawablesRelative(icon, null, null, null);
+    }
+
+    Button textAction(String label, View.OnClickListener click) {
+        Button button = new Button(activity, null, android.R.attr.borderlessButtonStyle);
+        button.setText(label);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        button.setTextColor(ink());
+        button.setAllCaps(false);
+        button.setMinHeight(dp(48));
+        button.setMinimumHeight(dp(48));
+        button.setOnClickListener(click);
+        return button;
+    }
+
     Badge disc(int iconRes) {
         return badge(48, -1, iconRes, 24);
     }
@@ -138,19 +269,22 @@ final class StationChrome {
     /** 只读的左右两列，没有图标。 */
     TextView valueRow(LinearLayout card, String label) {
         LinearLayout line = row();
+        boolean stacked = stackedRows();
+        if (stacked) { line.setOrientation(LinearLayout.VERTICAL); line.setGravity(Gravity.START); }
         line.setMinimumHeight(dp(46));
-        line.setPadding(dp(16), 0, dp(16), 0);
+        line.setPadding(dp(16), dp(6), dp(16), dp(6));
         TextView name = text(16);
         name.setText(label);
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        line.addView(name, nameParams);
+        line.addView(name, stacked ? matchWrap() : nameParams);
         TextView value = text(15);
         value.setIncludeFontPadding(false);
-        value.setGravity(Gravity.END);
+        value.setGravity(stacked ? Gravity.START : Gravity.END);
+        if (stacked) { value.setPadding(0, dp(4), 0, 0); }
         value.setTextIsSelectable(true);
-        line.addView(value, wrap());
+        line.addView(value, stacked ? matchWrap() : wrap());
         card.addView(line, matchWrap());
         return value;
     }
@@ -186,7 +320,7 @@ final class StationChrome {
         TextView name = text(16);
         name.setText(label);
         name.setIncludeFontPadding(false);
-        name.setMaxLines(2);
+        // Let long names grow with the user's font size.
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nameParams.setMarginStart(dp(12));
@@ -248,6 +382,11 @@ final class StationChrome {
     }
 
     Link statusLinkRow(LinearLayout card, int iconRes, String label, View.OnClickListener click) {
+        return statusLinkRow(card, iconRes, label, null, click);
+    }
+
+    Link statusLinkRow(LinearLayout card, int iconRes, String label, String subtitle, View.OnClickListener click) {
+        boolean stacked = stackedRows();
         Mark mark = mark(iconRes);
         mark.fill.setColor(color(R.color.well));
         mark.icon.setColorFilter(ink(), PorterDuff.Mode.SRC_IN);
@@ -258,20 +397,41 @@ final class StationChrome {
         TextView name = text(16);
         name.setText(label);
         name.setIncludeFontPadding(false);
-        name.setMaxLines(2);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         nameParams.setMarginStart(dp(12));
-        line.addView(name, nameParams);
+        LinearLayout words = new LinearLayout(activity);
+        words.setOrientation(LinearLayout.VERTICAL);
+        words.setPadding(0, dp(10), 0, dp(10));
+        words.addView(name, matchWrap());
+        if (subtitle != null) {
+            TextView detail = text(14);
+            detail.setText(subtitle);
+            detail.setTextColor(muted());
+            detail.setPadding(0, dp(4), 0, 0);
+            words.addView(detail, matchWrap());
+        }
+        line.addView(words, nameParams);
         TextView value = text(15);
         value.setIncludeFontPadding(false);
-        value.setGravity(Gravity.END);
-        value.setMaxLines(1);
-        value.setMaxWidth(dp(100));
-        value.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        value.setGravity(stacked ? Gravity.START : Gravity.END);
+        if (!stacked) {
+            value.setMaxLines(2);
+            value.setMaxWidth(dp(112));
+            value.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        }
         LinearLayout.LayoutParams valueParams = wrap();
         valueParams.setMarginStart(dp(8));
-        line.addView(value, valueParams);
+        if (stacked) { words.addView(value, matchWrap()); }
+        else { line.addView(value, valueParams); }
+        value.setVisibility(View.GONE);
+        value.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                value.setVisibility(s.length() == 0 ? View.GONE : View.VISIBLE);
+            }
+            public void afterTextChanged(android.text.Editable editable) {}
+        });
         ImageView chevron = glyph(R.drawable.ic_chevron, 18, muted());
         LinearLayout.LayoutParams chevronParams = new LinearLayout.LayoutParams(dp(18), dp(18));
         chevronParams.setMarginStart(dp(2));

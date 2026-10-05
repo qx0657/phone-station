@@ -40,3 +40,58 @@ scrcpy_bin() {
 online_serial() {
   python3 "$PHONE_STATION_LIB_DIR/adb_mdns.py" --adb "$1" serial
 }
+
+# Android 66 projects phone-owned feature choices for the existing adb scripts.
+# Older phones have no projection and keep their established behavior.
+require_station_feature() {
+  local station_flags station_master station_child
+  station_flags=$("$1" -s "$2" shell "settings get global phonestation_enabled; settings get global phonestation_feature_${3//./_}" 2>/dev/null) || {
+    print -u2 -- "无法确认手机功能开关，请检查连接后重试。"; return 1
+  }
+  station_flags=${station_flags//$'\r'/}
+  station_master=${station_flags%%$'\n'*}
+  station_child=${station_flags##*$'\n'}
+  if [[ "$station_master" == 0 || "$station_child" == 0 ]]; then
+    print -u2 -- "手机工位总开关或对应功能已关闭，请在手机首页「功能开关」中开启。"
+    return 1
+  fi
+}
+
+# Keep recording finalization intact when a phone-owned switch is revoked.
+run_station_screen() {
+  local station_pid station_code=0 station_stop=0
+  # Noninteractive shells ignore INT in background jobs. Reset it before exec
+  # so scrcpy can install its normal graceful-stop handler.
+  python3 -c 'import os, signal, sys
+for event in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP): signal.signal(event, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' "$@" &
+  station_pid=$!
+  trap 'station_stop=1; kill -INT "$station_pid" 2>/dev/null || true' INT TERM HUP
+  while kill -0 "$station_pid" 2>/dev/null; do
+    if [[ "$station_stop" == 1 ]] || ! require_station_feature "$ADB" "$SERIAL" screen; then
+      kill -INT "$station_pid" 2>/dev/null || true
+      break
+    fi
+    sleep 2
+  done
+  # A hung encoder must not keep a revoked screen session alive indefinitely.
+  if kill -0 "$station_pid" 2>/dev/null; then
+    local station_attempt
+    for station_attempt in {1..25}; do
+      kill -0 "$station_pid" 2>/dev/null || break
+      sleep 0.2
+    done
+    if kill -0 "$station_pid" 2>/dev/null; then
+      print -u2 -- "录屏进程未响应正常停止，正在结束；请检查录像文件是否完整。"
+      kill -TERM "$station_pid" 2>/dev/null || true
+      for station_attempt in {1..10}; do
+        kill -0 "$station_pid" 2>/dev/null || break
+        sleep 0.2
+      done
+      if kill -0 "$station_pid" 2>/dev/null; then kill -KILL "$station_pid" 2>/dev/null || true; fi
+    fi
+  fi
+  wait "$station_pid" || station_code=$?
+  trap - INT TERM HUP
+  return "$station_code"
+}

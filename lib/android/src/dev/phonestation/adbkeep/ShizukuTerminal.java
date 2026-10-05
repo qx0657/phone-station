@@ -15,6 +15,11 @@ final class ShizukuTerminal {
     private static Shizuku.UserServiceArgs serviceArgs;
 
     static synchronized Json call(Context context, Json request, boolean start) {
+        return call(context, request, start, () -> {});
+    }
+
+    static synchronized Json call(Context context, Json request, boolean start, Runnable authorize) {
+        authorize.run();
         String id = request.get("sessionId").string();
         Json status = ShizukuShell.status(context);
         if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
@@ -35,6 +40,7 @@ final class ShizukuTerminal {
         }
         Parcel input = Parcel.obtain(), output = Parcel.obtain();
         try {
+            authorize.run();
             input.writeInterfaceToken(TerminalUserService.DESCRIPTOR);
             input.writeString(request.emit());
             if (!connection.binder.transact(TerminalUserService.CALL, input, output, 0)) { throw new FileFailure("请更新手机工位以支持远程终端"); }
@@ -51,6 +57,13 @@ final class ShizukuTerminal {
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
         connection = null; serviceArgs = null;
+    }
+    static synchronized void closeSessions(Context context, java.util.Set<String> ids) {
+        if (connection == null) { return; }
+        for (String id : ids) {
+            try { call(context, TerminalJobs.request("close", id), false); }
+            catch (FileFailure ignored) { /* Never bind a service during revocation. */ }
+        }
     }
     private static final class Connection implements ServiceConnection {
         final CountDownLatch ready = new CountDownLatch(1);

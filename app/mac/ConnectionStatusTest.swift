@@ -22,6 +22,23 @@ private final class ProbeSequence: @unchecked Sendable {
 struct ConnectionStatusTest {
     @MainActor
     static func main() async {
+        var navigation = StationNavigation()
+        navigation.changed(from: .main, to: .more)
+        navigation.changed(from: .more, to: .connection)
+        precondition(navigation.destination(fallback: .main) == .more, "connection returns to its settings entry")
+        navigation.changed(from: .connection, to: .mcp)
+        precondition(navigation.destination(fallback: .more) == .connection, "nested setup preserves its entry")
+        navigation.changed(from: .mcp, to: .connection)
+        precondition(navigation.destination(fallback: .main) == .more, "back unwinds without creating a cycle")
+        navigation.changed(from: .connection, to: .main)
+        navigation.changed(from: .main, to: .connection)
+        precondition(navigation.destination(fallback: .more) == .main, "home entry stays independent")
+        let switches = PhoneFeatureState.adb((["0"] + Array(repeating: "1", count: PhoneFeatureState.keys.count)).joined(separator: "\n"))
+        precondition(switches?.master == false && switches?.selected["alerts"] == true)
+        precondition(switches?.allows("alerts") == false, "master blocks without overwriting child intent")
+        precondition(PhoneFeatureState.adb("null\nnull") == nil, "legacy phone remains compatible")
+        let independent = PhoneFeatureState(master: true, selected: ["alerts": false, "notifications": true])
+        precondition(independent.allows("notifications") && !independent.allows("alerts"))
         var frames = ConnectionFrames(format: .adb)
         precondition(frames.append(Data("00".utf8)).isEmpty)
         precondition(frames.append(Data("03a".utf8)).isEmpty)
@@ -108,11 +125,18 @@ struct ConnectionStatusTest {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let feedback = StationFeedback()
+        let setup = SetupSession(feedback: feedback, defaults: defaults)
+        setup.installBlocker = { RemoteAccessState(checked: true, permissions: [:]).blocker(for: [.install]) }
+        setup.install()
+        precondition(setup.installJobID == nil && feedback.activity == nil && feedback.notice?.contains("尚未开始安装") == true,
+                     "denied installation does not allocate or overwrite a task ID")
+        feedback.notice = nil
         var route: (String, String)? = ("test-endpoint", "test-token")
         var model = "PGT-AN20"
         var torchOn = false
         var writes = 0
         var reads = 0
+        var permissions: [String: Bool]? = nil
         let controls = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, args in
             if name == "station_torch" {
                 writes += 1
@@ -123,16 +147,24 @@ struct ConnectionStatusTest {
             reads += 1
             return try JSONSerialization.data(withJSONObject: ["model": model, "verified": true,
                 "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
-                "screenshotAvailable": true, "screenshotReason": "",
+                "screenshotAvailable": true, "screenshotReason": "", "remotePermissions": permissions as Any? ?? NSNull(),
                 "torch": ["on": torchOn, "available": true, "reason": ""]])
         })
         controls.route = { route }
         controls.refresh()
         for _ in 0..<100 where controls.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
         precondition(controls.canCapture && controls.canStayAwake && controls.canTorch && controls.stayAwake)
+        permissions = ["controls": true, "files.read": false]
+        controls.refresh()
+        for _ in 0..<100 where controls.reading?.remotePermissions == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(!controls.canCapture && controls.canStayAwake, "capture is blocked before creating a screenshot when download permission is missing")
+        permissions = ["controls": true, "files.read": true]
+        controls.refresh()
+        for _ in 0..<100 where !controls.canCapture { try? await Task.sleep(nanoseconds: 1_000_000) }
+        let readsBeforeTorch = reads
         controls.setTorch(true)
         precondition(!controls.canCapture, "忙时不得重复发起操作")
-        for _ in 0..<100 where feedback.activity != nil || reads < 2 { try? await Task.sleep(nanoseconds: 1_000_000) }
+        for _ in 0..<100 where feedback.activity != nil || reads <= readsBeforeTorch { try? await Task.sleep(nanoseconds: 1_000_000) }
         precondition(writes == 1 && controls.torchOn && feedback.notice?.contains("结果可能已生效") == true,
                      "丢失应答后只能读取实际状态，不能重放开关")
         route = nil
@@ -181,13 +213,20 @@ struct ConnectionStatusTest {
         defaults.set(try! JSONEncoder().encode(saved), forKey: "phoneStationPendingCapture")
         var releaseCalls = 0
         let cleanup = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
-            if name == "station_controls_status" { throw ClipboardRPC.Failure(message: "offline") }
+            if name == "station_controls_status" {
+                return try JSONSerialization.data(withJSONObject: ["model": "PGT-AN20", "verified": true,
+                    "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
+                    "screenshotAvailable": true, "screenshotReason": "", "remotePermissions": ["controls": true],
+                    "torch": ["on": false, "available": true, "reason": ""]])
+            }
             precondition(name == "station_screen_capture_release", "保存后只清理，不重新下载")
             releaseCalls += 1
             if releaseCalls == 1 { throw ClipboardRPC.Failure(message: "lost cleanup response") }
             return Data("{}".utf8)
         })
         cleanup.route = { ("capture-endpoint", "token") }
+        cleanup.refresh()
+        for _ in 0..<100 where cleanup.reading == nil { try? await Task.sleep(nanoseconds: 1_000_000) }
         cleanup.recoverCapture()
         for _ in 0..<100 where feedback.activity != nil { try? await Task.sleep(nanoseconds: 1_000_000) }
         precondition(cleanup.pendingCapture != nil)

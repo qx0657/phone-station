@@ -63,7 +63,7 @@ final class PermissionCopy {
             }
             this.missing = count;
             if (count == 0) {
-                this.summary = "已允许";
+                this.summary = rows.length == 0 ? "无需处理" : "已允许";
                 this.summaryTone = Tone.HELD;
             } else {
                 this.summary = "还有 " + count + " 项";
@@ -73,6 +73,12 @@ final class PermissionCopy {
     }
 
     private PermissionCopy() {}
+
+    static Board relevant(Board board, java.util.Set<String> required) {
+        java.util.List<Row> rows = new java.util.ArrayList<>();
+        for (Row row : board.rows) { if (required.contains(row.title)) { rows.add(row); } }
+        return new Board(rows.toArray(new Row[0]));
+    }
 
     static String impact(Row row) {
         switch (row.title) {

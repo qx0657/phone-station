@@ -32,6 +32,32 @@ class DeviceMismatch(RemoteError):
     pass
 
 
+class PermissionRequired(RemoteError):
+    pass
+
+
+def check_permissions(state: dict, scopes: list[str]):
+    features = state.get("features")
+    labels = {"files.read": "文件读取", "files.write": "文件修改", "shell": "Shell 与 APK 安装"}
+    if isinstance(features, dict):
+        if features.get("master") is False:
+            raise PermissionRequired("手机工位总开关已关闭，请在手机首页重新开启。尚未提交新操作。")
+        selected = features.get("selected")
+        if isinstance(selected, dict):
+            disabled = [labels[scope] for scope in scopes if selected.get(scope) is False]
+            if disabled:
+                raise PermissionRequired("功能已关闭：" + "、".join(disabled)
+                    + "。请在手机「功能开关」中开启。尚未提交新操作。")
+    permissions = state.get("remotePermissions")
+    if not isinstance(permissions, dict):
+        return
+    labels = {"files.read": "文件读取", "files.write": "文件修改", "shell": "Shell 与安装"}
+    missing = [labels[scope] for scope in scopes if permissions.get(scope) is not True]
+    if missing:
+        raise PermissionRequired("远程访问未允许：" + "、".join(missing)
+            + "。请在手机「权限与检查 → 远程访问范围」中允许；旧版称「远程权限」，更早版本入口在「MCP 服务 → 远程通道」。尚未提交新操作。")
+
+
 def gateway_binary() -> Path:
     for candidate in (ROOT / "lib/phone-relay-gateway", ROOT / "build/.phone-station/phone-relay-gateway"):
         if candidate.is_file() and os.access(candidate, os.X_OK):
@@ -78,6 +104,7 @@ class Client:
         self.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
                                 "clientInfo": {"name": "phone-remote-ops", "version": "1"}})
         names = {item["name"] for item in self.rpc("tools/list", {}).get("tools", [])}
+        self.require_permissions(["files.read", "files.write", "shell"] if install else ["shell"], names)
         required = {"station_shell_status", "station_shell_exec"}
         if install:
             required |= {"station_file_access_policy", "station_file_create_directory", "station_file_write_bytes", "station_file_append_bytes", "station_file_write_text"}
@@ -90,6 +117,14 @@ class Client:
         model = self.shell("getprop ro.product.model")["stdout"].strip()
         if model.replace("_", "-") != "PGT-AN20":
             raise DeviceMismatch(f"当前机型 {model} 尚未验证，停止设备操作。")
+
+    def require_permissions(self, scopes: list[str], names: set[str] | None = None):
+        if names is None:
+            names = {item["name"] for item in self.rpc("tools/list", {}).get("tools", [])}
+        if "station_controls_status" not in names:
+            return  # Older phones have no permission metadata.
+        state = self.tool("station_controls_status")
+        check_permissions(state, scopes)
 
     def shell(self, command: str, timeout_ms: int = 10000, output_bytes: int = 32768) -> dict:
         arguments = {"command": command, "timeoutMs": timeout_ms, "maxOutputBytes": output_bytes}
@@ -542,6 +577,7 @@ def main(argv=None) -> int:
         if args.mode == "install" and args.status:
             client.rpc_timeout = 20
             client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "phone-install-status", "version": "1"}})
+            client.require_permissions(["shell"])
             result = install_status(client, args.status)
             print(json.dumps(result, ensure_ascii=False))
             return 0 if result.get("completed") else 75 if result["state"] in {"running", "recovering"} else 1
@@ -575,7 +611,7 @@ def main(argv=None) -> int:
         print(str(error), file=sys.stderr)
         if job_id:
             print(f"保留任务编号：{job_id}。结果未确认时先查询，不要重复安装。", file=sys.stderr)
-        return 75 if args.mode == "install" and args.check and not isinstance(error, DeviceMismatch) else 1
+        return 75 if args.mode == "install" and args.check and not isinstance(error, (DeviceMismatch, PermissionRequired)) else 1
 
 
 if __name__ == "__main__":

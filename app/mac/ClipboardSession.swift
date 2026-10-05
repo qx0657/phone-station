@@ -21,6 +21,8 @@ final class ClipboardSession: ObservableObject {
     @Published private(set) var lastSyncDirection: String?
     var route: () -> (String, String)? = { nil }
     var remote: () -> Bool = { false }
+    var access: () -> RemoteAccessState = { .legacy }
+    @Published private(set) var remoteBlocker: RemotePermissionBlocker?
     private let clientID = UUID().uuidString
     private var policy = ClipboardSyncPolicy()
     private var recovery = ClipboardRecovery()
@@ -57,6 +59,7 @@ final class ClipboardSession: ObservableObject {
         }
     }
     var summary: String {
+        if let remoteBlocker { return remoteBlocker.title }
         guard shared else { return "未开启" }
         if let blocker { return blocker.status }
         guard connected else { return recovering ? "正在恢复同步" : "等待剪贴板连接" }
@@ -93,7 +96,18 @@ final class ClipboardSession: ObservableObject {
             self.lastSyncDirection = nil
         }
     }
+    private func pauseForPermission(_ value: RemotePermissionBlocker) {
+        if remoteBlocker != value { remoteBlocker = value }
+        policy.disconnect(); recovery.reset(); recovering = false; connected = false; checking = false
+        phone = nil; mac = .empty; lastSyncAt = nil; lastSyncDirection = nil
+    }
+    private func permissionBlocked() -> Bool {
+        if remote(), let value = access().blocker(for: [.clipboard]) { pauseForPermission(value); return true }
+        remoteBlocker = nil
+        return false
+    }
     private func perform(_ name: String, _ arguments: [String: Any], done: @escaping (Data) -> Void) {
+        guard !permissionBlocked() else { return }
         guard !busy, let (endpoint, token) = route() else {
             message = "请先连接 MCP 服务，稍后重试"
             return
@@ -102,7 +116,9 @@ final class ClipboardSession: ObservableObject {
         Task {
             while inFlight { try? await Task.sleep(nanoseconds: 50_000_000) }
             do {
+                guard !permissionBlocked() else { busy = false; return }
                 let data = try await call(endpoint, token, name, arguments)
+                guard !permissionBlocked() else { busy = false; return }
                 done(data)
             } catch { message = error.localizedDescription }
             busy = false
@@ -116,6 +132,7 @@ final class ClipboardSession: ObservableObject {
         return local
     }
     func refresh() {
+        guard !permissionBlocked() else { return }
         // Sample newer copies while a request waits; no content queue is needed.
         let local = sample()
         let availableRoute = route()
@@ -138,7 +155,7 @@ final class ClipboardSession: ObservableObject {
                 checking = false
                 requestStarted = nil
                 nextPoll = clock() + (remote() ? 2 : 0)
-                if shared, sample().count != sentCount, !busy { refresh() }
+                if !permissionBlocked(), shared, sample().count != sentCount, !busy { refresh() }
             }
             do {
                 var current = local
@@ -148,6 +165,7 @@ final class ClipboardSession: ObservableObject {
                 if needsProbe {
                     // Reconcile an unknown outcome without replaying the old exchange.
                     let data = try await call(endpoint, token, "station_clipboard_state", ["refresh": true])
+                    guard !permissionBlocked() else { return }
                     let snapshot = try JSONDecoder().decode(ClipboardSnapshot.self, from: data)
                     applySettings(snapshot)
                     if let error = snapshot.error { interrupted(error); return }
@@ -170,6 +188,7 @@ final class ClipboardSession: ObservableObject {
                         interrupted(nil); return
                     }
                 }
+                guard !permissionBlocked() else { return }
                 let wireKind = current.clip.kind == "image" && !imagesSupported ? "unsupported" : current.clip.kind
                 var args: [String: Any] = ["clientId": clientID, "macVersion": String(current.count), "macKind": wireKind]
                 if let text = current.clip.text { args["macText"] = text }
@@ -189,6 +208,7 @@ final class ClipboardSession: ObservableObject {
                 guard let currentRoute = route(), currentRoute.0 == endpoint, currentRoute.1 == token else {
                     interrupted(nil); return
                 }
+                guard !permissionBlocked() else { return }
                 let snapshot = try JSONDecoder().decode(ClipboardSnapshot.self, from: data)
                 let settingsChanged = shared != snapshot.shared || automatic != snapshot.automatic || images != (snapshot.images ?? false)
                 applySettings(snapshot)
@@ -231,6 +251,7 @@ final class ClipboardSession: ObservableObject {
             timeout: arguments["macImage"] == nil ? 8 : 30, onStart: {
                 let valid = await MainActor.run {
                     guard let current = self.route(), current.0 == endpoint, current.1 == token else { return false }
+                    guard !self.permissionBlocked() else { return false }
                     self.requestStarted = self.clock()
                     return true
                 }

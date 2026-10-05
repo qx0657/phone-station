@@ -38,6 +38,8 @@ final class PhoneRelayClient implements Runnable {
     private final String endpoint;
     private final String pin;
     private final String encryptedToken;
+    private final String permissionRevision;
+    private final java.util.Set<String> terminalIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final AtomicBoolean stopped = new AtomicBoolean(false);
     private final String internalToken = newToken();
     private final Thread thread;
@@ -59,6 +61,7 @@ final class PhoneRelayClient implements Runnable {
     }
 
     static String connectionLabel(Context context) {
+        if (!StationFeatures.master(context)) { return "已暂停"; }
         if (!RemoteStore.configured(context)) { return "未配置"; }
         if (!RemoteStore.enabled(context)) { return "已关闭"; }
         PhoneRelayClient client = activeClient;
@@ -76,6 +79,7 @@ final class PhoneRelayClient implements Runnable {
         endpoint = RemoteStore.endpoint(context);
         pin = RemoteStore.pin(context);
         encryptedToken = RemoteStore.encryptedToken(context);
+        permissionRevision = RemoteStore.permissionRevision(context);
         thread = new Thread(this, "phone-station-relay");
         thread.setDaemon(true);
     }
@@ -83,7 +87,31 @@ final class PhoneRelayClient implements Runnable {
     boolean matchesProfile() {
         return endpoint.equals(RemoteStore.endpoint(context))
                 && pin.equals(RemoteStore.pin(context))
-                && encryptedToken.equals(RemoteStore.encryptedToken(context));
+                && encryptedToken.equals(RemoteStore.encryptedToken(context))
+                && permissionRevision.equals(RemoteStore.permissionRevision(context));
+    }
+
+    static void revokeActive() {
+        PhoneRelayClient client = activeClient;
+        if (client != null) { client.stop(); }
+    }
+
+    boolean stopped() { return stopped.get(); }
+
+    private void authorize(String tool) {
+        StationFeatures.require(context, tool);
+        if (stopped.get() || !RemoteStore.enabled(context) || !matchesProfile()) {
+            throw new FileFailure("远程连接或权限已撤销，尚未执行");
+        }
+        RemoteStore.policy(context).require(tool);
+    }
+
+    private void trackTerminal(String id) {
+        authorize("station_terminal_open");
+        if (terminalIds.size() >= OperationJobs.RECORD_LIMIT && !terminalIds.contains(id)) {
+            throw new FileFailure("本次远程连接的终端编号已满，尚未执行");
+        }
+        terminalIds.add(id);
     }
 
     void start() {
@@ -92,9 +120,10 @@ final class PhoneRelayClient implements Runnable {
         thread.start();
     }
 
-    void stop() {
+    synchronized void stop() {
+        if (stopped.getAndSet(true)) { return; }
         ShizukuScreen.close();
-        stopped.set(true);
+        ShizukuTerminal.closeSessions(context, terminalIds);
         retry.changed();
         if (networkCallback != null) {
             connectivity.unregisterNetworkCallback(networkCallback);
@@ -217,7 +246,7 @@ final class PhoneRelayClient implements Runnable {
         files.setMediaNotice(new MediaScan(context));
         McpProtocol.Reply reply = McpProtocol.handle(
                 payload, "Bearer " + internalToken, internalToken,
-                files, new StationBridge(context, files), version);
+                files, new StationBridge(context, files, this::authorize, this::trackTerminal), version);
         Json response = Json.obj().put("status", reply.status);
         if (!reply.body.isEmpty()) {
             response.put("body", Json.parse(reply.body));

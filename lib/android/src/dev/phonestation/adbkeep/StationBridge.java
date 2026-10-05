@@ -42,31 +42,70 @@ final class StationBridge implements StationHost {
         ShizukuTerminal.close(); terminalJobs = null; ShizukuScreen.close();
     }
     private static synchronized TerminalJobs terminals(Context context) {
-        if (terminalJobs == null) { terminalJobs = new TerminalJobs(jobs(context), (request, start) -> ShizukuTerminal.call(context, request, start)); }
+        if (terminalJobs == null) {
+            terminalJobs = new TerminalJobs(jobs(context), new TerminalJobs.Backend() {
+                public Json call(Json request, boolean start) { return ShizukuTerminal.call(context, request, start); }
+                public Json call(Json request, boolean start, Runnable authorize) { return ShizukuTerminal.call(context, request, start, authorize); }
+            });
+        }
         return terminalJobs;
     }
     private final Context context;
     private final FileOps files;
+    private final java.util.function.Consumer<String> access;
+    private final java.util.function.Consumer<String> terminalOwner;
+    private final String localRevision;
 
     StationBridge(Context context, FileOps files) {
+        this(context, files, null, null);
+    }
+
+    StationBridge(Context context, FileOps files, java.util.function.Consumer<String> access,
+            java.util.function.Consumer<String> terminalOwner) {
         this.context = context;
         this.files = files;
+        this.access = access;
+        this.terminalOwner = terminalOwner;
+        this.localRevision = RemoteStore.permissionRevision(context);
+    }
+
+    @Override public void authorize(String tool) {
+        StationFeatures.require(context, tool);
+        if (access != null) { access.accept(tool); }
+        else if (!FeaturePolicy.safe(tool) && !localRevision.equals(RemoteStore.permissionRevision(context))) {
+            throw new FileFailure("功能开关已变化，旧请求不会继续执行。请重新操作。");
+        }
     }
 
     @Override public Json shellStart(String id, ShellRequest request) {
         requireVerifiedModel();
         Json args = Json.obj().put("command", request.command).put("timeoutMs", request.timeoutMs).put("maxOutputBytes", request.maxOutputBytes);
-        return jobs(context).start(id, "shell", args, () -> ShizukuShell.execute(context, request));
+        return jobs(context).start(id, "shell", args, () -> ShizukuShell.execute(context, request, () -> authorize("station_shell_start")));
     }
     @Override public Json captureStart(String id, String requestId) {
         requireVerifiedModel(); ScreenCapture.path(requestId);
         return jobs(context).start(id, "capture", Json.obj().put("requestId", requestId), () -> screenCapture(requestId));
     }
-    @Override public Json operationStatus(String id) { return jobs(context).status(id); }
+    @Override public Json operationStatus(String id) {
+        Json receipt = jobs(context).status(id);
+        StationFeatures.requireJob(context, receipt);
+        if (access != null) { authorize("station_operation_status"); RemoteStore.policy(context).requireJob(receipt); }
+        return receipt;
+    }
     @Override public Json screenOpen(String id) {
         requireVerifiedModel();
         if (!RemoteStore.enabled(context) || !RemoteStore.configured(context)) { throw new FileFailure("请先连接远程中继"); }
+        RemoteStore.policy(context).require("station_screen_open");
+        String revision = RemoteStore.permissionRevision(context);
         return jobs(context).start(id, "screen.open", Json.obj().put("sessionId", id), () -> {
+            Runnable check = () -> {
+                authorize("station_screen_open");
+                if (!RemoteStore.enabled(context) || !revision.equals(RemoteStore.permissionRevision(context))) {
+                    throw new FileFailure("投屏权限或远程连接已变化，尚未执行");
+                }
+                RemoteStore.policy(context).require("station_screen_open");
+            };
+            check.run();
             String token;
             try { token = RemoteStore.decryptToken(RemoteStore.encryptedToken(context)); }
             catch (Exception e) { throw new FileFailure("远程凭据不可用"); }
@@ -74,13 +113,15 @@ final class StationBridge implements StationHost {
             try { for (java.net.InetAddress address : java.net.InetAddress.getAllByName(new java.net.URL(RemoteStore.endpoint(context)).getHost())) { addresses.add(Json.str(address.getHostAddress())); } }
             catch (Exception e) { throw new FileFailure("无法解析中继地址"); }
             return ShizukuScreen.call(context, Json.obj().put("op", "open").put("sessionId", id)
-                    .put("endpoint", RemoteStore.endpoint(context)).put("pin", RemoteStore.pin(context)).put("token", token).put("addresses", addresses), true);
+                    .put("endpoint", RemoteStore.endpoint(context)).put("pin", RemoteStore.pin(context)).put("token", token).put("addresses", addresses), true, check);
         });
     }
     @Override public Json screenStatus(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "status").put("sessionId", id), false); }
     @Override public Json screenClose(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "close").put("sessionId", id), false); }
     @Override public Json terminalOpen(String id, int columns, int rows) {
-        requireVerifiedModel(); return terminals(context).open(id, columns, rows);
+        requireVerifiedModel(); OperationJobs.validate(id);
+        if (terminalOwner != null) { terminalOwner.accept(id); }
+        return terminals(context).open(id, columns, rows, () -> authorize("station_terminal_open"));
     }
     @Override public Json terminalRead(String id, long offset) { return terminals(context).read(id, offset); }
     @Override public Json terminalInput(String id, long sequence, String hex) {
@@ -93,12 +134,18 @@ final class StationBridge implements StationHost {
 
     @Override
     public Json shellStatus() {
-        return ShizukuShell.status(context).put("terminalSupported", true).put("terminalProtocol", 1);
+        Json state = ShizukuShell.status(context).put("terminalSupported", true).put("terminalProtocol", 1);
+        if (!StationFeatures.active(context, "shell")) {
+            state.put("available", false).put("terminalSupported", false).put("reason", FeaturePolicy.denied(StationFeatures.master(context), "shell"));
+        } else if (access != null && !RemoteStore.policy(context).allows("station_shell_start")) {
+            state.put("available", false).put("terminalSupported", false).put("reason", RemotePermissionInfo.denied("shell"));
+        }
+        return state;
     }
 
     @Override
     public Json shellExecute(ShellRequest request) {
-        return ShizukuShell.execute(context, request);
+        return ShizukuShell.execute(context, request, () -> authorize("station_shell_exec"));
     }
 
     private static boolean verifiedModel() { return "PGT-AN20".equals(Build.MODEL.replace('_', '-')); }
@@ -115,25 +162,34 @@ final class StationBridge implements StationHost {
         String unsupported = verified ? "" : "当前机型 " + Build.MODEL + " 尚未验证，停止设备操作";
         Json lamp = verified ? ShizukuTorch.status(context) : Json.obj().put("available", false)
                 .put("on", Json.nul()).put("reason", unsupported);
-        return Json.obj().put("model", Build.MODEL).put("verified", verified)
-                .put("screenAvailable", verified && shell.get("available").boolValue() && RemoteStore.enabled(context) && RemoteStore.configured(context))
+        boolean screenAllowed = StationFeatures.active(context, "screen") && RemoteStore.policy(context).allows("station_screen_open");
+        boolean controlsAllowed = access == null || RemoteStore.policy(context).allows("station_screen_capture");
+        if (!StationFeatures.active(context, "torch")) { lamp = Json.obj().put("available", false).put("on", Json.nul()).put("reason", FeaturePolicy.denied(StationFeatures.master(context), "torch")); }
+        else if (!controlsAllowed) { lamp = Json.obj().put("available", false).put("on", Json.nul()).put("reason", RemotePermissionInfo.denied("controls")); }
+        Json permissions = Json.obj();
+        for (String scope : RemotePolicy.SCOPES) { permissions.put(scope, RemoteStore.permission(context, scope)); }
+        return Json.obj().put("model", Build.MODEL).put("verified", verified).put("remotePermissions", permissions).put("remotePermissionPageVersion", 1).put("features", StationFeatures.status(context))
+                .put("screenAvailable", screenAllowed && verified && shell.get("available").boolValue() && RemoteStore.enabled(context) && RemoteStore.configured(context))
+                .put("screenReason", !StationFeatures.active(context, "screen") ? FeaturePolicy.denied(StationFeatures.master(context), "screen") : !screenAllowed ? RemotePermissionInfo.denied("screen") : !verified ? unsupported
+                        : !shell.get("available").boolValue() ? shell.get("reason").string() : "")
                 .put("screenProtocol", 1)
                 .put("stayAwake", StayAwake.held(systemInt(Settings.System.SCREEN_OFF_TIMEOUT), globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN)))
-                .put("stayAwakeAvailable", verified && settings)
-                .put("stayAwakeReason", !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")
-                .put("screenshotAvailable", verified && storage && shell.get("available").boolValue())
-                .put("screenshotReason", !verified ? unsupported : !storage ? "请在手机权限页允许所有文件访问" : shell.get("reason").string())
+                .put("stayAwakeAvailable", StationFeatures.active(context, "awake") && controlsAllowed && verified && settings)
+                .put("stayAwakeReason", !StationFeatures.active(context, "awake") ? FeaturePolicy.denied(StationFeatures.master(context), "awake") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")
+                .put("screenshotAvailable", StationFeatures.active(context, "capture") && controlsAllowed && verified && storage && shell.get("available").boolValue())
+                .put("screenshotReason", !StationFeatures.active(context, "capture") ? FeaturePolicy.denied(StationFeatures.master(context), "capture") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : !storage ? "请在手机权限页允许所有文件访问" : shell.get("reason").string())
                 .put("torch", lamp);
     }
 
     @Override public Json screenCapture(String requestId) {
         requireVerifiedModel();
-        return ScreenCapture.capture(files, request -> ShizukuShell.execute(context, request), requestId);
+        return ScreenCapture.capture(files, request -> ShizukuShell.execute(context, request, () -> authorize("station_screen_capture")),
+                requestId, () -> authorize("station_screen_capture"));
     }
 
     @Override public Json torch(boolean on) {
         requireVerifiedModel();
-        return ShizukuTorch.set(context, on);
+        return ShizukuTorch.set(context, on, () -> authorize("station_torch"));
     }
 
     @Override
@@ -259,7 +315,7 @@ final class StationBridge implements StationHost {
     @Override public Json clipboardState(Json args) { return SharedClipboard.status(context, args); }
     @Override public Json clipboardConfigure(Json args) { return SharedClipboard.configure(context, args); }
     @Override public Json clipboardExchange(Json args) { return SharedClipboard.exchange(context, args); }
-    @Override public Json notificationStatus() { return PhoneNotifications.status(context); }
+    @Override public Json notificationStatus() { return PhoneNotifications.status(context).put("remoteAllowed", RemoteStore.permission(context, "personal")).put("alertsEnabled", StationFeatures.selected(context, "alerts")).put("alertsReady", StationFeatures.active(context, "alerts") && PermissionProbe.read(context).notifications); }
     @Override public Json notificationConfigure(Json args) { return PhoneNotifications.configure(context, args); }
     @Override public Json notificationPoll(Json args) { return PhoneNotifications.poll(context, args); }
     @Override public Json notificationIcon(String packageName) { return NotificationAppIcon.read(context, packageName); }

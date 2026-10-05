@@ -30,7 +30,7 @@ final class PhoneNotifications {
     }
     static synchronized NotificationSyncState state(Context context) {
         if (state == null) { state = new NotificationSyncState(context.getPackageName()); }
-        state.configure(enabled(context), selected(context));
+        state.configure(StationFeatures.master(context) && enabled(context), selected(context));
         state.access(accessGranted(context));
         return state;
     }
@@ -44,9 +44,10 @@ final class PhoneNotifications {
     static synchronized Json configure(Context context, Json args) {
         Json on = args.get("enabled");
         if (on != null && !on.isNull()) { prefs(context).edit().putBoolean("enabled", on.boolValue()).apply(); }
+        StationFeatures.publish(context);
         return status(context);
     }
-    static Json status(Context context) { return state(context).status(SystemClock.elapsedRealtime()); }
+    static Json status(Context context) { return state(context).status(SystemClock.elapsedRealtime()).put("enabled", enabled(context)).put("stationEnabled", StationFeatures.master(context)); }
     static synchronized Json poll(Context context, Json args) {
         Json id = args.get("clientId");
         Json cursor = args.get("cursor");

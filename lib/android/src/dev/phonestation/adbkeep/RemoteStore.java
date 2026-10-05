@@ -24,6 +24,7 @@ final class RemoteStore {
     private static final String ENDPOINT = "endpoint";
     private static final String PIN = "pin";
     private static final String TOKEN = "token";
+    private static final String PERMISSION_REVISION = "permission_revision";
     private static final String KEY_ALIAS = "phone_station_relay_v1";
     private static final String KEYSTORE = "AndroidKeyStore";
 
@@ -33,9 +34,46 @@ final class RemoteStore {
         return prefs(context).getBoolean(ENABLED, false);
     }
 
-    static void setEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(ENABLED, enabled).commit();
+    static boolean setEnabled(Context context, boolean enabled) {
+        SharedPreferences.Editor editor = prefs(context).edit().putBoolean(ENABLED, enabled);
+        if (enabled != enabled(context)) { editor.putString(PERMISSION_REVISION, java.util.UUID.randomUUID().toString()); }
+        boolean saved = editor.commit();
+        if (!enabled) { PhoneRelayClient.revokeActive(); ShizukuScreen.close(); }
         publishState(context);
+        return saved;
+    }
+
+    static String permissionRevision(Context context) { return prefs(context).getString(PERMISSION_REVISION, ""); }
+
+    static void invalidate(Context context) {
+        prefs(context).edit().putString(PERMISSION_REVISION, java.util.UUID.randomUUID().toString()).commit();
+        PhoneRelayClient.revokeActive(); ShizukuScreen.close();
+    }
+
+    static boolean permission(Context context, String scope) { return prefs(context).getBoolean("allow_" + scope, false); }
+
+    static String permissionSummary(Context context) {
+        int count = 0;
+        for (String scope : RemotePolicy.SCOPES) { if (permission(context, scope)) { count++; } }
+        return RemotePermissionInfo.summary(count);
+    }
+
+    static RemotePolicy policy(Context context) {
+        java.util.Set<String> grants = new java.util.HashSet<>();
+        for (String scope : RemotePolicy.SCOPES) { if (permission(context, scope)) { grants.add(scope); } }
+        return new RemotePolicy(grants);
+    }
+
+    // No MCP or pairing broadcast can grant these permissions; only the phone UI calls this.
+    static boolean setPermission(Context context, String scope, boolean allowed) {
+        if (!java.util.Arrays.asList(RemotePolicy.SCOPES).contains(scope)) { throw new IllegalArgumentException("未知远程权限"); }
+        if (permission(context, scope) == allowed) { return true; }
+        boolean saved = prefs(context).edit().putBoolean("allow_" + scope, allowed)
+                .putString(PERMISSION_REVISION, java.util.UUID.randomUUID().toString()).commit();
+        PhoneRelayClient.revokeActive();
+        // Screen streams always use the relay, including opens submitted over adb.
+        ShizukuScreen.close();
+        return saved;
     }
 
     static String endpoint(Context context) {
@@ -60,12 +98,19 @@ final class RemoteStore {
         }
         try {
             String encrypted = token.isEmpty() ? encryptedToken(context) : encrypt(token.toLowerCase(Locale.US));
-            boolean saved = prefs(context).edit()
+            boolean changed = !endpoint.equals(endpoint(context)) || !pin.equalsIgnoreCase(pin(context)) || !token.isEmpty();
+            SharedPreferences.Editor editor = prefs(context).edit();
+            if (changed) {
+                for (String scope : RemotePolicy.SCOPES) { editor.remove("allow_" + scope); }
+                editor.putString(PERMISSION_REVISION, java.util.UUID.randomUUID().toString());
+            }
+            boolean saved = editor
                     .putString(ENDPOINT, endpoint)
                     .putString(PIN, pin.toLowerCase(Locale.US))
                     .putString(TOKEN, encrypted)
                     .putBoolean(ENABLED, true)
                     .commit();
+            if (changed) { PhoneRelayClient.revokeActive(); ShizukuScreen.close(); }
             if (!saved) { return false; }
             publishState(context);
             return true;
@@ -75,7 +120,10 @@ final class RemoteStore {
     }
 
     static boolean forget(Context context) {
-        if (!prefs(context).edit().clear().commit()) { return false; }
+        boolean saved = prefs(context).edit().clear().commit();
+        PhoneRelayClient.revokeActive();
+        ShizukuScreen.close();
+        if (!saved) { return false; }
         publishState(context);
         try {
             KeyStore keyStore = KeyStore.getInstance(KEYSTORE);

@@ -1,6 +1,6 @@
 package dev.phonestation.adbkeep;
 
-/** 手机上「MCP说明」那一页的字。没有 Android 依赖，构建时在电脑上跑测试。 */
+/** MCP 服务页折叠说明。没有 Android 依赖，构建时在电脑上跑测试。 */
 final class McpHelp {
     static final class Section {
         final String title;
@@ -18,12 +18,13 @@ final class McpHelp {
         return new Section[] {
             new Section(
                     "怎么连上",
-                    "打开「MCP服务」之后，在电脑菜单栏的「手机工位」里打开同一项。\n"
+                    "在本页开启「本地 MCP 接入」，通过无线调试或 USB 连接电脑；也可在「远程连接」中配置互联网接入。"
+                            + "本地与远程可独立使用。电脑菜单栏的「手机工位」里打开「MCP 服务」。\n"
                             + "也可以在仓库里运行\n"
                             + "./scripts/mcp.sh\n"
                             + "界面上的地址只在手机本机。电脑上的地址和令牌在菜单栏，或脚本打印的那一行。"
                             + "开着的话，手机会记住，重启后还会再打开。"
-                            + "若需通过互联网继续访问，在「远程中继设置」填写服务器资料。"
+                            + "若需通过互联网继续访问，在「远程连接」填写服务器资料。"
                             + "Mac 填相同地址、指纹和另一枚电脑令牌，两端分别保存即可；也可由 Mac 通过 adb 同时配置。"),
             new Section(
                     "能做的",

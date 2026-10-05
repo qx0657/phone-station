@@ -6,11 +6,11 @@
 
 | 组件 | 当前源码目标 | 状态与证据 |
 |---|---|---|
-| Android | 63 | 已远程保留数据安装，APK 校验、后台服务自动恢复、实际 MCP 63 与实时屏幕真机验收通过 |
-| Mac / 本机网关 | 0.1.0 (25) | 已安装完整 App，整包与签名核对通过，仅远程 H.264/AAC 录屏与控制验收通过，两通道恢复 |
-| 公网中继 | 3 / durable-epochs-v1 | 已部署独立屏幕 WSS，保留原持久回执、配置与配对，实际进程摘要和服务恢复通过 |
+| Android | 67 | 已远程升级；原任务 completed / verified 为 true，安装 APK 摘要一致，本地与远程 MCP 均返回 67，总开关与 11 项子开关已部署 |
+| Mac / 本机网关 | 0.1.0 (30) | 已整包安装；签名、安装目录摘要、安装版 App / 网关进程核实，原配对与本地、远程连接保留 |
+| 公网中继 | 4 / durable-epochs-v1 | 已部署；实际运行程序摘要、持久目录、TLS、角色隔离及歧义请求拒绝核实 |
 
-本轮最终构建摘要和提交编号见下方验收记录。历史 Android 59 / Mac 17 的安装及旧中继上线事实见 [历史验证](history/README.md)，不能用来声明本轮版本已部署。
+本轮功能开关、界面与安全改动在 main 集中维护；实际安装来自当时的工作区构建，保留原回执中的 dirtyWorkingTree 事实。总开关与功能选择的规则见 [功能开关](features.md)，实际部署与验证边界见 [功能开关验收](history/features.md)；已有安全边界的验收见 [安全验证记录](history/security.md)。中继 4 的新构建与现网字节相同，本轮未停启或替换公网程序。最新 Android 首页与 MCP 页面整理、安装摘要和自动恢复结果见 [界面验收](history/design.md)。最后一次仅更新 Android，Mac 30 随包 APK 仍为此前已记录的构建；下方早期版本记录不代替本轮验证。
 
 ## 发布入口
 
@@ -21,7 +21,7 @@ lib/android/build.sh
 ./scripts/build-mac-app.sh
 ```
 
-中继发布包在 `build/.phone-station/relay/linux-amd64/`，包含程序与 `manifest.json`。完整 Mac 构建也自动生成 `build/.phone-station/android-manifest.json` 和 `mac-manifest.json`。回执标明源码提交、工作区是否有未提交改动、三端源码版本、产物大小和摘要，默认 `deployed: false`。正式发布应来自已提交的工作区；只构建 Android 或需要重新核对本地产物时也可用下面的内部工具生成回执，不会连接设备：
+中继发布包在 `build/.phone-station/relay/linux-amd64/`，包含程序与 `manifest.json`。完整 Mac 构建也自动生成 `build/.phone-station/android-manifest.json` 和 `mac-manifest.json`。回执标明源码提交、工作区是否有未提交改动、三端源码版本、产物大小和摘要，默认 `deployed: false`。按用户授权部署未提交工作区时，清单如实保留 `dirtyWorkingTree: true`，Git 提交与推送需另有明确要求。只构建 Android 或需要重新核对本地产物时也可用下面的内部工具生成回执，不会连接设备：
 
 ```sh
 python3 lib/release_manifest.py android build/adb-keep.apk build/.phone-station/android-manifest.json

@@ -31,8 +31,9 @@ fi
 ADB=$(adb_bin)
 SCRCPY=$(scrcpy_bin)
 SERIAL=$(online_serial "$ADB")
+require_station_feature "$ADB" "$SERIAL" screen
 print -r -- "录屏 $SERIAL"
 print -r -- "保存到 $out"
 print -r -- "结束：关闭窗口，或在这个终端按 Ctrl+C。"
 export ADB
-exec "$SCRCPY" --serial="$SERIAL" --stay-awake --record="$out" "$@"
+run_station_screen "$SCRCPY" --serial="$SERIAL" --stay-awake --record="$out" "$@"

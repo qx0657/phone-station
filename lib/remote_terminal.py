@@ -19,7 +19,7 @@ import time
 import tty
 import uuid
 
-from remote_ops import Client, RemoteError, DeviceMismatch
+from remote_ops import Client, RemoteError, DeviceMismatch, check_permissions
 
 TOOLS = {"station_terminal_open", "station_terminal_read", "station_terminal_input",
          "station_terminal_resize", "station_terminal_close"}
@@ -91,11 +91,12 @@ def initialize(client: Client):
     client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
                               "clientInfo": {"name": "phone-remote-terminal", "version": "1"}})
     names = {item["name"] for item in client.rpc("tools/list", {}).get("tools", [])}
-    if not TOOLS <= names:
-        raise RemoteError("请先更新手机工位到 61 或更新版本，以支持远程交互终端。")
     model = client.tool("station_controls_status")
     if model.get("model", "").replace("_", "-") != "PGT-AN20" or model.get("verified") is not True:
         raise DeviceMismatch("当前手机型号尚未验证，停止终端操作。")
+    check_permissions(model, ["shell"])
+    if not TOOLS <= names:
+        raise RemoteError("请先更新手机工位到 61 或更新版本，以支持远程交互终端。")
     state = client.tool("station_shell_status")
     if not state.get("available"):
         raise RemoteError(state.get("reason") or "Shizuku 尚不可用。")

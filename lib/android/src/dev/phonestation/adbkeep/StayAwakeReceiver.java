@@ -14,6 +14,7 @@ public final class StayAwakeReceiver extends BroadcastReceiver {
                 && !AlertSender.allowed(getSentFromUid(), android.os.Process.myUid(), intent.getFlags())) { return; }
         if (!intent.hasExtra("on")) { setResultData("缺少 on 参数"); return; }
         try {
+            if (intent.getBooleanExtra("on", false)) { StationFeatures.require(context, "station_stay_awake"); }
             StayAwakeController.set(context, intent.getBooleanExtra("on", false));
             setResultCode(1);
         } catch (RuntimeException error) { setResultData(error.getMessage()); }

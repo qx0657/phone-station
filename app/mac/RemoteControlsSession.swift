@@ -5,6 +5,10 @@ import Foundation
 struct RemoteControlsReading: Decodable {
     let screenAvailable: Bool?
     let screenProtocol: Int?
+    let screenReason: String?
+    let remotePermissions: [String: Bool]?
+    let remotePermissionPageVersion: Int?
+    let features: PhoneFeatureState?
     struct Torch: Decodable { var available: Bool; var on: Bool?; var reason: String }
     var model: String
     var verified: Bool
@@ -64,6 +68,7 @@ final class RemoteControlsSession: ObservableObject {
     private let captureKey = "phoneStationPendingCapture"
     var route: () -> (String, String)? = { nil }
     var monitoring = false
+    var accessMonitoring: () -> Bool = { false }
     private var nextPoll = Date.distantPast
     var onFinishedCapture: () -> Void = {}
     private let feedback: StationFeedback
@@ -89,7 +94,7 @@ final class RemoteControlsSession: ObservableObject {
         if startTimer {
             let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, self.monitoring, Date() >= self.nextPoll else { return }
+                    guard let self, self.monitoring || self.accessMonitoring(), Date() >= self.nextPoll else { return }
                     self.refresh()
                 }
             }
@@ -101,11 +106,19 @@ final class RemoteControlsSession: ObservableObject {
               Date().timeIntervalSince(readAt) < 30, reading?.supportedModel == true else { return nil }
         return reading
     }
+    var accessState: RemoteAccessState {
+        guard let route = route(), let readRoute, route.0 == readRoute.0, route.1 == readRoute.1,
+              Date().timeIntervalSince(readAt) < 30, let reading else {
+            return RemoteAccessState(failure: failure)
+        }
+        return RemoteAccessState(checked: true, permissions: reading.remotePermissions)
+    }
     var canScreen: Bool { current?.screenAvailable == true && current?.screenProtocol == 1 && feedback.activity == nil }
-    var canCapture: Bool { current?.screenshotAvailable == true && feedback.activity == nil && pendingCapture == nil }
+    var canCapture: Bool { accessState.blocker(for: [.capture]) == nil && current?.screenshotAvailable == true && feedback.activity == nil && pendingCapture == nil }
     var canRecoverCapture: Bool {
         guard let pendingCapture, let currentRoute = route() else { return false }
         return currentRoute.0 == pendingCapture.endpoint && feedback.activity == nil
+            && accessState.blocker(for: pendingCapture.localFile == nil ? [.capture] : [.controls]) == nil
     }
     var captureRecoveryTitle: String { pendingCapture?.localFile == nil ? "继续下载上次截图" : "清理手机临时截图" }
     private func rememberCapture(_ value: PendingCapture?) {
@@ -121,7 +134,7 @@ final class RemoteControlsSession: ObservableObject {
         if let failure { return failure }
         guard let reading else { return route() == nil ? nil : "正在检查远程控制状态…" }
         if !reading.supportedModel { return "当前机型尚未验证，远程设备操作未启用。" }
-        return [reading.stayAwakeReason, reading.screenshotReason, reading.torch.reason]
+        return [reading.stayAwakeReason, reading.screenshotReason, reading.torch.reason, reading.screenReason ?? ""]
             .filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: "；").nilIfEmpty
     }
     func refresh() {

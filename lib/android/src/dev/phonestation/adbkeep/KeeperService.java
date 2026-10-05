@@ -23,6 +23,7 @@ public final class KeeperService extends Service {
     private boolean probed;
 
     static void start(Context context) {
+        if (!StationFeatures.master(context)) { return; }
         Intent intent = new Intent(context, KeeperService.class);
         try {
             context.startForegroundService(intent);
@@ -39,7 +40,7 @@ public final class KeeperService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         StationNotifications.attachKeeper(this);
         StationNotifications.enter(this);
-        if (!KeeperStore.isEnabled(this)) {
+        if (!StationFeatures.master(this) || !KeeperStore.isEnabled(this)) {
             shutdown();
             return START_NOT_STICKY;
         }
@@ -72,7 +73,7 @@ public final class KeeperService extends Service {
     }
 
     private void onTick() {
-        if (!KeeperStore.isEnabled(this)) {
+        if (!StationFeatures.master(this) || !KeeperStore.isEnabled(this)) {
             shutdown();
             return;
         }

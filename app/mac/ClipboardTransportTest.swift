@@ -11,11 +11,21 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     exchanges = 0
+    redirected = 0
     def log_message(self, *args): pass
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         name = request['params']['name']
-        if name == 'station_device_status':
+        if self.path == '/redirected': Handler.redirected += 1
+        if name == 'station_test_redirect' and self.path == '/mcp':
+            self.send_response(307)
+            self.send_header('Location', '/redirected')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if name == 'station_test_redirect_count' or self.path == '/redirected':
+            value = {'redirected': Handler.redirected}
+        elif name == 'station_device_status':
             time.sleep(9)
             value = {'health': {'issues': []}}
         else:
@@ -41,6 +51,20 @@ server.serve_forever()
         var port = Data()
         while let byte = try output.fileHandleForReading.read(upToCount: 1), !byte.isEmpty, byte != Data([10]) { port.append(byte) }
         let endpoint = "http://127.0.0.1:\(String(data: port, encoding: .utf8)!)/mcp"
+        do {
+            _ = try await ClipboardRPC.call(endpoint: endpoint, token: "fixture", name: "station_test_redirect", arguments: [:])
+            preconditionFailure("HTTP redirect accepted")
+        } catch {}
+        let count = try await ClipboardRPC.call(endpoint: endpoint, token: "fixture", name: "station_test_redirect_count", arguments: [:])
+        let redirectInfo = try JSONSerialization.jsonObject(with: count) as! [String: Int]
+        precondition(redirectInfo["redirected"] == 0, "redirect must not leak the bearer or replay a mutation")
+        for bad in [endpoint + "?token=fixture", endpoint + "#fragment", endpoint.replacingOccurrences(of: "http://", with: "http://user@"),
+                    endpoint.replacingOccurrences(of: "http://", with: "https://")] {
+            do {
+                _ = try await ClipboardRPC.call(endpoint: bad, token: "fixture", name: "station_test_redirect_count", arguments: [:])
+                preconditionFailure("invalid MCP endpoint accepted")
+            } catch {}
+        }
         var local = ClipboardLocalState(count: 1, clip: .empty)
         var writes: [String] = []
         let clipboard = ClipboardSession(startTimer: false, readLocal: { local }, writeLocal: {

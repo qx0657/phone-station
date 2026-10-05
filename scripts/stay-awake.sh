@@ -24,6 +24,7 @@ fi
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
+if [[ "$enabled" == true ]]; then require_station_feature "$ADB" "$SERIAL" awake; fi
 if ! result=$("$ADB" -s "$SERIAL" shell am broadcast -f 0x00400000 \
     -n dev.phonestation.adbkeep/.StayAwakeReceiver \
     -a dev.phonestation.adbkeep.STAY_AWAKE --ez on "$enabled" 2>&1); then

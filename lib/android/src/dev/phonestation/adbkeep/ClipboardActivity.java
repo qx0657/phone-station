@@ -14,7 +14,8 @@ import java.util.concurrent.Executors;
 
 public final class ClipboardActivity extends Activity {
     private StationChrome ui;
-    private StationChrome.Control shared;
+    private android.widget.Switch shared;
+    private StationChrome.Disclosure help;
     private StationChrome.Control images;
     private TextView status;
     private TextView message;
@@ -36,8 +37,8 @@ public final class ClipboardActivity extends Activity {
         ui = new StationChrome(this);
         ui.back("共享剪贴板");
         LinearLayout settings = ui.card();
-        shared = ui.switchRow(settings, R.drawable.ic_status_clipboard, "共享剪贴板");
-        shared.toggle.setOnCheckedChangeListener((button, on) -> {
+        shared = ui.groupSwitch(settings, "自动同步", "共享剪贴板");
+        shared.setOnCheckedChangeListener((button, on) -> {
             if (!painting) { configure(Json.obj().put("shared", on)); }
         });
         ui.paragraph(settings, "复制文字或链接，自动同步到另一端。");
@@ -45,16 +46,21 @@ public final class ClipboardActivity extends Activity {
         images.toggle.setOnCheckedChangeListener((button, on) -> {
             if (!painting) { configure(Json.obj().put("images", on)); }
         });
-        ui.paragraph(settings, "默认关闭。开启后，新复制的 Mac 图片保存到相册的「手机工位」，成功后显示无声通知，点通知查看图片；每张最多 4 MB / 3200 万像素。");
+        ui.paragraph(settings, "开启后，新复制的 Mac 图片保存到手机相册。");
         LinearLayout sync = ui.card();
         ui.groupTitle(sync, "同步状态");
         status = ui.paragraph(sync, "正在核对同步状态…");
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        session = ui.valueRow(sync, "Mac 会话");
-        session.setText("正在核对");
         resolve = ui.action(sync, "查看处理方法", false, view -> {
-            Class<?> target = "mcp".equals(resolution) ? MainActivity.class : PermissionActivity.class;
-            startActivity(new Intent(this, target));
+            if ("master".equals(resolution)) { startActivity(new Intent(this, MainActivity.class)); return; }
+            if ("remotePermissions".equals(resolution)) {
+                startActivity(RemotePermissionsActivity.intent(this, "personal")); return;
+            }
+            if ("mcp".equals(resolution)) {
+                startActivity(new Intent(this, McpHelpActivity.class));
+            } else {
+                startActivity(new Intent(this, PermissionActivity.class).putExtra("feature", "clipboard"));
+            }
         });
         resolve.setVisibility(View.GONE);
         resume = ui.action(sync, "恢复自动同步", true,
@@ -63,13 +69,18 @@ public final class ClipboardActivity extends Activity {
         message = ui.paragraph(sync, "");
         message.setVisibility(View.GONE);
         message.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        LinearLayout help = ui.card();
-        ui.groupTitle(help, "怎么用");
-        ui.paragraph(help, "在任意应用复制，再到另一端粘贴。首次连接后，请重新复制一次。");
-        ui.paragraph(help, "Mac 手机工位需保持运行并连接 MCP 服务；手机需启动并授权 Shizuku。本地连接和远程通道都可同步，无需打开投屏。");
-        ui.linkRow(help, R.drawable.ic_status_permission, "查看 Shizuku 权限",
-                view -> startActivity(new Intent(this, PermissionActivity.class)));
-        ui.paragraph(help, "图片开关关闭时安静跳过，文字同步继续；文件与敏感内容仍跳过，锁屏时暂停。图片保存到相册，不覆盖手机剪贴板。文字仅保留在内存中，不显示正文、不保存历史；关闭共享后停止读取。");
+        help = ui.disclosure("使用说明与权限", saved != null && saved.getBoolean("help_expanded"));
+        LinearLayout details = help.body;
+        session = ui.valueRow(details, "Mac 连接");
+        session.setText("正在核对");
+        ui.paragraph(details, "在任意应用复制，再到另一端粘贴。首次连接后，请重新复制一次。");
+        ui.paragraph(details, "Mac 手机工位需保持运行并连接 MCP 服务；手机需启动并授权 Shizuku。本地连接和远程通道都可同步，无需打开投屏。");
+        ui.linkRow(details, R.drawable.ic_status_permission, "查看 Shizuku 权限",
+                view -> startActivity(new Intent(this, PermissionActivity.class).putExtra("feature", "clipboard")));
+        ui.paragraph(details, "图片同步默认关闭；开启后每张最多 4 MB / 3200 万像素，保存成功显示无声通知，点通知查看图片。图片开关关闭时安静跳过，文字同步继续；文件与敏感内容仍跳过，锁屏时暂停。图片保存到相册，不覆盖手机剪贴板。文字仅保留在内存中，不显示正文、不保存历史；关闭共享后停止读取。");
+    }
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("help_expanded", help.expanded); super.onSaveInstanceState(state);
     }
     @Override protected void onResume() { super.onResume(); active = true; handler.post(refresh); }
     @Override protected void onPause() { active = false; handler.removeCallbacks(refresh); super.onPause(); }
@@ -86,24 +97,24 @@ public final class ClipboardActivity extends Activity {
                 boolean enabled = state.get("shared").boolValue();
                 boolean automatic = state.get("automatic").boolValue();
                 painting = true;
-                shared.toggle.setChecked(enabled);
+                shared.setChecked(enabled);
                 boolean imageEnabled = state.get("images").boolValue();
                 images.toggle.setChecked(imageEnabled);
                 painting = false;
-                ui.paintOn(shared.mark, enabled);
                 ui.paintOn(images.mark, imageEnabled);
                 Json availability = state.get("availability");
                 String reason = availability.get("reason").string();
                 resolution = availability.get("action").string();
                 String title = availability.get("status").string();
                 status.setText(title + (reason.isEmpty() ? "" : "\n" + reason));
-                boolean needsAction = "permissions".equals(resolution) || "mcp".equals(resolution);
+                boolean needsAction = "permissions".equals(resolution) || "mcp".equals(resolution) || "remotePermissions".equals(resolution) || "master".equals(resolution);
                 status.setTextColor(enabled && needsAction ? ui.waiting()
                         : enabled && automatic && availability.get("ready").boolValue() ? ui.held() : ui.muted());
                 session.setText(!enabled ? "已停止" : state.get("macOnline").boolValue() ? "已连接" : "等待连接");
                 session.setTextColor(enabled && state.get("macOnline").boolValue() ? ui.held() : ui.muted());
                 resolve.setVisibility(needsAction ? View.VISIBLE : View.GONE);
-                resolve.setText("mcp".equals(resolution) ? "前往首页启用 MCP" : "查看 Shizuku 权限");
+                resolve.setText("master".equals(resolution) ? "前往首页恢复使用" : "remotePermissions".equals(resolution) ? "去授权剪贴板与通知"
+                        : "mcp".equals(resolution) ? "查看 MCP 服务" : "查看 Shizuku 权限");
                 resume.setVisibility(enabled && !automatic ? View.VISIBLE : View.GONE);
             });
         });
@@ -119,6 +130,7 @@ public final class ClipboardActivity extends Activity {
             String failure = null;
             try {
                 SharedClipboard.configure(this, args);
+                StationFeatures.changed(this, "clipboard");
                 if (SharedClipboard.shared(this)) {
                     KeeperStore.setMcpEnabled(this, true);
                     FileMcpService.start(this);
@@ -131,8 +143,10 @@ public final class ClipboardActivity extends Activity {
                 images.setEnabled(true);
                 resume.setEnabled(true);
                 if (!active) { return; }
-                if (error != null) { message.setText(error); message.setVisibility(View.VISIBLE); }
+                if (error != null) { message.setText(error); message.setTextColor(getColor(R.color.error)); message.setVisibility(View.VISIBLE); }
+                else if (!StationFeatures.master(this)) { message.setText("已保存，恢复使用后生效。"); message.setTextColor(ui.muted()); message.setVisibility(View.VISIBLE); }
                 load();
+                if (error == null && args.get("shared") != null && args.get("shared").boolValue()) { FeatureReadiness.prompt(this, "clipboard"); }
             });
         });
     }

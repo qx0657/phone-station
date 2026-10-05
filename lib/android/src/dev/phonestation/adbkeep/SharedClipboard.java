@@ -21,16 +21,18 @@ final class SharedClipboard {
     private static volatile String macKind = "";
     // Home diagnostics must not wait on a Shizuku bind or read any clipboard content.
     static Json health(Context context) {
+        if (!StationFeatures.master(context)) { return Json.obj().put("shared", shared(context)).put("automatic", automatic(context)).put("ready", false).put("status", "手机工位已暂停").put("reason", "请在首页开启总开关，子开关选择已保留").put("action", "master"); }
         long now = SystemClock.elapsedRealtime();
-        Json state = ClipboardAvailability.present(shared(context), automatic(context), FileMcpService.listening(),
+        Json state = ClipboardAvailability.present(shared(context), automatic(context), (FileMcpService.listening() || PhoneRelayClient.connected()),
                 HostProbe.current(context).linked, ShizukuShell.status(context),
-                macContact >= 0 && now >= macContact && now - macContact < 10_000L, lastFailure);
+                macContact >= 0 && now >= macContact && now - macContact < 10_000L, lastFailure,
+                HostProbe.remoteOnly(context) && !RemoteStore.permission(context, "personal"));
         return ClipboardAvailability.withContent(state, phoneKind, macKind);
     }
     private static android.content.SharedPreferences prefs(Context context) {
         return context.getSharedPreferences("clipboard", Context.MODE_PRIVATE);
     }
-    static boolean shared(Context context) { return prefs(context).getBoolean("shared", true); }
+    static boolean shared(Context context) { return prefs(context).getBoolean("shared", StationFeatures.legacy(context)); }
     static boolean automatic(Context context) { return prefs(context).getBoolean("automatic", true); }
     static boolean images(Context context) { return prefs(context).getBoolean("images", false); }
     static synchronized Json configure(Context context, Json args) {
@@ -49,6 +51,7 @@ final class SharedClipboard {
             STATE.clear(); macContact = -1; lastFailure = ""; phoneKind = ""; macKind = "";
         }
         if (!shared(context)) { close(); }
+        StationFeatures.publish(context);
         return status(context);
     }
     static synchronized Json status(Context context) {
@@ -87,7 +90,7 @@ final class SharedClipboard {
         };
     }
     static synchronized Json exchange(Context context, Json args) {
-        if (!shared(context)) { return status(context).put("appliedMac", false); }
+        if (!StationFeatures.active(context, "clipboard")) { return status(context).put("appliedMac", false); }
         try {
             Json result = STATE.exchange(access(context), args, automatic(context), images(context), SystemClock.elapsedRealtime());
             recordKinds(result);
@@ -111,6 +114,7 @@ final class SharedClipboard {
         return call(context, ClipboardUserService.READ, null);
     }
     private static Json call(Context context, int code, String text) {
+        StationFeatures.require(context, code == ClipboardUserService.READ ? "station_clipboard_get" : "station_clipboard_set");
         Json status = ShizukuShell.status(context);
         if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
         if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
@@ -134,6 +138,7 @@ final class SharedClipboard {
             input.writeInterfaceToken(ClipboardUserService.DESCRIPTOR);
             if (code == ClipboardUserService.WRITE) { input.writeString(text); }
             if (!connection.binder.transact(code, input, output, 0)) { throw new FileFailure("请更新手机端剪贴板服务"); }
+            StationFeatures.require(context, code == ClipboardUserService.READ ? "station_clipboard_get" : "station_clipboard_set");
             output.readException();
             Json result = Json.parse(output.readString());
             if (result.get("error") != null) { throw new FileFailure(result.get("error").string()); }

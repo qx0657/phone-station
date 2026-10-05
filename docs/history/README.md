@@ -10,4 +10,7 @@
 - [notify](notify.md)
 - [remote-controls](remote-controls.md)
 - [remote-ops](remote-ops.md)
+- [security](security.md)
 - [validation](validation.md)
+
+- [功能开关验收](features.md)

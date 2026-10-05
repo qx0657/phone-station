@@ -41,11 +41,15 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/RelayRetry.java" \
   "$here/src/dev/phonestation/adbkeep/RelayConnection.java" \
   "$here/src/dev/phonestation/adbkeep/RelayProfile.java" \
+  "$here/src/dev/phonestation/adbkeep/FeaturePolicy.java" \
+  "$here/src/dev/phonestation/adbkeep/RemotePolicy.java" \
+  "$here/src/dev/phonestation/adbkeep/RemotePermissionInfo.java" \
   "$here/src/dev/phonestation/adbkeep/AlertNote.java" \
   "$here/src/dev/phonestation/adbkeep/AlertSoundPlan.java" \
   "$here/src/dev/phonestation/adbkeep/AlertSender.java" \
   "$here/src/dev/phonestation/adbkeep/PermissionCopy.java" \
   "$here/src/dev/phonestation/adbkeep/McpHelp.java" \
+  "$here/src/dev/phonestation/adbkeep/McpStatus.java" \
   "$here/src/dev/phonestation/adbkeep/AboutCopy.java" \
   "$here/src/dev/phonestation/adbkeep/StationNote.java" \
   "$here/src/dev/phonestation/adbkeep/FilePolicy.java" \
@@ -76,11 +80,14 @@ javac --release 17 -d "$work/policy" \
   "$here/test/RelayRetryTest.java" \
   "$here/test/RelayConnectionTest.java" \
   "$here/test/RelayProfileTest.java" \
+  "$here/test/RemotePolicyTest.java" \
+  "$here/test/FeaturePolicyTest.java" \
   "$here/test/AlertNoteTest.java" \
   "$here/test/AlertSoundPlanTest.java" \
   "$here/test/AlertSenderTest.java" \
   "$here/test/PermissionCopyTest.java" \
   "$here/test/McpHelpTest.java" \
+  "$here/test/McpStatusTest.java" \
   "$here/test/AboutCopyTest.java" \
   "$here/test/StationNoteTest.java" \
   "$here/test/JsonTest.java" \
@@ -105,11 +112,14 @@ java -cp "$work/policy" dev.phonestation.adbkeep.HostLinkTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayRetryTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayConnectionTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayProfileTest
+java -cp "$work/policy" dev.phonestation.adbkeep.RemotePolicyTest
+java -cp "$work/policy" dev.phonestation.adbkeep.FeaturePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertNoteTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertSoundPlanTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AlertSenderTest
 java -cp "$work/policy" dev.phonestation.adbkeep.PermissionCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpHelpTest
+java -cp "$work/policy" dev.phonestation.adbkeep.McpStatusTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AboutCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.StationNoteTest
 java -cp "$work/policy" dev.phonestation.adbkeep.JsonTest

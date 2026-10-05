@@ -5,7 +5,7 @@ struct FilesPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("最近文件") { station.page = .main }
+            StationRows.subpageHeader("最近文件") { station.goBack(fallback: .main) }
             if station.files.recentFiles.isEmpty {
                 Text("截图和录屏完成后，会显示在这里。")
                     .font(.subheadline)

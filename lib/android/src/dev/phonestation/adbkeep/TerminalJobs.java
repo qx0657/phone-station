@@ -5,7 +5,10 @@ import java.util.Set;
 
 /** Durable creation receipt plus a live backend. Reads never bind/start a service. */
 final class TerminalJobs {
-    interface Backend { Json call(Json request, boolean start); }
+    interface Backend {
+        Json call(Json request, boolean start);
+        default Json call(Json request, boolean start, Runnable authorize) { authorize.run(); return call(request, start); }
+    }
     private final OperationJobs jobs;
     private final Backend backend;
     private final Set<String> cancelled = new HashSet<>();
@@ -13,11 +16,16 @@ final class TerminalJobs {
     TerminalJobs(OperationJobs jobs, Backend backend) { this.jobs = jobs; this.backend = backend; }
 
     Json open(String id, int columns, int rows) {
+        return open(id, columns, rows, () -> {});
+    }
+
+    Json open(String id, int columns, int rows, Runnable authorize) {
         OperationJobs.validate(id); dimensions(columns, rows);
         return jobs.start(id, "terminal", Json.obj().put("columns", columns).put("rows", rows), () -> {
             synchronized (this) {
                 if (cancelled.contains(id)) { return ended(id, "closed", "会话已关闭"); }
-                return backend.call(request("open", id).put("columns", columns).put("rows", rows), true);
+                authorize.run();
+                return backend.call(request("open", id).put("columns", columns).put("rows", rows), true, authorize);
             }
         });
     }

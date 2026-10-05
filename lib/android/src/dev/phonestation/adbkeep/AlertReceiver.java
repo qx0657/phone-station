@@ -28,6 +28,7 @@ public final class AlertReceiver extends BroadcastReceiver {
             setResultCode(0);
             return;
         }
+        if (!StationFeatures.active(context, "alerts")) { setResultCode(0); setResultData("电脑提醒接收已关闭"); return; }
         AlertNote note = AlertNote.parse(
                 intent.getStringExtra("title"),
                 intent.getStringExtra("text"),

@@ -5,18 +5,21 @@ struct ClipboardPage: View {
     @ObservedObject var clipboard: ClipboardSession
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("共享剪贴板") { station.page = .main }
+            StationRows.subpageHeader("共享剪贴板") { station.goBack(fallback: .main) }
             VStack(alignment: .leading, spacing: 14) {
                 StationRows.toggleRow("共享剪贴板", symbol: "doc.on.clipboard",
                     subtitle: "复制文字或链接，自动同步到另一端",
                     isOn: Binding(get: { clipboard.shared }, set: { clipboard.configure(shared: $0) }),
-                    enabled: station.mcp.listening && !clipboard.busy)
+                    enabled: station.mcp.listening && !clipboard.busy && station.remoteBlocker([.clipboard]) == nil)
                     .elevatedGroup()
                 StationRows.toggleRow("同步 Mac 图片到相册", symbol: "photo",
                     subtitle: "默认关闭；新图片存入手机相册，并显示无声通知",
                     isOn: Binding(get: { clipboard.images }, set: { clipboard.configure(images: $0) }),
-                    enabled: station.mcp.listening && clipboard.imagesSupported && !clipboard.busy)
+                    enabled: station.mcp.listening && clipboard.imagesSupported && !clipboard.busy && station.remoteBlocker([.clipboard]) == nil)
                     .elevatedGroup()
+                if let blocker = station.remoteBlocker([.clipboard]) {
+                    RemotePermissionHint(station: station, blocker: blocker)
+                }
                 VStack(alignment: .leading, spacing: 8) {
                     Label(clipboard.summary, systemImage: statusSymbol)
                         .font(.subheadline).foregroundStyle(statusColor)
@@ -30,7 +33,7 @@ struct ClipboardPage: View {
                     }
                     if clipboard.shared, !clipboard.automatic, station.mcp.listening {
                         Button("恢复自动同步") { clipboard.configure(automatic: true) }
-                            .buttonStyle(.bordered).disabled(clipboard.busy)
+                            .buttonStyle(.bordered).disabled(clipboard.busy || station.remoteBlocker([.clipboard]) != nil)
                     }
                     if clipboard.shared, let date = clipboard.lastSyncAt, let direction = clipboard.lastSyncDirection {
                         HStack {

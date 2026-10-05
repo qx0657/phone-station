@@ -15,13 +15,16 @@ final class ShizukuTorch {
     private static Shizuku.UserServiceArgs serviceArgs;
 
     static synchronized Json status(Context context) {
-        try { return call(context, TorchUserService.STATUS, false); }
+        try { return call(context, TorchUserService.STATUS, false, () -> {}); }
         catch (FileFailure error) { return Json.obj().put("available", false).put("on", Json.nul()).put("reason", error.getMessage()); }
     }
 
-    static synchronized Json set(Context context, boolean on) { return call(context, TorchUserService.SET, on); }
+    static synchronized Json set(Context context, boolean on) { return set(context, on, () -> {}); }
 
-    private static Json call(Context context, int code, boolean on) {
+    static synchronized Json set(Context context, boolean on, Runnable authorize) { return call(context, TorchUserService.SET, on, authorize); }
+
+    private static Json call(Context context, int code, boolean on, Runnable authorize) {
+        authorize.run();
         Json status = ShizukuShell.status(context);
         if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
         if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
@@ -40,6 +43,7 @@ final class ShizukuTorch {
         }
         Parcel input = Parcel.obtain(), output = Parcel.obtain();
         try {
+            authorize.run();
             input.writeInterfaceToken(TorchUserService.DESCRIPTOR);
             if (code == TorchUserService.SET) { input.writeInt(on ? 1 : 0); }
             if (!connection.binder.transact(code, input, output, 0)) { throw new FileFailure("请更新手机端手电筒服务"); }

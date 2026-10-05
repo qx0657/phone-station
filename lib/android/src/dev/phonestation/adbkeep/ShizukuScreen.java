@@ -15,6 +15,11 @@ final class ShizukuScreen {
     private static Shizuku.UserServiceArgs serviceArgs;
 
     static synchronized Json call(Context context, Json request, boolean start) {
+        return call(context, request, start, () -> {});
+    }
+
+    static synchronized Json call(Context context, Json request, boolean start, Runnable authorize) {
+        authorize.run();
         String id = request.get("sessionId").string();
         Json status = ShizukuShell.status(context);
         if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
@@ -35,6 +40,7 @@ final class ShizukuScreen {
         }
         Parcel input = Parcel.obtain(), output = Parcel.obtain();
         try {
+            authorize.run();
             input.writeInterfaceToken(ScreenUserService.DESCRIPTOR);
             input.writeString(request.emit());
             if (!connection.binder.transact(ScreenUserService.CALL, input, output, 0)) { throw new FileFailure("请更新手机工位以支持远程投屏"); }

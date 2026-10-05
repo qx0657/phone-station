@@ -3,13 +3,16 @@ import SwiftUI
 struct RemoteRelayPage: View {
     @ObservedObject var station: Station
     @ObservedObject var mcp: McpSession
+    @StationViewState private var editingConfiguration: Bool = false
+
+    private var showsConfiguration: Bool { editingConfiguration || (!mcp.remoteProfileLoading && !mcp.remoteProfile.configured) || mcp.remoteError != nil }
 
     private var busy: Bool { mcp.remoteProfileLoading || station.feedback.activity != nil }
     private var canSave: Bool { !busy && (!mcp.configurePhone || station.canOperate) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("远程中继") { station.page = .mcp }
+            StationRows.subpageHeader("远程中继") { station.goBack(fallback: .mcp) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {
@@ -23,43 +26,52 @@ struct RemoteRelayPage: View {
                         Text("通过互联网使用手机的 MCP 工具。两端填写相同的地址和指纹，各自使用不同的令牌。")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        field("服务器地址") {
-                            TextField("https://relay.example.com", text: $mcp.remoteDraft.endpoint)
-                        }
-                        field("证书指纹 · SPKI SHA-256") {
-                            TextField("64 位十六进制指纹", text: $mcp.remoteDraft.pin)
-                        }
-                        field("电脑令牌") {
-                            SecureField("64 位十六进制令牌", text: $mcp.remoteDraft.desktopToken)
-                        }
-                        Text("资料由中继管理员提供。令牌安全保存，不回填；查看配置时无需重新输入。")
+                        Text("在手机「设置 → 远程访问范围」中授权需要的功能。")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        Button("查看远程访问范围与处理步骤") { station.openRemotePermissions() }
+                            .buttonStyle(.borderless)
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("同时配置手机", isOn: $mcp.configurePhone)
-                            .toggleStyle(.checkbox).font(.subheadline).disabled(busy)
-                        if mcp.configurePhone {
-                            field("手机令牌") {
-                                SecureField("与电脑不同的 64 位十六进制令牌", text: $mcp.remoteDraft.phoneToken)
+                    if showsConfiguration {
+                        VStack(alignment: .leading, spacing: 12) {
+                            field("服务器地址") {
+                                TextField("https://relay.example.com", text: $mcp.remoteDraft.endpoint)
                             }
-                            Text(station.link.serial == nil
-                                 ? "请先通过 USB 或无线 adb 连接手机，再保存两端配置。"
-                                 : "手机已通过 adb 连接，保存时会同时更新手机并开启 MCP 与远程通道。")
+                            field("证书指纹 · SPKI SHA-256") {
+                                TextField("64 位十六进制指纹", text: $mcp.remoteDraft.pin)
+                            }
+                            field("电脑令牌") {
+                                SecureField("64 位十六进制令牌", text: $mcp.remoteDraft.desktopToken)
+                            }
+                            Text("资料由中继管理员提供。令牌安全保存，不回填；查看配置时无需重新输入。")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("同时配置手机", isOn: $mcp.configurePhone)
+                                .toggleStyle(.checkbox).font(.subheadline).disabled(busy)
+                            if mcp.configurePhone {
+                                field("手机令牌") {
+                                    SecureField("与电脑不同的 64 位十六进制令牌", text: $mcp.remoteDraft.phoneToken)
+                                }
+                                Text(station.link.serial == nil
+                                     ? "请先通过 USB 或无线 adb 连接手机，再保存两端配置。"
+                                     : "手机已通过 adb 连接，保存时会同时更新手机并开启 MCP 与远程通道。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text("只保存此 Mac，无需 adb。手机在「远程中继设置」单独填写手机令牌并连接。")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    } else {
+                        Button("修改连接配置") { editingConfiguration = true }.buttonStyle(.bordered)
+                    }
                 }
                 .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 16)
             }
-            .frame(height: mcp.configurePhone ? 400 : 316)
+            .frame(height: showsConfiguration ? (mcp.configurePhone ? 400 : 316) : 180)
             VStack(alignment: .leading, spacing: 10) {
                 if let error = mcp.remoteError {
                     Text(error).font(.subheadline).foregroundStyle(StationPalette.recording)
@@ -67,9 +79,15 @@ struct RemoteRelayPage: View {
                         .accessibilityAddTraits(.updatesFrequently)
                 }
                 HStack(spacing: 12) {
-                    Button(mcp.configurePhone ? "保存两端配置" : "保存 Mac 配置") { mcp.pairRemote() }
-                        .buttonStyle(.borderedProminent).disabled(!canSave)
-                        .keyboardShortcut(.defaultAction)
+                    if showsConfiguration {
+                        Button(mcp.configurePhone ? "保存两端配置" : "保存 Mac 配置") { mcp.pairRemote() }
+                            .buttonStyle(.borderedProminent).disabled(!canSave)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                    if editingConfiguration && mcp.remoteProfile.configured && mcp.remoteError == nil {
+                        Button("收起") { editingConfiguration = false; mcp.clearRemoteSecrets() }
+                            .buttonStyle(.borderless).disabled(busy)
+                    }
                     Spacer(minLength: 0)
                     if mcp.remoteProfile.configured {
                         Button("清除 Mac 配置…") { mcp.confirmingRemoteRemoval = true }

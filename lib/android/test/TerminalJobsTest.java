@@ -42,6 +42,19 @@ final class TerminalJobsTest {
         expect(terminals.read(queued, 0).get("state").string().equals("starting"));
         terminals.close(queued); release.countDown(); await(jobs, queued);
         expect(starts.get() == 1 && terminals.read(queued, 0).get("state").string().equals("closed"));
+        // Revoking a connection while an open is queued must prevent binding.
+        CountDownLatch occupied = new CountDownLatch(1), unblock = new CountDownLatch(1);
+        jobs.start("d".repeat(32), "shell", Json.obj(), () -> { occupied.countDown(); unblock.await(2, TimeUnit.SECONDS); return Json.obj(); });
+        expect(occupied.await(1, TimeUnit.SECONDS));
+        java.util.concurrent.atomic.AtomicBoolean allowed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        String revoked = "e".repeat(32);
+        terminals.open(revoked, 80, 24, () -> { if (!allowed.get()) { throw new FileFailure("远程权限已撤销"); } });
+        allowed.set(false); unblock.countDown();
+        for (int i = 0; i < 300 && !jobs.status(revoked).get("state").string().equals("result_unknown"); i++) { Thread.sleep(5); }
+        expect(jobs.status(revoked).get("state").string().equals("result_unknown"));
+        expect(starts.get() == 1);
+        // The saved ID stays consumed after permissions are restored.
+        allowed.set(true); terminals.open(revoked, 80, 24); expect(starts.get() == 1);
         jobs.close();
         System.out.println("TerminalJobsTest ok");
     }

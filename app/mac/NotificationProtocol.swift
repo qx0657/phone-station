@@ -63,6 +63,7 @@ struct NotificationSnapshot: Decodable {
     var cursor: String
     var events: [PhoneNotification]
     var baseline: Bool?
+    var remoteAllowed: Bool? = nil
 }
 
 enum NotificationPermission: String {

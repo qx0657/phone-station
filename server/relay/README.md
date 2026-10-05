@@ -45,3 +45,5 @@
 ## 中继 3 的独立屏幕连接
 
 中继 3 保留中继 2 的持久 MCP 状态格式与回执，增加已鉴权的 `/v1/screen/phone/<sessionId>` 和 `/v1/screen/desktop/<sessionId>` WSS。只在双方配对完成后开始视频，消息不占 MCP 队列、不持久缓存；角色隔离、时限、关闭与兼容顺序见 [远程屏幕](../../docs/remote-screen.md)。已有反向代理须透传 WebSocket Upgrade，直连 TLS 不改端口。第三方许可位于 [docs/licenses](../../docs/remote-screen.md#发布与验证边界)。
+
+中继 4 继续使用上述协议与持久状态，收紧浏览器来源、重复认证头、URL 参数和歧义 JSON，不增加公网端口。手机端权限在 Android 64 执行，与中继请求校验分别部署，见 [远程安全与授权](../../docs/security.md)。

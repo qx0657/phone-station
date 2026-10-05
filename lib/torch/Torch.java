@@ -19,6 +19,8 @@ public class Torch {
     private static final String PID_FILE = "/data/local/tmp/torch.pid";
 
     private CameraManager manager;
+    private Context stationContext;
+    private long policyCheckedNs;
     private String cameraId;
     private int maxLevel = 1;
     private int current = -1;
@@ -106,7 +108,8 @@ public class Torch {
                     writePid();
                     say("holding " + current + " " + maxLevel);
                     for (;;) {
-                        Thread.sleep(3_600_000L);
+                        enforcePolicy();
+                        Thread.sleep(1_000L);
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -173,6 +176,7 @@ public class Torch {
         Class<?> activityThread = Class.forName("android.app.ActivityThread");
         Object thread = activityThread.getMethod("systemMain").invoke(null);
         Context context = (Context) activityThread.getMethod("getSystemContext").invoke(thread);
+        stationContext = context;
         Object service = context.getSystemService(Context.CAMERA_SERVICE);
         if (!(service instanceof CameraManager)) {
             throw new IllegalStateException("拿不到相机服务");
@@ -279,6 +283,7 @@ public class Torch {
         int shown = -1;
         long retryAfterNs = 0;
         while (!liveStop) {
+            enforcePolicy();
             int want;
             long since;
             synchronized (liveLock) {
@@ -348,6 +353,7 @@ public class Torch {
     }
 
     private synchronized void apply(int level) throws Exception {
+        if (level > 0) { enforcePolicy(); }
         CameraAccessException last = null;
         for (int attempt = 0; attempt < 6; attempt++) {
             try {
@@ -364,6 +370,22 @@ public class Torch {
         if (last != null) {
             throw last;
         }
+    }
+
+    private void enforcePolicy() {
+        long now = System.nanoTime();
+        if (policyCheckedNs != 0 && now - policyCheckedNs < 1_000_000_000L) { return; }
+        policyCheckedNs = now;
+        try {
+            Object resolver = Context.class.getMethod("getContentResolver").invoke(stationContext);
+            java.lang.reflect.Method read = Class.forName("android.provider.Settings$Global").getMethod("getString",
+                    Class.forName("android.content.ContentResolver"), String.class);
+            String master = (String) read.invoke(null, resolver, "phonestation_enabled");
+            String feature = (String) read.invoke(null, resolver, "phonestation_feature_torch");
+            if ("0".equals(master) || "0".equals(feature)) {
+                manager.setTorchMode(cameraId, false); say("off"); System.exit(0);
+            }
+        } catch (Throwable error) { fail("无法核对手机功能开关"); }
     }
 
     private void applyOnce(int level) throws CameraAccessException {

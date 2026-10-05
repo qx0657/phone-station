@@ -2,6 +2,8 @@ package dev.phonestation.adbkeep;
 
 /** 文件以外、要在手机应用进程里做的事。电脑上的测试换一个假的。 */
 interface StationHost {
+    default void authorize(String tool) {}
+
     Json status();
 
     Json stayAwake(boolean on);

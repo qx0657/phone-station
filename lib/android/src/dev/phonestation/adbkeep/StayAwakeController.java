@@ -8,6 +8,10 @@ import android.provider.Settings;
 final class StayAwakeController {
     private StayAwakeController() {}
 
+    static void release(Context context) {
+        if (context.getSharedPreferences("stay-awake", Context.MODE_PRIVATE).getBoolean("saved", false)) { set(context, false); }
+    }
+
     static void set(Context context, boolean on) {
         if (!"PGT-AN20".equals(Build.MODEL.replace('_', '-'))) { throw new FileFailure("此机型尚未验证，未改亮屏设置"); }
         SharedPreferences prefs = context.getSharedPreferences("stay-awake", Context.MODE_PRIVATE);

@@ -23,6 +23,10 @@ struct StationView: View {
                 AboutPage(station: station)
             case .mcp:
                 McpPage(station: station)
+            case .remotePermissions:
+                RemotePermissionsPage(station: station)
+            case .features:
+                FeaturesPage(station: station)
             case .remoteRelay:
                 RemoteRelayPage(station: station, mcp: station.mcp)
             case .clipboard:

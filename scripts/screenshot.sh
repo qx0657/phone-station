@@ -27,6 +27,7 @@ fi
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
+require_station_feature "$ADB" "$SERIAL" capture
 print -r -- "截屏 $SERIAL"
 "$ADB" -s "$SERIAL" exec-out screencap -p > "$out"
 if ! file "$out" | grep -q 'PNG image data'; then

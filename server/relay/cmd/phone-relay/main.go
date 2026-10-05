@@ -19,7 +19,7 @@ import (
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Println("phone-station-relay 3 (durable-epochs-v1, screen-v1)")
+		fmt.Println("phone-station-relay 4 (durable-epochs-v1, screen-v1, strict-requests)")
 		return
 	}
 	if len(os.Args) != 1 {

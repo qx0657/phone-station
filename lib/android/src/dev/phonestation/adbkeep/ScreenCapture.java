@@ -23,7 +23,12 @@ final class ScreenCapture {
     }
 
     static Json capture(FileOps files, Shell shell, String requestId) {
+        return capture(files, shell, requestId, () -> {});
+    }
+
+    static Json capture(FileOps files, Shell shell, String requestId, Runnable authorize) {
         synchronized (FileOps.TRANSACTIONS) {
+            authorize.run();
             String input = path(requestId);
             files.createDirectory(ROOT);
             long[] usage = cleanup(files, System.currentTimeMillis());

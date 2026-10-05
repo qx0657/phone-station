@@ -15,6 +15,10 @@ final class ClipboardAvailability {
     }
     static Json present(boolean shared, boolean automatic, boolean mcp, boolean linked,
                         Json shell, boolean macOnline, String failure) {
+        return present(shared, automatic, mcp, linked, shell, macOnline, failure, false);
+    }
+    static Json present(boolean shared, boolean automatic, boolean mcp, boolean linked,
+                        Json shell, boolean macOnline, String failure, boolean remoteBlocked) {
         String title = "共享已关闭", reason = "", action = "none";
         if (shared) {
             if (!shell.get("available").boolValue()) {
@@ -26,8 +30,12 @@ final class ClipboardAvailability {
                 action = "permissions";
             } else if (!mcp) {
                 title = "MCP 服务未运行";
-                reason = "在手机首页启用 MCP 服务，再连接 Mac 手机工位。";
+                reason = "在「MCP 服务」中启用本地 MCP 接入或远程通道，再连接 Mac 手机工位。";
                 action = "mcp";
+            } else if (remoteBlocked) {
+                title = "远程剪贴板未授权";
+                reason = RemotePermissionInfo.denied("personal");
+                action = "remotePermissions";
             } else if (failure != null && !failure.isEmpty()) {
                 title = "剪贴板后台服务不可用";
                 reason = failure;

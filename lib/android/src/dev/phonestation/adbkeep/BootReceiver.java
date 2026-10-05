@@ -7,6 +7,8 @@ import android.content.Intent;
 public final class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
+        StationFeatures.initialize(context);
+        if (!StationFeatures.master(context)) { return; }
         if (KeeperStore.isEnabled(context)) {
             long next = KeeperEngine.tick(context);
             if (next >= 0L) {

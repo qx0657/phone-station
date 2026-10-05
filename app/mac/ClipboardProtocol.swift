@@ -1,6 +1,96 @@
 import Foundation
 import OSLog
 
+struct PhoneFeatureState: Decodable, Equatable, Sendable {
+    var master: Bool
+    var selected: [String: Bool]
+    var reasons: [String: String]?
+    static let keys = ["clipboard", "notifications", "alerts", "files.read", "files.write", "open", "awake", "torch", "capture", "screen", "shell"]
+    static func title(_ key: String) -> String {
+        switch key {
+        case "clipboard": return "共享剪贴板"
+        case "notifications": return "手机通知 → Mac"
+        case "alerts": return "电脑提醒 → 手机"
+        case "files.read": return "文件读取"
+        case "files.write": return "文件修改"
+        case "open": return "在手机打开文件"
+        case "awake": return "电脑控制保持亮屏"
+        case "torch": return "电脑控制手电筒"
+        case "capture": return "截取画面"
+        case "screen": return "投屏、录屏与操控"
+        case "shell": return "Shell 与 APK 安装"
+        default: return key
+        }
+    }
+    func allows(_ key: String) -> Bool { master && selected[key] == true }
+    static func adb(_ output: String) -> PhoneFeatureState? {
+        let lines = output.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map(String.init)
+        guard lines.count == keys.count + 1, lines.allSatisfy({ $0 == "0" || $0 == "1" }) else { return nil }
+        return PhoneFeatureState(master: lines[0] == "1", selected: Dictionary(uniqueKeysWithValues: zip(keys, lines.dropFirst().map { $0 == "1" })))
+    }
+}
+
+enum RemoteFeature {
+    case clipboard, notifications, screen, capture, controls, shell, install
+    var scopes: [String] {
+        switch self {
+        case .clipboard, .notifications: return ["personal"]
+        case .screen: return ["screen"]
+        case .capture: return ["controls", "files.read"]
+        case .controls: return ["controls"]
+        case .shell: return ["shell"]
+        case .install: return ["files.read", "files.write", "shell"]
+        }
+    }
+    var title: String {
+        switch self {
+        case .clipboard: return "远程剪贴板"
+        case .notifications: return "远程通知接收"
+        case .screen: return "远程投屏"
+        case .capture: return "远程截图下载"
+        case .controls: return "远程手机控件"
+        case .shell: return "远程 Shell"
+        case .install: return "远程安装"
+        }
+    }
+}
+
+struct RemotePermissionBlocker: Equatable {
+    var title: String
+    var detail: String
+    var scopes: [String]
+    var canResolve: Bool { !scopes.isEmpty }
+}
+
+struct RemoteAccessState {
+    static let scopes = ["files.read", "files.write", "personal", "controls", "screen", "shell"]
+    var checked = false
+    var permissions: [String: Bool]?
+    var failure: String?
+    static var legacy: RemoteAccessState { RemoteAccessState(checked: true) }
+    static func title(_ scope: String) -> String {
+        switch scope {
+        case "files.read": return "文件读取"
+        case "files.write": return "文件修改"
+        case "personal": return "剪贴板与通知"
+        case "controls": return "手机控件与提醒"
+        case "screen": return "投屏与操控"
+        case "shell": return "Shell 与安装"
+        default: return "远程访问范围"
+        }
+    }
+    func blocker(for features: [RemoteFeature]) -> RemotePermissionBlocker? {
+        if let failure { return RemotePermissionBlocker(title: "远程访问范围暂未确认", detail: failure, scopes: []) }
+        guard checked else { return RemotePermissionBlocker(title: "正在检查远程访问范围", detail: "确认手机授权后再操作。", scopes: []) }
+        guard let permissions else { return nil } // Older phones have no scope metadata.
+        let needed = Set(features.flatMap(\.scopes))
+        let missing = Self.scopes.filter { needed.contains($0) && permissions[$0] != true }
+        guard !missing.isEmpty else { return nil }
+        let name = features.count == 1 ? features[0].title : "远程操作"
+        return RemotePermissionBlocker(title: name + "未授权", detail: "请在手机允许「" + missing.map(Self.title).joined(separator: "、") + "」。", scopes: missing)
+    }
+}
+
 struct ClipboardClip: Codable, Equatable {
     var kind: String
     var text: String?
@@ -170,13 +260,20 @@ actor StationRPCQueue {
     }
 }
 
+private final class StationHTTPDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 enum ClipboardRPC {
     private static let queue = StationRPCQueue()
     private static let logger = Logger(subsystem: "com.qx0657.phonestation", category: "rpc")
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: StationHTTPDelegate(), delegateQueue: nil)
     }()
     struct Failure: LocalizedError {
         let message: String
@@ -213,7 +310,8 @@ enum ClipboardRPC {
         }
     }
     private static func send(endpoint: String, token: String, name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> Data {
-        guard let url = URL(string: endpoint), url.host == "127.0.0.1", url.path == "/mcp", !token.isEmpty else {
+        guard let url = URL(string: endpoint), url.scheme == "http", url.host == "127.0.0.1", url.path == "/mcp",
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, !token.isEmpty else {
             throw Failure(message: "请先连接 MCP 服务")
         }
         var request = URLRequest(url: url)

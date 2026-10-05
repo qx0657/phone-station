@@ -16,6 +16,28 @@ final class HealthStatusTest {
     }
     static void expect(boolean value, String message) { if (!value) { throw new AssertionError(message); } }
     public static void main(String[] ignored) {
+        expect("提醒已开启".equals(HealthStatus.notificationOverview(true, false, false, true, true, true).get("label").string()),
+                "alerts-only use must not appear switched off");
+        expect("同步已就绪".equals(HealthStatus.notificationOverview(true, true, true, false, false, false).get("label").string()),
+                "sync-only use is distinct from both directions");
+        expect("均已就绪".equals(HealthStatus.notificationOverview(true, true, true, false, true, true).get("label").string()),
+                "both independently ready directions are included");
+        expect("已暂停".equals(HealthStatus.notificationOverview(false, true, true, false, true, true).get("label").string()),
+                "master pause overrides stale ready facts");
+        expect("已关闭".equals(HealthStatus.notificationOverview(true, false, true, false, false, true).get("label").string()),
+                "saved selections override stale readiness");
+        expect(HealthStatus.notificationOverview(true, true, true, false, true, false).get("attention").boolValue(),
+                "working phone sync cannot hide blocked computer alerts");
+        expect("待 Mac 接收".equals(HealthStatus.notificationOverview(true, true, false, false, false, false).get("label").string()),
+                "normal waiting is not a settings failure");
+        Json setupIssues = Json.arr()
+                .add(Json.obj().put("id", "notification-apps").put("destination", "notifications"))
+                .add(Json.obj().put("id", "shizuku").put("destination", "permissions"))
+                .add(Json.obj().put("id", "notification-mac").put("destination", "notifications"));
+        expect(HealthStatus.forFeature(setupIssues, "notifications").array().size() == 1,
+                "notification setup includes app selection but not unrelated permissions or standby");
+        expect(HealthStatus.forFeature(setupIssues, "alerts").array().isEmpty(),
+                "computer alerts do not require the phone notification whitelist");
         Json ready = shell(true, "granted"), stopped = shell(false, "stopped");
         Json offNotifications = notifications(false, false, 0, false, false);
         Json unavailable = ClipboardAvailability.present(true, true, true, true, stopped, false, "");
@@ -26,6 +48,14 @@ final class HealthStatusTest {
         Json list = issues(board(PermissionCopy.ShizukuState.STOPPED), stopped, unavailable, offNotifications, true);
         expect(list.array().size() == 1 && "shizuku".equals(list.array().get(0).get("id").string()), "one cause, no misleading Mac offline issue");
         Json online = ClipboardAvailability.present(true, true, true, true, ready, true, "");
+        Json remoteDenied = ClipboardAvailability.present(true, true, true, true, ready, false, "", true);
+        expect("remotePermissions".equals(remoteDenied.get("action").string()), "remote denial has a specific destination");
+        expect(issues(board(PermissionCopy.ShizukuState.GRANTED), ready,
+                ClipboardAvailability.present(false, true, true, true, ready, false, "", true), offNotifications, true).array().isEmpty(),
+                "default-off remote permissions do not create faults for disabled features");
+        expect(issues(board(PermissionCopy.ShizukuState.GRANTED), ready, remoteDenied,
+                notifications(true, true, 1, true, false).put("remoteBlocked", true), true).array().size() == 1,
+                "one personal permission cause is not counted twice");
         Json locked = ClipboardAvailability.withContent(
                 ClipboardAvailability.present(true, true, true, true, ready, true, ""), "locked", "text");
         expect(!locked.get("ready").boolValue() && locked.get("status").string().contains("锁定"),

@@ -8,11 +8,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -161,6 +163,21 @@ func (s *Server) persist(op *operation) bool {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Native clients never send Origin or credentials in a URL. Reject ambiguous
+	// requests before authentication, storage maintenance or queue changes.
+	if len(r.Header.Values("Origin")) != 0 {
+		writeError(w, http.StatusForbidden, "native clients only")
+		return
+	}
+	if r.URL.RawQuery != "" {
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if r.URL.Path != "/v1/desktop/operation" || err != nil || len(query) != 1 || len(query["id"]) != 1 || query.Get("id") == "" {
+			writeError(w, http.StatusBadRequest, "unexpected query parameters")
+			return
+		}
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/screen/") {
 		s.screen(w, r)
 		return
@@ -206,12 +223,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authorized(w http.ResponseWriter, r *http.Request, want string) bool {
 	const prefix = "Bearer "
-	got := r.Header.Get("Authorization")
-	if !strings.HasPrefix(got, prefix) {
+	headers := r.Header.Values("Authorization")
+	if want == "" || len(headers) != 1 || !strings.HasPrefix(headers[0], prefix) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}
-	got = strings.TrimPrefix(got, prefix)
+	got := strings.TrimPrefix(headers[0], prefix)
 	if len(got) != len(want) || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return false
@@ -648,7 +665,8 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(target); err != nil {
+	var body json.RawMessage
+	if err := decoder.Decode(&body); err != nil {
 		status := http.StatusBadRequest
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -659,6 +677,10 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "request must contain one JSON value")
+		return false
+	}
+	if !utf8.Valid(body) || !unambiguousJSON(body) || json.Unmarshal(body, target) != nil {
+		writeError(w, http.StatusBadRequest, "invalid or ambiguous JSON body")
 		return false
 	}
 	return true

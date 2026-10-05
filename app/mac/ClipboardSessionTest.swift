@@ -15,6 +15,7 @@ enum ClipboardSessionTest {
         var writes: [String] = []
         var time: TimeInterval = 100
         var blocked = false
+        var localReads = 0
         var images = false
         var imagesSupported = true
         var imageReads = 0
@@ -55,7 +56,7 @@ enum ClipboardSessionTest {
             return reply(applied: apply, savedImage: saved)
         }
         func session() -> ClipboardSession {
-            let session = ClipboardSession(startTimer: false, readLocal: { self.local },
+            let session = ClipboardSession(startTimer: false, readLocal: { self.localReads += 1; return self.local },
                 writeLocal: { self.writes.append($0); self.copy($0) },
                 readImage: { _ in self.imageReads += 1; return Data([1, 2, 3]) }, rpc: rpc, clock: { self.time })
             session.route = { ("http://127.0.0.1:18765/mcp", "fake") }
@@ -72,6 +73,33 @@ enum ClipboardSessionTest {
     }
     @MainActor
     static func main() async {
+        let guarded = Fake(), guardedSession = guarded.session()
+        var permission = RemoteAccessState(checked: true, permissions: ["personal": false])
+        guardedSession.remote = { true }
+        guardedSession.access = { permission }
+        guardedSession.refresh(); guardedSession.configure(shared: true)
+        await Task.yield()
+        precondition(guarded.calls.isEmpty && guarded.localReads == 0, "denied remote clipboard neither reads local contents nor sends RPC")
+        precondition(guardedSession.remoteBlocker?.scopes == ["personal"])
+        permission.permissions = ["personal": true]
+        guarded.holdState = true
+        guardedSession.refresh()
+        await waitFor { guarded.stateWait != nil }
+        permission.permissions = ["personal": false]
+        guardedSession.refresh()
+        guarded.stateWait!.resume(returning: guarded.reply())
+        await waitFor { guardedSession.remoteBlocker != nil }
+        for _ in 0..<50 { await Task.yield() }
+        precondition(guarded.calls.count == 1 && guarded.writes.isEmpty, "revocation suppresses the in-flight result and does not exchange old clipboard data")
+        guardedSession.remote = { false }
+        guarded.time += 3
+        guardedSession.refresh()
+        await waitFor { guardedSession.connected }
+        precondition(guardedSession.remoteBlocker == nil, "local transport keeps its existing permission behavior")
+        let partial = RemoteAccessState(checked: true, permissions: ["shell": true, "controls": true])
+        precondition(partial.blocker(for: [.install])?.scopes == ["files.read", "files.write"])
+        precondition(partial.blocker(for: [.capture])?.scopes == ["files.read"])
+        precondition(RemoteAccessState().blocker(for: [.install])?.canResolve == false)
         let fake = Fake(), session = fake.session()
         session.refresh()
         await waitFor { session.connected }

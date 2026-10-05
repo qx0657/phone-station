@@ -127,6 +127,38 @@ class RemoteOpsTest(unittest.TestCase):
             client.return_value.initialize.side_effect = ops.RemoteError("offline")
             self.assertEqual(ops.main(["install", "--check"]), 75)
 
+    def test_denied_install_reports_all_scopes_without_upload_or_shell(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        names = {"station_controls_status", "station_shell_status"}
+        client.rpc = lambda method, args: {"tools": [{"name": name} for name in names]}
+        with patch.object(client, "tool", return_value={"remotePermissions": {"shell": True}}) as call:
+            with self.assertRaisesRegex(ops.PermissionRequired, "文件读取、文件修改"):
+                client.initialize(install=True)
+            self.assertEqual([item.args[0] for item in call.call_args_list], ["station_controls_status"])
+        with patch.object(ops, "Client", return_value=client), patch.object(ops.sys, "stderr", io.StringIO()):
+            with patch.object(client, "initialize", side_effect=ops.PermissionRequired("未授权")):
+                self.assertEqual(ops.main(["install", "--check"]), 1, "permission denial must not fall back to adb")
+
+    def test_disabled_feature_is_not_reported_as_missing_protocol_tools(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        client.rpc = lambda method, args: {"tools": [{"name": "station_controls_status"}]}
+        for features, reason in [({"master": False}, "总开关已关闭"),
+                                  ({"master": True, "selected": {"shell": False}}, "功能已关闭：Shell")]:
+            with patch.object(client, "tool", return_value={"features": features}) as call:
+                with self.assertRaisesRegex(ops.PermissionRequired, reason):
+                    client.initialize(install=True)
+                self.assertEqual([item.args[0] for item in call.call_args_list], ["station_controls_status"])
+
+    def test_query_permission_keeps_original_task_without_install(self):
+        with patch.object(ops, "Client") as factory, patch.object(ops.sys, "stderr", io.StringIO()):
+            client = factory.return_value
+            client.require_permissions.side_effect = ops.PermissionRequired("Shell 未授权")
+            self.assertEqual(ops.main(["install", "--status", "a" * 32]), 1)
+            client.require_permissions.assert_called_once_with(["shell"])
+            client.checked_shell.assert_not_called()
+
     def test_status_verifies_installed_bytes_even_at_same_version(self):
         job_id = "a" * 32
         record = {"jobId": job_id, "package": "dev.test.app", "versionCode": 42, "sha256": ["a" * 64]}

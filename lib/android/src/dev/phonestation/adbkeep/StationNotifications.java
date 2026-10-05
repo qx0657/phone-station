@@ -130,6 +130,7 @@ final class StationNotifications {
 
     /** 打开应用。通知还在下拉栏里就不动；被划掉了就换 id 再发。 */
     static void restore(Context context) {
+        if (!StationFeatures.master(context)) { return; }
         Service service = live();
         if (service == null) {
             if (hidden) {

@@ -83,8 +83,8 @@ final class KeeperStore {
         return prefs(context).getBoolean(MCP, SharedClipboard.shared(context));
     }
 
-    static void setMcpEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(MCP, enabled).commit();
+    static boolean setMcpEnabled(Context context, boolean enabled) {
+        return prefs(context).edit().putBoolean(MCP, enabled).commit();
     }
 
     static void setAlertSound(Context context, String sound) {

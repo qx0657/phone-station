@@ -2,17 +2,35 @@ import SwiftUI
 
 struct MainPage: View {
     @ObservedObject var station: Station
+    @StationViewState private var showsControls: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("手机工位").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                Spacer()
+                Button { station.page = .more } label: {
+                    HStack(spacing: 5) {
+                        if !station.health.issues.isEmpty {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(StationPalette.caution)
+                                .accessibilityHidden(true)
+                        }
+                        Text("设置")
+                    }
+                }.buttonStyle(.borderless).help(settingsDetail)
+                    .accessibilityLabel("设置，\(settingsDetail)")
+            }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
             header
             VStack(alignment: .leading, spacing: 12) {
-                // 后台检查只更新固定入口的摘要，不在操作区前面插入提示。
+                if station.phoneFeatures?.master == false {
+                    Text("手机工位已暂停，在手机首页点「恢复使用」即可继续。")
+                        .font(.subheadline).foregroundStyle(StationPalette.caution).fixedSize(horizontal: false, vertical: true)
+                }
                 actionRow
                 if station.link.serial == nil && station.link.remoteConnected {
-                    Text("远程连接可截屏、保持亮屏和开关手电筒。投屏、录屏与灯光跟随声音需要 USB 或同一 Wi-Fi 连接。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let blocker = station.remoteBlocker([.screen, .capture, .controls]) {
+                        RemotePermissionHint(station: station, blocker: blocker)
+                    }
                 }
                 if let pending = station.remoteControls.pendingCapture {
                     HStack {
@@ -30,16 +48,6 @@ struct MainPage: View {
                         .buttonStyle(.bordered)
                 }
                 VStack(spacing: 0) {
-                    StationRows.navigationRow("连接与配对", symbol: "wifi") { station.page = .connection }
-                    StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted",
-                                              detail: station.mcp.summary, detailLineLimit: 1,
-                                              needsAttention: station.link.isConnected && !station.mcp.listening && !station.mcp.remoteChecking) {
-                        station.page = .mcp
-                    }
-                    StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("adb 命令", symbol: "terminal") { station.page = .commands }
-                    StationRows.groupDivider.padding(.horizontal, 10)
                     StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.clipboard.summary,
                                               detailLineLimit: 1, needsAttention: station.clipboard.shared && station.clipboard.blocker != nil) {
                         station.page = .clipboard
@@ -53,20 +61,20 @@ struct MainPage: View {
                     StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
                         station.page = .files
                     }
-                    StationRows.groupDivider.padding(.horizontal, 10)
-                    StationRows.navigationRow("更多工具与设置", symbol: "slider.horizontal.3", detail: settingsDetail,
-                                              detailLineLimit: 1, needsAttention: !station.health.issues.isEmpty) {
-                        station.page = .more
-                    }
                 }
                 .elevatedGroup()
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 14)
         }
+        .onAppear {
+            showsControls = stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
+        }
     }
 
     private var notificationsNeedAttention: Bool {
+        if station.notifications.receiving, station.notifications.snapshot?.enabled == true,
+           station.remoteBlocker([.notifications])?.canResolve == true { return true }
         if station.health.issues.contains(where: { $0.destination == "notifications" }) { return true }
         guard station.notifications.connected, let snapshot = station.notifications.snapshot, snapshot.enabled else { return false }
         return !snapshot.accessGranted || snapshot.selectedCount == 0 || !snapshot.listenerConnected
@@ -117,46 +125,65 @@ struct MainPage: View {
     }
 
     private var controlGroup: some View {
-        VStack(spacing: 0) {
-            StationRows.toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
-            StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
-            StationRows.toggleRow("手电筒", symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
-                                  isOn: torchBinding, enabled: station.canTorch || station.torch.torchBeat)
-            StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
-            StationRows.toggleRow("灯光跟随声音", symbol: "waveform",
-                                  subtitle: "跟随这台 Mac 正在播放的声音",
-                                  isOn: beatBinding, enabled: station.canOperate || station.torch.torchBeat)
+        DisclosureGroup(isExpanded: $showsControls) {
+            VStack(spacing: 0) {
+                StationRows.toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
+                StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
+                StationRows.toggleRow("手电筒", symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
+                                      isOn: torchBinding, enabled: station.canTorch || station.torch.torchBeat)
+                StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
+                StationRows.toggleRow("灯光跟随声音", symbol: "waveform",
+                                      subtitle: "跟随 Mac 播放的声音，需要本地连接",
+                                      isOn: beatBinding, enabled: station.canTorch || station.torch.torchBeat)
+            }
+        } label: {
+            HStack {
+                Label("手机控制", systemImage: "slider.horizontal.3")
+                Spacer(minLength: 6)
+                Text(controlSummary).font(.caption).foregroundStyle(.secondary)
+            }.font(.subheadline)
         }
+        .padding(10)
         .elevatedGroup()
     }
 
+    private var controlSummary: String {
+        var active: [String] = []
+        if stayAwakeBinding.wrappedValue { active.append("亮屏") }
+        if torchBinding.wrappedValue { active.append("手电筒") }
+        if beatBinding.wrappedValue { active.append("声音灯光") }
+        return active.isEmpty ? "亮屏与灯光" : active.joined(separator: " · ")
+    }
+
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(station.link.headline)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if !station.link.connectionLine.isEmpty {
-                    Text(station.link.connectionLine)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+        Button { station.page = .connection } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: station.link.isConnected ? "iphone" : "iphone.slash")
+                    .font(.system(size: 23)).foregroundStyle(statusTint).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(station.link.headline)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                }
+                    HStack(spacing: 5) {
+                        if !station.link.isConnected && (station.link.isChecking || station.link.isReconnecting || station.link.remoteChecking) {
+                            ProgressView().controlSize(.mini).accessibilityHidden(true)
+                        }
+                        Text([station.link.statusLabel, station.link.connectionLine].filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.system(size: 12)).foregroundStyle(statusTint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if let battery = station.link.battery { batteryReadout(battery) }
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 8) {
-                if let battery = station.link.battery {
-                    batteryReadout(battery)
-                }
-                statusChip
-            }
+            .padding(12).contentShape(Rectangle())
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(PressFadeStyle())
+        .background { HoverWash(radius: 12) }
+        .elevatedGroup()
+        .padding(.horizontal, 16).padding(.bottom, 12)
+        .help("连接设置与配对")
     }
 
     private func batteryReadout(_ reading: BatteryReport.Reading) -> some View {
@@ -186,21 +213,6 @@ struct MainPage: View {
         case ..<88: return "battery.75"
         default: return "battery.100"
         }
-    }
-
-    private var statusChip: some View {
-        HStack(spacing: 4) {
-            if !station.link.isConnected && (station.link.isChecking || station.link.isReconnecting || station.link.remoteChecking) {
-                ProgressView().controlSize(.mini).accessibilityHidden(true)
-            }
-            Text(station.link.statusLabel)
-        }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(statusTint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(statusTint.opacity(0.14), in: Capsule())
-            .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var statusTint: Color {

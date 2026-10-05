@@ -30,6 +30,7 @@ public final class FileMcpService extends Service {
 
     private McpHttp server;
     private String token;
+    private String serverRevision;
     private PhoneRelayClient remoteClient;
     private boolean restoredKeeper;
     private java.util.concurrent.ScheduledExecutorService captureCleanup;
@@ -38,7 +39,14 @@ public final class FileMcpService extends Service {
         return listening;
     }
 
+    static Json status(Context context) {
+        return McpStatus.present(StationFeatures.master(context), KeeperStore.mcpEnabled(context), listening(),
+                RemoteStore.enabled(context), RemoteStore.configured(context), PhoneRelayClient.connected(),
+                PhoneRelayClient.checking(), PhoneRelayClient.connectionLabel(context));
+    }
+
     static void start(Context context) {
+        if (!StationFeatures.master(context)) { return; }
         try {
             context.startForegroundService(new Intent(context, FileMcpService.class));
         } catch (RuntimeException error) {
@@ -57,6 +65,8 @@ public final class FileMcpService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        StationFeatures.initialize(this);
+        if (!StationFeatures.master(this)) { stopSelf(); return START_NOT_STICKY; }
         if (captureCleanup == null) {
             captureCleanup = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(job -> {
                 Thread worker = new Thread(job, "station-capture-cleanup");
@@ -75,12 +85,17 @@ public final class FileMcpService extends Service {
             restoredKeeper = true;
             if (KeeperStore.isEnabled(this)) { KeeperService.start(this); }
         }
+        if (server != null && (!KeeperStore.mcpEnabled(this)
+                || !RemoteStore.permissionRevision(this).equals(serverRevision))) {
+            server.close(); server = null; token = null; listening = false; publishListening(false);
+        }
         if (server == null && KeeperStore.mcpEnabled(this)) {
             token = newToken();
             try {
                 FileOps files = FileOps.device();
                 files.setMediaNotice(new MediaScan(this));
                 server = McpHttp.open(PORT, token, files, new StationBridge(this, files), versionName());
+                serverRevision = RemoteStore.permissionRevision(this);
             } catch (IOException error) {
                 Log.e(TAG, "mcp listen failed", error);
                 listening = false;
@@ -97,7 +112,7 @@ public final class FileMcpService extends Service {
                 logStorage();
             }
         }
-        if (remoteClient != null && (!RemoteStore.enabled(this) || !RemoteStore.configured(this)
+        if (remoteClient != null && (remoteClient.stopped() || !RemoteStore.enabled(this) || !RemoteStore.configured(this)
                 || !remoteClient.matchesProfile())) {
             remoteClient.stop();
             remoteClient = null;

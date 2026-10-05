@@ -16,6 +16,7 @@ fi
 ADB=$(adb_bin)
 SCRCPY=$(scrcpy_bin)
 SERIAL=$(online_serial "$ADB")
+require_station_feature "$ADB" "$SERIAL" screen
 print -r -- "投屏 $SERIAL"
 export ADB
-exec "$SCRCPY" --serial="$SERIAL" --stay-awake "$@"
+run_station_screen "$SCRCPY" --serial="$SERIAL" --stay-awake "$@"

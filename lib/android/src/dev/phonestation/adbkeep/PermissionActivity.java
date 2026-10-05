@@ -47,6 +47,7 @@ public final class PermissionActivity extends Activity {
     private LinearLayout allowedRows;
     private LinearLayout manual;
     private StationChrome.Link allowedLink;
+    private StationChrome.Link remotePermissions;
     private boolean expanded;
     private boolean active;
     private String shown;
@@ -67,8 +68,19 @@ public final class PermissionActivity extends Activity {
         super.onCreate(savedInstanceState);
         ui = new StationChrome(this);
         ui.back("权限与检查");
+        String feature = getIntent().getStringExtra("feature");
+        if (feature != null && !feature.isEmpty()) {
+            LinearLayout context = ui.card();
+            ui.groupTitle(context, FeaturePolicy.title(feature));
+            ui.paragraph(context, "只检查这项功能需要的设置。完成后返回，检查结果会自动更新。");
+        }
         expanded = savedInstanceState != null && savedInstanceState.getBoolean("allowed_expanded");
         pending = ui.card();
+        LinearLayout remoteAccess = ui.card();
+        remotePermissions = ui.statusLinkRow(remoteAccess, R.drawable.ic_status_permission, "远程访问范围",
+                view -> startActivity(RemotePermissionsActivity.intent(this, "")));
+        ui.paragraph(remoteAccess, "选择远程电脑可以使用的能力。默认关闭，按需允许。");
+        remoteAccess.setVisibility(feature == null || feature.isEmpty() ? View.VISIBLE : View.GONE);
         allowed = ui.card();
         allowedLink = ui.statusLinkRow(allowed, R.drawable.ic_status_permission, "已满足的权限", view -> {
             expanded = !expanded;
@@ -118,20 +130,16 @@ public final class PermissionActivity extends Activity {
     }
 
     private void render() {
-        PermissionProbe facts = PermissionProbe.read(this);
-        PermissionCopy.Board board = PermissionCopy.present(
-                facts.canWrite,
-                facts.notifications,
-                facts.banner,
-                facts.storage,
-                facts.battery,
-                facts.alarm,
-                KeeperStore.alertPops(this),
-                ShizukuLink.read(this));
-        Json issues = HealthStatus.attention(PhoneHealth.read(this).get("issues"));
+        String feature = getIntent().getStringExtra("feature");
+        PermissionCopy.Board board = FeatureReadiness.board(this, feature);
+        Json issues = FeatureReadiness.checks(this, feature);
         Json extra = Json.arr();
         boolean shizukuPending = false;
         StringBuilder key = new StringBuilder(issues.emit());
+        String remoteSummary = RemoteStore.permissionSummary(this);
+        remotePermissions.value.setText(remoteSummary);
+        remotePermissions.value.setTextColor(ui.muted());
+        key.append(remoteSummary);
         for (PermissionCopy.Row row : board.rows) {
             key.append(row.title).append(row.value).append(row.tone);
             if ("Shizuku".equals(row.title) && row.tone == PermissionCopy.Tone.WAITING) {
@@ -149,9 +157,9 @@ public final class PermissionActivity extends Activity {
         pending.removeAllViews();
         allowedRows.removeAllViews();
         manual.removeAllViews();
-        ui.groupTitle(pending, count == 0 ? "权限已就绪" : "有 " + count + " 项需要处理");
+        ui.groupTitle(pending, count == 0 ? "当前无需处理" : "还需完成 " + count + " 项设置");
         ui.paragraph(pending, count == 0
-                ? "手机端权限已满足。Mac 接收状态可在剪贴板和通知页查看。"
+                ? StationFeatures.master(this) ? "当前检查的权限和必要设置已满足。实际连接与同步状态请查看对应功能页。" : "手机工位已暂停；开启功能后检查所需权限。"
                 : "先处理下面这些项目；返回后会自动更新检查结果。");
         for (PermissionCopy.Row row : board.rows) {
             if (row.tone == PermissionCopy.Tone.WAITING) {
@@ -171,11 +179,12 @@ public final class PermissionActivity extends Activity {
             ui.issueRow(pending, issue.get("title").string(), issue.get("detail").string(),
                     view -> openIssue(issue));
         }
-        int granted = board.rows.length - board.missing - 1;
+        int granted = (int) java.util.Arrays.stream(board.rows).filter(row -> row.tone == PermissionCopy.Tone.HELD).count();
         allowed.setVisibility(granted == 0 ? View.GONE : View.VISIBLE);
         allowedLink.value.setText(granted + " 项");
         allowedLink.value.setTextColor(ui.muted());
         ui.paintOn(allowedLink.mark, true);
+        manual.setVisibility(manual.getChildCount() == 0 ? View.GONE : View.VISIBLE);
         paintExpanded();
     }
 
@@ -191,14 +200,21 @@ public final class PermissionActivity extends Activity {
     }
 
     private void openIssue(Json issue) {
-        if ("shizuku".equals(issue.get("id").string())) { openShizuku(); return; }
+        String id = issue.get("id").string();
+        if ("shizuku".equals(id)) { openShizuku(); return; }
+        if ("notification-apps".equals(id)) { startActivity(new Intent(this, NotificationAppsActivity.class)); return; }
+        if ("notification-access".equals(id) || "notification-listener".equals(id)) {
+            start(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)); return;
+        }
         String destination = issue.get("destination").string();
         if ("mcp".equals(destination)) {
-            startActivity(new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_PAGE, "mcp"));
+            startActivity(new Intent(this, McpHelpActivity.class));
         } else if ("notifications".equals(destination)) {
             startActivity(new Intent(this, NotificationActivity.class));
         } else if ("remoteRelay".equals(destination)) {
             startActivity(new Intent(this, RemoteRelayActivity.class));
+        } else if ("remotePermissions".equals(destination)) {
+            startActivity(RemotePermissionsActivity.intent(this, issue.get("scope") == null ? "personal" : issue.get("scope").string()));
         } else {
             startActivity(new Intent(this, ClipboardActivity.class));
         }

@@ -131,6 +131,7 @@ fi
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
+require_station_feature "$ADB" "$SERIAL" alerts
 
 # 手机上的缓存。stamp 一行，制表符分隔：铃声标识、文件路径、大小、修改时间。
 # 标识是参数里的路径，或者 settings 里的 notification_sound。

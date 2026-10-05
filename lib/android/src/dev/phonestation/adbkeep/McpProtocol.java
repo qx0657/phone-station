@@ -28,6 +28,10 @@ final class McpProtocol {
                     return rpcError(null, -32600, "批量请求编号不能重复");
                 }
             }
+            // Preflight the entire batch before any file or device side effect.
+            try {
+                for (Json item : batch) { authorizeCall(item, host); }
+            } catch (FileFailure denied) { return new Reply(403, Json.obj().put("error", denied.getMessage()).emit()); }
             Json replies = Json.arr();
             for (Json item : batch) {
                 Reply reply = message(item, files, host, version);
@@ -43,6 +47,15 @@ final class McpProtocol {
     private static String normalizedID(Json id) {
         String value = id.emit();
         return "-0".equals(value) ? "0" : value;
+    }
+
+    private static void authorizeCall(Json message, StationHost host) {
+        if (host == null || !message.isObject()) { return; }
+        Json method = message.get("method"), params = message.get("params");
+        if (method != null && method.isString() && method.string().equals("tools/call")
+                && params != null && params.isObject() && params.get("name") != null && params.get("name").isString()) {
+            host.authorize(params.get("name").string());
+        }
     }
 
     private static Reply message(Json message, FileOps files, StationHost host, String version) {
@@ -76,7 +89,14 @@ final class McpProtocol {
                 return rpc(id, initialize(version));
             }
             if ("tools/list".equals(method)) {
-                return rpc(id, Json.obj().put("tools", tools()));
+                Json visible = Json.arr();
+                for (Json tool : tools().array()) {
+                    try {
+                        if (host != null) { host.authorize(tool.get("name").string()); }
+                        visible.add(tool);
+                    } catch (FileFailure denied) { /* The phone owns this tool's permission. */ }
+                }
+                return rpc(id, Json.obj().put("tools", visible));
             }
             if ("tools/call".equals(method)) {
                 // 文件事务跨通道串行；主机状态与后台任务查询不占文件锁。
@@ -131,6 +151,7 @@ final class McpProtocol {
             args = Json.obj();
         }
         try {
+            if (host != null) { host.authorize(name); }
             return toolOk(dispatch(name, args, files, host));
         } catch (FileFailure error) {
             return toolError(error.getMessage());

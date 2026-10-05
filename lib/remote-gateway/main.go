@@ -1021,7 +1021,7 @@ func (g *gateway) probeLocal(token string) probeResult {
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"local-probe","method":"ping"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: time.Second}).Do(request)
+	response, err := (&http.Client{Timeout: time.Second, CheckRedirect: rejectRelayRedirect}).Do(request)
 	if err != nil {
 		return probeResult{}
 	}
@@ -1099,7 +1099,7 @@ func (g *gateway) proxyLocal(parent context.Context, w http.ResponseWriter, body
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
-	response, err := (&http.Client{Timeout: 4 * time.Minute}).Do(request)
+	response, err := (&http.Client{Timeout: 4 * time.Minute, CheckRedirect: rejectRelayRedirect}).Do(request)
 	if err != nil {
 		g.localRequestFailed(parent, w, body, value, revision)
 		return
@@ -1423,7 +1423,7 @@ func watchJSONStatus() error {
 	}
 	request, _ := http.NewRequest(http.MethodGet, "http://"+listenAddress+"/__events", nil)
 	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
-	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: time.Second}}
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: time.Second}, CheckRedirect: rejectRelayRedirect}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -1470,7 +1470,7 @@ func getStatus() (statusReply, error) {
 	}
 	request, _ := http.NewRequest(http.MethodGet, "http://"+listenAddress+"/__status", nil)
 	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
-	response, err := (&http.Client{Timeout: time.Second}).Do(request)
+	response, err := (&http.Client{Timeout: time.Second, CheckRedirect: rejectRelayRedirect}).Do(request)
 	if err != nil {
 		return statusReply{}, err
 	}

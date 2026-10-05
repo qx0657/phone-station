@@ -7,6 +7,7 @@
 | 文档 | 对应 | 这篇里有什么 |
 | --- | --- | --- |
 | [architecture.md](architecture.md) | 三端系统与源码 | 组件关系、能力矩阵、身份边界及源码唯一归属 |
+| [security.md](security.md) | 远程权限与攻击边界 | 手机端默认拒绝、分项授权、撤销、请求收紧与中继信任范围 |
 | [troubleshooting.md](troubleshooting.md) | 状态与任务恢复 | 认证、通道、Shizuku、结果未知、安装恢复和中继存储的排障入口 |
 | [releases.md](releases.md) | 三端发布与部署 | 版本、提交、产物摘要、独立完成层次、升级顺序与安全回滚 |
 | [history/](history/README.md) | 历史证据 | 日期与版本限定的测试、界面、安装和部署记录 |
@@ -24,3 +25,5 @@
 | [screenshot-cleanup.md](screenshot-cleanup.md) | 图库截图 | 哪些截图可以删。界面类和重复张的像素阈值。张数是 2026-09-29 这台 PGT-AN20 上的 |
 | [adb-keep.md](adb-keep.md) | `lib/android/`、`scripts/android.sh` | 手机上的「手机工位」。为什么无线调试会自己关，以及何时写回去。界面上的已连接合并 adb 心跳和远程通道；adb 断开后靠写成 0 或 15 秒过期复位，远程在线时仍显示已连接。权限页列出读得到的授权，其中 Shizuku 要服务在跑才能授权；自启动读不到。Shizuku 启动后活到重启，重启后要无线调试开着才能再拉起。开机自启还要在荣耀的应用启动管理里允许 |
 | [android-cli.md](android-cli.md) | `android` | 建工程、查文档、装 APK、看布局。不参与 `scripts/` 里的手机操作，安装命令写在这里 |
+
+功能选择、系统权限和远程访问的关系见 [功能开关](features.md)。

@@ -8,6 +8,8 @@ Android 63、Mac 0.1.0 (25)、公网中继 3 配合使用时，Mac 首页的「�
 
 ## 通道与权限
 
+Android 64 起必须在手机远程中继页开启「投屏与操控」，默认关闭；即使 open 经本地 MCP 提交，公网屏幕会话也检查此开关。改变权限或资料会结束旧会话并阻止旧排队创建。详见 [远程安全与授权](security.md)。
+
 控制会话的三个工具是 `station_screen_open`、`station_screen_status`、`station_screen_close`，参数是提前保存的 32 位小写十六进制 `sessionId`。open 返回编号相同的后台任务，使用 `station_operation_status` 查询创建结果；status 返回原会话状态与视频帧数，不重新采集。丢失创建应答后只查询原任务，不再次提交。close 关闭原会话，可重复调用。
 
 视频不经过串行 MCP 队列。Mac 通过已鉴权的本机 `/__screen/<sessionId>` WebSocket 接入，网关内部读取钥匙串里的电脑凭据，再连接中继 `/v1/screen/desktop/<sessionId>`。手机用自身角色凭据连接 `/v1/screen/phone/<sessionId>`。两端使用 WSS 和既有 SPKI 固定验证；不扩大手机回环监听，不暴露 adb。中继可看到视频、音频与输入，应部署在自己管理或信任的主机上。

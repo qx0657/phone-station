@@ -2,10 +2,11 @@ import SwiftUI
 
 struct ConnectionPage: View {
     @ObservedObject var station: Station
+    @StationViewState private var showsPairing: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("连接与配对") { station.page = .main }
+            StationRows.subpageHeader("连接与配对") { station.goBack(fallback: .main) }
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(station.link.headline)
@@ -27,7 +28,7 @@ struct ConnectionPage: View {
                         online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
                 }.elevatedGroup()
                 Text(station.link.remoteConnected && station.link.serial == nil
-                     ? "远程连接已可用，可使用文件、截屏、保持亮屏和手电筒。投屏、录屏与灯光跟随声音需要接入 USB，或回到同一 Wi-Fi。"
+                     ? "远程连接已可用。投屏、录屏、文件与手机控件按手机授权开放；灯光跟随声音需要 USB 或同一 Wi-Fi 的连接。"
                      : "无线调试配对过一次并且开着，或 USB 已经接上，就可以连接。没有设备在线时会自动查找并连接。断开成功之后，要再点「连接手机」，这次打开期间才会继续自动连接。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -51,26 +52,25 @@ struct ConnectionPage: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("第一次配对")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("手机打开「无线调试 → 使用配对码配对」，停在那个页面，把 6 位码填在这里。不要用页面上的 172.19 地址。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    TextField("6 位配对码", text: Binding(
-                        get: { station.setup.pairCode },
-                        set: { station.setup.pairCode = $0 }
-                    ))
-                        .textFieldStyle(.roundedBorder)
-                    Button("使用配对码配对") { station.setup.pair() }
-                        .buttonStyle(.bordered)
-                        .disabled(station.feedback.activity != nil)
-                }
+                DisclosureGroup("第一次配对", isExpanded: $showsPairing) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("手机打开「无线调试 → 使用配对码配对」，停在那个页面，把 6 位码填在这里。不要用页面上的 172.19 地址。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        TextField("6 位配对码", text: Binding(
+                            get: { station.setup.pairCode },
+                            set: { station.setup.pairCode = $0 }
+                        ))
+                            .textFieldStyle(.roundedBorder)
+                        Button("使用配对码配对") { station.setup.pair() }
+                            .buttonStyle(.bordered)
+                            .disabled(station.feedback.activity != nil)
+                    }
+                }.font(.subheadline)
                 Button("打开项目说明") { station.login.openGuide() }
                     .buttonStyle(.bordered)
-                StationRows.navigationRow("远程 MCP 连接", symbol: "network", detail: "在不同网络下使用手机工具") {
+                StationRows.navigationRow("电脑接入与远程连接", symbol: "network", detail: station.mcp.summary) {
                     station.page = .mcp
                 }.elevatedGroup()
                 if let text = station.feedbackText {
@@ -79,6 +79,6 @@ struct ConnectionPage: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        }.onAppear { showsPairing = !station.link.isConnected }
     }
 }

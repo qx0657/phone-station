@@ -89,6 +89,7 @@ final class KeeperEngine {
      * 写入之前先把失败次数加一，避免系统立刻拨回关时观察者马上再写一次。
      */
     static synchronized long tick(Context context) {
+        if (!StationFeatures.master(context)) { return -1L; }
         Context app = context.getApplicationContext();
         if (!KeeperStore.isEnabled(app)) {
             KeeperAlarm.cancel(app);

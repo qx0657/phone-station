@@ -23,6 +23,7 @@ class Phone:
         self.drop_before_input = False
         self.wrong_id = False
         self.model = "PGT-AN20"
+        self.permissions = None
 
     def rpc(self, method, args):
         self.calls.append((method, args))
@@ -33,7 +34,7 @@ class Phone:
     def tool(self, name, args=None):
         self.calls.append((name, args))
         if name == "station_controls_status":
-            return {"model": self.model, "verified": True}
+            return {"model": self.model, "verified": True, "remotePermissions": self.permissions}
         if name == "station_shell_status":
             return {"available": True}
         if name == "station_terminal_input":
@@ -81,6 +82,13 @@ class TerminalTest(unittest.TestCase):
         self.assertEqual(self.receipt.value["nextInputSequence"], 1)
         self.assertEqual(len([name for name, _ in self.phone.calls if name == "station_terminal_input"]), 1)
         self.assertEqual(self.receipt.path.stat().st_mode & 0o777, 0o600)
+
+    def test_permission_denial_is_not_an_old_version_error(self):
+        self.phone.permissions = {"shell": False}
+        self.phone.rpc = lambda method, args: {"tools": [{"name": "station_controls_status"}]}
+        with self.assertRaisesRegex(RemoteError, "Shell 与安装"):
+            initialize(self.phone)
+        self.assertEqual([name for name, _ in self.phone.calls], ["station_controls_status"])
 
     def test_missing_input_ack_remains_blocked_after_restart(self):
         self.phone.drop_before_input = True

@@ -19,7 +19,7 @@ class StayAwakeScriptTest(unittest.TestCase):
         shutil.copyfile(ROOT / "scripts/stay-awake.sh", self.root / "scripts/stay-awake.sh")
         self.events = self.root / "events"
         self.env = dict(os.environ, TEST_EVENTS=str(self.events), TEST_ADB=str(self.root / "adb"), TEST_RESULT="1")
-        (self.root / "lib/common.sh").write_text('adb_bin() { print -r -- "$TEST_ADB"; }\nonline_serial() { print test-device; }\n')
+        (self.root / "lib/common.sh").write_text('adb_bin() { print -r -- "$TEST_ADB"; }\nonline_serial() { print test-device; }\nrequire_station_feature() { return 0; }\n')
         for name, content in {
             "scripts/connect.sh": '#!/bin/zsh\nprint connect >> "$TEST_EVENTS"\n',
             "adb": '''#!/bin/zsh

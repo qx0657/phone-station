@@ -17,6 +17,13 @@ final class ScreenCaptureTest {
             catch (Exception error) { throw new IllegalStateException(error); }
             return Json.obj().put("timedOut", false).put("exitCode", 0);
         };
+        // A revoked queued capture must not even reserve or create ordinary files.
+        try {
+            ScreenCapture.capture(files, shell, id, () -> { throw new FileFailure("远程权限已撤销"); });
+            throw new AssertionError("revoked capture dispatched");
+        } catch (FileFailure expected) {
+            expect(calls[0] == 0 && !Files.exists(home.resolve("Download")));
+        }
         Json result = ScreenCapture.capture(files, shell, id);
         expect(result.get("size").longValue() == png.length);
         expect(result.get("sha256").string().length() == 64);

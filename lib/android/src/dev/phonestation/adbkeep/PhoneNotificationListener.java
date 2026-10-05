@@ -15,6 +15,7 @@ public final class PhoneNotificationListener extends NotificationListenerService
     @Override public void onDestroy() { PhoneNotifications.state(this).listener(false); super.onDestroy(); }
 
     @Override public void onNotificationPosted(StatusBarNotification posted) {
+        if (!StationFeatures.active(this, "notifications")) { return; }
         if (posted == null || !Process.myUserHandle().equals(posted.getUser())) { return; }
         NotificationSyncState state = PhoneNotifications.state(this);
         long now = SystemClock.elapsedRealtime();

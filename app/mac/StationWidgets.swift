@@ -2,6 +2,10 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+// Resolve the property wrapper explicitly: Command Line Tools do not include
+// the newer SwiftUI.State macro plugin with the same name.
+typealias StationViewState<Value> = SwiftUI.State<Value>
+
 enum StationChrome {
     static let cardRadius: CGFloat = 12
 }

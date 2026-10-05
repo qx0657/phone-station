@@ -6,6 +6,8 @@
 
 地址是 HTTPS 服务根地址；客户端在其后拼接接口路径。通过路径前缀反代时，代理须移除此前缀再交给服务端。手机/电脑各使用一枚不同 Bearer；两端校验固定 SPKI，不自动跟随重定向。
 
+中继 4 仅接受原生客户端，拒绝 Origin、重复 Authorization 和接口之外的查询参数；operation 查询只允许单个 id。JSON 正文拒绝重复字段（包括转义同名键）、非 UTF-8、超过手机解析深度及尾随值。权限与信任边界见 [远程安全与授权](security.md)。
+
 | 接口 | 角色 | 请求与应答 |
 |---|---|---|
 | `GET /v1/desktop/status` | 电脑 | 返回 deviceId、online、version、durable、operationEpoch；握手可能推进会话代号并清理过期回执，不调用手机工具 |

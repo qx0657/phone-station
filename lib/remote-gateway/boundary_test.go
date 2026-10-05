@@ -88,3 +88,26 @@ func TestBatchReplayRequiresEveryItemToBeReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalProbeAndMutationNeverFollowRedirects(t *testing.T) {
+	redirected := 0
+	phone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirected++
+			w.Write([]byte(pingReply))
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+	}))
+	defer phone.Close()
+	g := &gateway{localURL: phone.URL + "/mcp"}
+	if g.probeLocal("test").ok || redirected != 0 {
+		t.Fatal("local probe followed a redirect")
+	}
+	g.state.localOnline = true
+	w := httptest.NewRecorder()
+	g.proxyLocal(context.Background(), w, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"station_shell_exec","arguments":{"command":"fixture"}}}`), config{LocalToken: "test"})
+	if w.Code != http.StatusTemporaryRedirect || redirected != 0 {
+		t.Fatal("local mutation replayed by redirect")
+	}
+}

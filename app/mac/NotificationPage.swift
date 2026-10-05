@@ -5,17 +5,20 @@ struct NotificationPage: View {
     @ObservedObject var notifications: NotificationSession
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("手机通知") { station.page = .main }
+            StationRows.subpageHeader("手机通知") { station.goBack(fallback: .main) }
             ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(spacing: 0) {
                     StationRows.toggleRow("在这台 Mac 接收", symbol: "bell.badge",
                         subtitle: "只接收手机端勾选应用的新通知",
                         isOn: Binding(get: { notifications.receiving }, set: { notifications.setReceiving($0) }),
-                        enabled: notifications.permission == .authorized && !notifications.busy)
+                        enabled: !notifications.busy)
                 }.elevatedGroup()
                 Text(notifications.summary).font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let blocker = station.remoteBlocker([.notifications]) {
+                    RemotePermissionHint(station: station, blocker: blocker)
+                }
                 VStack(spacing: 0) {
                     StationRows.toggleRow("显示应用图标横幅", symbol: "rectangle.topthird.inset.filled",
                         subtitle: "左侧使用手机应用图标，6 秒后收起",
@@ -48,9 +51,9 @@ struct NotificationPage: View {
                         detail("已选应用", "\(state.selectedCount) 个")
                         if !state.enabled {
                             Button("开启手机端同步") { notifications.configurePhone(true) }
-                                .buttonStyle(.bordered).disabled(notifications.busy || !notifications.connected)
+                                .buttonStyle(.bordered).disabled(notifications.busy || !notifications.connected || station.remoteBlocker([.notifications]) != nil)
                         }
-                        Text("在手机工位「设置 → 通知 → 手机通知 → Mac」中授予通知使用权，并选择应用。")
+                        Text("在手机工位首页打开「通知 → 手机通知 → Mac」，授予通知使用权并选择应用。电脑提醒 → 手机由手机上的独立开关控制。")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(12).elevatedGroup()
                 }

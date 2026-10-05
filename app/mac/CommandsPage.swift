@@ -5,7 +5,7 @@ struct CommandsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("adb 命令") { station.page = .main }
+            StationRows.subpageHeader("命令与终端") { station.goBack(fallback: .more) }
             VStack(alignment: .leading, spacing: 12) {
                 Text(station.commands.remoteRoute() == nil
                      ? "点一行执行。铅笔用来修改。"
@@ -13,6 +13,9 @@ struct CommandsPage: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let blocker = station.remoteBlocker([.shell]), station.link.serial == nil {
+                    RemotePermissionHint(station: station, blocker: blocker)
+                }
                 if !station.commands.commands.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(Array(station.commands.commands.enumerated()), id: \.element.id) { index, command in
@@ -75,7 +78,6 @@ struct CommandsPage: View {
             }
             .buttonStyle(PressFadeStyle())
             .disabled(reason != nil)
-            .opacity(reason == nil ? 1 : 0.4)
             Button {
                 station.commands.beginEdit(command)
             } label: {

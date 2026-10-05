@@ -16,6 +16,7 @@ struct LinkReading: Sendable {
     var serial: String? = nil
     /// 一台设备都没有，而且不是在等手机上点允许。这种才自动跑 connect.sh。
     var reconnectable = false
+    var features: PhoneFeatureState? = nil
 }
 
 @MainActor
@@ -24,6 +25,7 @@ final class LinkSession: ObservableObject {
     @Published private(set) var deviceDetail = ""
     @Published private(set) var transport = ""
     @Published private(set) var serial: String?
+    @Published private(set) var phoneFeatures: PhoneFeatureState?
     @Published private(set) var battery: BatteryReport.Reading?
     @Published private(set) var stayAwake = false
     @Published private(set) var isReconnecting = false
@@ -180,6 +182,7 @@ final class LinkSession: ObservableObject {
             accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
                    link: reading.link, serial: reading.serial, readingControls: controls,
                    reconnectable: reading.reconnectable)
+            if revision == statusRevision { phoneFeatures = reading.features }
         } while probeAgain
         probeInFlight = false
     }
@@ -303,13 +306,16 @@ final class LinkSession: ObservableObject {
             return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline,
                                reconnectable: !unauthorized)
         }
+        let switches = "settings get global phonestation_enabled; " + PhoneFeatureState.keys.map {
+            "settings get global phonestation_feature_" + $0.replacingOccurrences(of: ".", with: "_")
+        }.joined(separator: "; ")
         if let trustedSerial, only == trustedSerial {
-            let alive = StationRunner.capture(adb, ["-s", only, "shell", "true"], timeout: 2)
+            let alive = StationRunner.capture(adb, ["-s", only, "shell", switches], timeout: 2)
             if !alive.succeeded {
                 return LinkReading(name: "手机未连接", detail: "调试连接已中断。", link: .offline,
                                    reconnectable: true)
             }
-            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
+            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only, features: PhoneFeatureState.adb(alive.output))
         }
         let model = StationRunner.capture(adb, ["-s", only, "shell", "getprop", "ro.product.model"], timeout: 2)
         let rawName = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -317,7 +323,8 @@ final class LinkSession: ObservableObject {
             return LinkReading(name: "无法识别手机型号", detail: "请检查连接，然后重新打开面板。", link: .offline)
         }
         if rawName == "PGT-AN20" {
-            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only)
+            let state = StationRunner.capture(adb, ["-s", only, "shell", switches], timeout: 2)
+            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only, features: state.succeeded ? PhoneFeatureState.adb(state.output) : nil)
         }
         return LinkReading(name: rawName, detail: "该型号尚未验证。请先查看项目说明中的设备支持范围。",
                            transport: transportLabel(only), link: .unverified)

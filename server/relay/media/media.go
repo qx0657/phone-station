@@ -17,7 +17,7 @@ var ID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func Accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	// Browser origins are unnecessary: this channel is only for authenticated native clients.
-	if r.Header.Get("Origin") != "" {
+	if len(r.Header.Values("Origin")) != 0 {
 		http.Error(w, "native clients only", http.StatusForbidden)
 		return nil, errors.New("origin")
 	}

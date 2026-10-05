@@ -54,6 +54,25 @@ enum NotificationSessionTest {
         try? await Task.sleep(nanoseconds: 20_000_000)
     }
     @MainActor static func main() async {
+        let guarded = Fake(), guardedSession = guarded.session()
+        var granted = false
+        guardedSession.remote = { true }
+        guardedSession.access = { RemoteAccessState(checked: true, permissions: ["personal": granted]) }
+        await tick(guardedSession); await tick(guardedSession)
+        guardedSession.configurePhone(true)
+        await Task.yield()
+        expect(guarded.calls.allSatisfy { $0.0 == "station_notification_status" }, "ungranted notifications only read content-free status")
+        expect(guardedSession.remoteBlocker?.scopes == ["personal"], "notification denial provides a resolvable scope")
+        granted = true
+        await tick(guardedSession)
+        expect(guarded.calls.last?.0 == "station_notification_poll" && guarded.delivered.isEmpty, "grant establishes a new baseline")
+        guarded.event(); guarded.holdIcon = true
+        guardedSession.refresh()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        granted = false
+        guarded.iconWaiting?.resume(returning: Data("{\"available\":false}".utf8))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(guarded.delivered.isEmpty, "revocation during icon lookup suppresses the notification body")
         let fake = Fake()
         let session = fake.session()
         await tick(session) // status
@@ -105,6 +124,10 @@ enum NotificationSessionTest {
         await tick(pending)
         await tick(pending)
         expect(unapproved.requests == 0 && unapproved.calls.allSatisfy { $0.0 == "station_notification_status" }, "permission is only requested by user action")
+        pending.setReceiving(false)
+        pending.setReceiving(true)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        expect(pending.receiving && unapproved.requests == 1, "user can enable receiving before notification authorization")
         let offline = Fake()
         offline.endpoint = nil
         let noRoute = offline.session()
