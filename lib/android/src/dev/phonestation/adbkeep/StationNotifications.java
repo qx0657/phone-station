@@ -13,6 +13,7 @@ import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.Icon;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -328,11 +329,10 @@ final class StationNotifications {
         RemoteViews expanded = new RemoteViews(context.getPackageName(), R.layout.note_expanded);
         bindCollapsed(context, collapsed, note);
         bindExpanded(context, expanded, note);
-        return new Notification.Builder(context, CHANNEL)
+        Notification.Builder builder = new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_station)
                 .setContentTitle(note.title)
                 .setContentText(note.text)
-                .setCustomContentView(collapsed)
                 .setCustomBigContentView(expanded)
                 .setStyle(new Notification.DecoratedCustomViewStyle())
                 .setOngoing(true)
@@ -340,52 +340,89 @@ final class StationNotifications {
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_STATUS)
                 .setContentIntent(openApp(context))
-                .setDeleteIntent(hideIntent(context, postedToken))
-                .build();
+                .setDeleteIntent(hideIntent(context, postedToken));
+        // 自定义收起区可能只有 48dp；更大字号交给系统模板分配标题和正文。
+        if (context.getResources().getConfiguration().fontScale <= 1.3f) {
+            builder.setCustomContentView(collapsed);
+        }
+        if (note.mcpAction) {
+            addAction(context, builder, R.drawable.ic_status_mcp, "MCP 设置",
+                    openPage(context, McpHelpActivity.class, 10));
+        }
+        switch (note.keeperAction) {
+            case PERMISSION:
+                addAction(context, builder, R.drawable.ic_status_permission, "权限设置",
+                        openPage(context, PermissionActivity.class, 11));
+                break;
+            case CONNECTION:
+                addAction(context, builder, R.drawable.ic_note_keeper, "连接设置",
+                        openPage(context, ConnectionActivity.class, 12));
+                break;
+            case WIFI:
+                addAction(context, builder, R.drawable.ic_status_wifi, "Wi-Fi 设置",
+                        PendingIntent.getActivity(context, 13, new Intent(Settings.ACTION_WIFI_SETTINGS),
+                                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+                break;
+            default: break;
+        }
+        return builder.build();
     }
 
     private static void bindCollapsed(Context context, RemoteViews views, StationNote note) {
         views.setTextViewText(R.id.title, note.title);
         views.setTextColor(R.id.title, context.getColor(R.color.note_text));
         views.setTextViewText(R.id.detail, note.text);
-        views.setTextColor(R.id.detail, context.getColor(R.color.note_muted));
+        views.setTextColor(R.id.detail, context.getColor(note.expandedDetail.isEmpty()
+                ? R.color.note_muted : R.color.waiting));
     }
 
     private static void bindExpanded(Context context, RemoteViews views, StationNote note) {
         views.setTextViewText(R.id.title, note.title);
         views.setTextColor(R.id.title, context.getColor(R.color.note_text));
-        views.setTextViewText(R.id.connection, note.connection);
-        views.setTextColor(R.id.connection, context.getColor(R.color.note_muted));
-        views.setViewVisibility(R.id.connection, note.connection.isEmpty() ? View.GONE : View.VISIBLE);
-        bindStatus(context, views, R.id.wireless_cell, R.id.wireless_icon, R.id.wireless_label,
-                R.id.wireless_state, R.drawable.ic_status_wireless, "无线调试", note.wirelessState);
+        boolean usb = "USB".equals(note.localName);
+        int localIcon = usb ? (note.localTone == StationNote.Tone.READY
+                ? R.drawable.ic_status_usb : R.drawable.ic_status_usb_off)
+                : "本地".equals(note.localName) ? R.drawable.ic_status_computer
+                : note.localTone == StationNote.Tone.READY ? R.drawable.ic_status_wifi : R.drawable.ic_status_wifi_off;
+        bindStatus(context, views, R.id.local_cell, R.id.local_icon, R.id.local_label,
+                R.id.local_state, localIcon, note.localName, note.localName + "连接", note.localState, note.localTone);
+        boolean remoteActive = "已连接".equals(note.remoteState) || "连接中".equals(note.remoteState)
+                || "待确认".equals(note.remoteState);
+        bindStatus(context, views, R.id.remote_cell, R.id.remote_icon, R.id.remote_label,
+                R.id.remote_state, remoteActive ? R.drawable.ic_status_cloud : R.drawable.ic_status_cloud_off,
+                "远程", "远程连接", note.remoteState, note.remoteTone);
         bindStatus(context, views, R.id.mcp_cell, R.id.mcp_icon, R.id.mcp_label,
-                R.id.mcp_state, R.drawable.ic_status_mcp, "MCP 服务", note.mcpState);
+                R.id.mcp_state, R.drawable.ic_status_mcp, "MCP", "MCP 服务", note.mcpState, note.mcpTone);
         bindStatus(context, views, R.id.keeper_cell, R.id.keeper_icon, R.id.keeper_label,
-                R.id.keeper_state, R.drawable.ic_status_keep, "自动保持无线调试", note.keeperState);
+                R.id.keeper_state, R.drawable.ic_note_keeper, "自动保持", "自动保持无线调试",
+                note.keeperState, note.keeperTone);
         if (note.expandedDetail.isEmpty()) {
             views.setViewVisibility(R.id.detail, View.GONE);
             return;
         }
         views.setViewVisibility(R.id.detail, View.VISIBLE);
         views.setTextViewText(R.id.detail, note.expandedDetail);
-        views.setTextColor(R.id.detail, context.getColor(R.color.note_muted));
+        views.setTextColor(R.id.detail, context.getColor(R.color.waiting));
     }
 
     private static void bindStatus(Context context, RemoteViews views, int cell, int icon,
-            int label, int stateView, int drawableId, String name, String state) {
-        boolean on = "开".equals(state);
+            int label, int stateView, int drawableId, String name, String description,
+            String state, StationNote.Tone tone) {
         int quiet = context.getColor(R.color.note_muted);
-        int ink = on ? context.getColor(R.color.note_text) : quiet;
-        views.setTextColor(label, ink);
+        int ink = tone == StationNote.Tone.WAITING ? context.getColor(R.color.waiting)
+                : tone == StationNote.Tone.READY || "已开启".equals(state)
+                ? context.getColor(R.color.note_text) : quiet;
+        views.setTextViewText(label, name);
+        views.setTextColor(label, quiet);
         views.setTextViewText(stateView, state);
         views.setTextColor(stateView, ink);
-        views.setContentDescription(cell, name + "，" + (on ? "开启" : "关闭"));
+        views.setContentDescription(cell, description + "，" + state);
         // 位图走 RemoteViews 的标准入口，不依赖系统对向量着色反射方法的支持。
         int size = Math.max(1, Math.round(16 * context.getResources().getDisplayMetrics().density));
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Drawable drawable = context.getDrawable(drawableId).mutate();
-        drawable.setTint(on ? context.getColor(R.color.held) : quiet);
+        drawable.setTint(tone == StationNote.Tone.READY ? context.getColor(R.color.held)
+                : tone == StationNote.Tone.WAITING ? context.getColor(R.color.waiting) : quiet);
         drawable.setBounds(0, 0, size, size);
         drawable.draw(new Canvas(bitmap));
         views.setImageViewBitmap(icon, bitmap);
@@ -431,6 +468,19 @@ final class StationNotifications {
                 context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    private static PendingIntent openPage(Context context, Class<?> activity, int requestCode) {
+        Intent intent = new Intent(context, activity);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return PendingIntent.getActivity(context, requestCode, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static void addAction(Context context, Notification.Builder builder, int icon,
+            String title, PendingIntent intent) {
+        builder.addAction(new Notification.Action.Builder(
+                Icon.createWithResource(context, icon), title, intent).build());
+    }
+
     private static PendingIntent hideIntent(Context context, int postedToken) {
         Intent intent = new Intent(context, StationHideReceiver.class);
         intent.setAction(StationHideReceiver.ACTION);
@@ -457,15 +507,10 @@ final class StationNotifications {
     private static StationNote current(Context context) {
         HostProbe host = HostProbe.current(context);
         KeeperCopy keeper = KeeperEngine.current(context);
-        boolean mcp = FileMcpService.listening() || mcpInstance != null;
         return StationNote.present(
-                host.linked,
-                "开".equals(keeper.wireless),
-                mcp,
-                KeeperStore.isEnabled(context),
-                keeper.headline,
-                host.connectionType,
-                host.remoteChecking);
+                StationFeatures.master(context), host.localConnected, host.localTransport,
+                "开".equals(keeper.wireless), RemoteStore.enabled(context), FileMcpService.status(context),
+                KeeperStore.isEnabled(context), keeper.headline);
     }
 
     private static void watch(Context context) {

@@ -125,6 +125,8 @@ public final class FileMcpService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // 进入前台时监听尚未建立；完成启动后立即刷新真实服务状态。
+        StationNotifications.update(this);
         return RemoteStore.enabled(this) ? START_STICKY : START_NOT_STICKY;
     }
 

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.phonestation.adbkeep"
-    android:versionCode="67"
-    android:versionName="67">
+    android:versionCode="68"
+    android:versionName="68">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
 

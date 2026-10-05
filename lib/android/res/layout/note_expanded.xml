@@ -5,134 +5,185 @@
     android:orientation="vertical"
     android:paddingTop="2dp"
     android:paddingBottom="8dp">
-    <LinearLayout
+    <TextView
+        android:id="@+id/title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textSize="16sp" />
+    <LinearLayout
+        android:id="@+id/connection_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
         android:orientation="horizontal">
-        <TextView
-            android:id="@+id/title"
+        <LinearLayout
+            android:id="@+id/local_cell"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:fontFamily="sans-serif-medium"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:textSize="16sp" />
-        <TextView
-            android:id="@+id/connection"
-            android:layout_width="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:gravity="top"
+            android:importantForAccessibility="yes"
+            android:orientation="horizontal">
+            <ImageView
+                android:id="@+id/local_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginTop="1dp"
+                android:importantForAccessibility="no" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/local_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:text="无线"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/local_state"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/remote_cell"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:textSize="12sp" />
+            android:layout_weight="1"
+            android:gravity="top"
+            android:importantForAccessibility="yes"
+            android:orientation="horizontal">
+            <ImageView
+                android:id="@+id/remote_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginTop="1dp"
+                android:importantForAccessibility="no" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/remote_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:text="远程"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/remote_state"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
     <LinearLayout
         android:id="@+id/status_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        android:gravity="center_vertical"
         android:orientation="horizontal">
-        <LinearLayout
-            android:id="@+id/wireless_cell"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="12dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-            <ImageView
-                android:id="@+id/wireless_icon"
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:importantForAccessibility="no" />
-            <TextView
-                android:id="@+id/wireless_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:ellipsize="end"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:importantForAccessibility="no"
-                android:text="无线"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/wireless_state"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
-                android:includeFontPadding="false"
-                android:importantForAccessibility="no"
-                android:textSize="12sp" />
-        </LinearLayout>
         <LinearLayout
             android:id="@+id/mcp_cell"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="12dp"
-            android:gravity="center_vertical"
+            android:gravity="top"
+            android:importantForAccessibility="yes"
             android:orientation="horizontal">
             <ImageView
                 android:id="@+id/mcp_icon"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
+                android:layout_marginTop="1dp"
                 android:importantForAccessibility="no" />
-            <TextView
-                android:id="@+id/mcp_label"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:ellipsize="end"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:importantForAccessibility="no"
-                android:text="MCP"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/mcp_state"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
-                android:includeFontPadding="false"
-                android:importantForAccessibility="no"
-                android:textSize="12sp" />
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/mcp_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:text="MCP"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/mcp_state"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
         <LinearLayout
             android:id="@+id/keeper_cell"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:gravity="center_vertical"
+            android:gravity="top"
+            android:importantForAccessibility="yes"
             android:orientation="horizontal">
             <ImageView
                 android:id="@+id/keeper_icon"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
+                android:layout_marginTop="1dp"
                 android:importantForAccessibility="no" />
-            <TextView
-                android:id="@+id/keeper_label"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:ellipsize="end"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:importantForAccessibility="no"
-                android:text="保持"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/keeper_state"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
-                android:includeFontPadding="false"
-                android:importantForAccessibility="no"
-                android:textSize="12sp" />
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/keeper_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:text="自动保持"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/keeper_state"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
     <TextView
@@ -141,7 +192,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:includeFontPadding="false"
-        android:maxLines="2"
+        android:maxLines="3"
+        android:ellipsize="end"
         android:textSize="12sp"
         android:visibility="gone" />
 </LinearLayout>
