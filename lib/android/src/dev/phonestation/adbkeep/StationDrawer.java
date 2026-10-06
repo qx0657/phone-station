@@ -66,7 +66,7 @@ final class StationDrawer {
         destinations.addView(heading);
         ui.hairline(destinations, 20);
         TextView section = ui.text(14);
-        section.setText("设置");
+        section.setText(StationText.translate("设置"));
         section.setTextColor(ui.muted());
         section.setPadding(ui.dp(20), ui.dp(20), ui.dp(20), ui.dp(6));
         section.setAccessibilityHeading(true);
@@ -85,7 +85,7 @@ final class StationDrawer {
 
         scrim = new View(ui.activity);
         scrim.setBackgroundColor(0xff000000);
-        scrim.setContentDescription("关闭侧边栏");
+        scrim.setContentDescription(StationText.translate("关闭侧边栏"));
         scrim.setOnClickListener(view -> close());
         scrim.setVisibility(View.GONE);
         host = new DrawerHost();
@@ -338,7 +338,7 @@ final class StationDrawer {
 
     private TextView title(String text) {
         TextView title = ui.text(20);
-        title.setText(text);
+        title.setText(StationText.translate(text));
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         title.setAccessibilityHeading(true);
         return title;
@@ -348,7 +348,7 @@ final class StationDrawer {
         ImageButton button = new ImageButton(ui.activity);
         button.setImageResource(resource);
         button.setColorFilter(ui.ink());
-        button.setContentDescription(description);
+        button.setContentDescription(StationText.translate(description));
         button.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12));
         TypedValue background = new TypedValue();
         ui.activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, background, true);

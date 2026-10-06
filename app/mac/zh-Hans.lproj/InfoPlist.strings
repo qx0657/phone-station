@@ -1,0 +1,2 @@
+"CFBundleDisplayName" = "手机工位";
+"NSAudioCaptureUsageDescription" = "手机工位读取这台 Mac 正在播放的音量，用来让闪光灯跟着声音变化。只读取音量，不录音，也不录屏幕。";

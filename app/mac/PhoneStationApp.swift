@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import OSLog
 import SwiftUI
 
@@ -18,6 +19,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var menuBarShowsConnected: Bool?
+    private var appearanceSubscription: AnyCancellable?
     /// Clicks in other apps never reach an `LSUIElement` popover, so `.transient` stays open.
     private var outsideClickMonitor: Any?
     private var localDismissMonitor: Any?
@@ -30,8 +32,21 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        station.appearance.applyTheme()
         repairPreferredPositionIfNeeded()
         installStatusItem()
+        appearanceSubscription = station.appearance.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let connected = self.menuBarShowsConnected ?? false
+                self.menuBarShowsConnected = nil
+                self.applyMenuBar(connected: connected)
+                NotificationBannerCenter.shared.refreshAppearance()
+                for window in NSApp.windows where ["手机工位 · 远程投屏", "Phone Station · Remote mirroring"].contains(window.title) {
+                    window.title = StationL10n.text("手机工位 · 远程投屏")
+                }
+            }
+        }
         schedulePlacementLog()
     }
 
@@ -83,8 +98,8 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
             button.image = menuBarImage(connected: connected)
             logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.link.statusLabel, privacy: .public)")
         }
-        let line = station.link.connectionLine
-        let tip = "手机工位：\(station.link.statusLabel)" + (line.isEmpty ? "" : "\n\(line)")
+        let line = StationL10n.text(station.link.connectionLine)
+        let tip = StationL10n.format("手机工位：{0}", StationL10n.text("\(station.link.statusLabel)")) + (line.isEmpty ? "" : "\n\(line)")
         if button.toolTip != tip {
             button.toolTip = tip
         }
@@ -94,7 +109,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     /// Both symbols share a point size so the status item does not jump when the link changes.
     private func menuBarImage(connected: Bool) -> NSImage {
         let symbolName = connected ? "iphone" : "iphone.slash"
-        let description = connected ? "手机已连接" : "手机未连接"
+        let description = connected ? StationL10n.text("手机已连接") : StationL10n.text("手机未连接")
         let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)?
             .withSymbolConfiguration(config) {
@@ -199,6 +214,10 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private func handleLocalDismiss(escape: Bool, mouse: Bool, at point: NSPoint) -> Bool {
         guard popover?.isShown == true else { return false }
         if escape {
+            if station.dialog != nil {
+                station.dialog = nil
+                return true
+            }
             logger.notice("Menu bar panel closed from Escape")
             popover?.performClose(nil)
             return true
@@ -230,6 +249,7 @@ extension PhoneStationApp: NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        station.dialog = nil
         station.remoteControls.monitoring = false
         removeDismissMonitors()
         station.files.dismissPreview()

@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 final class Station: ObservableObject {
     let feedback: StationFeedback
+    let appearance = StationAppearance.shared
     let link: LinkSession
     let screen: ScreenSession
     let torch: TorchSession
@@ -20,9 +21,11 @@ final class Station: ObservableObject {
     let health: DeviceHealthSession
     let remoteControls: RemoteControlsSession
     private var navigation = StationNavigation()
+    @Published var dialog: StationDialogKind?
     @Published var page: StationPage = .main {
         didSet {
             navigation.changed(from: oldValue, to: page)
+            if oldValue != page { dialog = nil }
             if oldValue != page && feedback.activity == nil { feedback.notice = nil }
         }
     }
@@ -64,6 +67,7 @@ final class Station: ObservableObject {
         remoteControls = RemoteControlsSession(feedback: feedback)
         wire()
         watch(feedback)
+        watch(appearance)
         watch(link)
         watch(screen)
         watch(torch)

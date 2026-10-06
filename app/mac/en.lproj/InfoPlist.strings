@@ -1,0 +1,2 @@
+"CFBundleDisplayName" = "Phone Station";
+"NSAudioCaptureUsageDescription" = "Phone Station reads the volume of audio playing on this Mac to make the flashlight follow sound. It reads volume only and does not record audio or the screen.";

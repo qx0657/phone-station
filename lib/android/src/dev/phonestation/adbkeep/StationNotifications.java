@@ -319,20 +319,21 @@ final class StationNotifications {
     }
 
     private static String appearanceKey(Context context, StationNote note) {
-        Configuration config = context.getResources().getConfiguration();
+        Configuration config = StationAppearance.notificationContext(context).getResources().getConfiguration();
         return note.fullKey() + "\n" + (config.uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                + "\n" + config.fontScale + "\n" + config.densityDpi;
+                + "\n" + config.getLocales().toLanguageTags() + "\n" + config.fontScale + "\n" + config.densityDpi;
     }
 
     private static Notification build(Context context, StationNote note, int postedToken) {
+        context = StationAppearance.notificationContext(context);
         RemoteViews collapsed = new RemoteViews(context.getPackageName(), R.layout.note_collapsed);
         RemoteViews expanded = new RemoteViews(context.getPackageName(), R.layout.note_expanded);
         bindCollapsed(context, collapsed, note);
         bindExpanded(context, expanded, note);
         Notification.Builder builder = new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_station)
-                .setContentTitle(note.title)
-                .setContentText(note.text)
+                .setContentTitle(StationText.translate(note.title))
+                .setContentText(StationText.translate(note.text))
                 .setCustomBigContentView(expanded)
                 .setStyle(new Notification.DecoratedCustomViewStyle())
                 .setOngoing(true)
@@ -369,15 +370,15 @@ final class StationNotifications {
     }
 
     private static void bindCollapsed(Context context, RemoteViews views, StationNote note) {
-        views.setTextViewText(R.id.title, note.title);
+        views.setTextViewText(R.id.title, StationText.translate(note.title));
         views.setTextColor(R.id.title, context.getColor(R.color.note_text));
-        views.setTextViewText(R.id.detail, note.text);
+        views.setTextViewText(R.id.detail, StationText.translate(note.text));
         views.setTextColor(R.id.detail, context.getColor(note.expandedDetail.isEmpty()
                 ? R.color.note_muted : R.color.waiting));
     }
 
     private static void bindExpanded(Context context, RemoteViews views, StationNote note) {
-        views.setTextViewText(R.id.title, note.title);
+        views.setTextViewText(R.id.title, StationText.translate(note.title));
         views.setTextColor(R.id.title, context.getColor(R.color.note_text));
         boolean usb = "USB".equals(note.localName);
         int localIcon = usb ? (note.localTone == StationNote.Tone.READY
@@ -401,7 +402,7 @@ final class StationNotifications {
             return;
         }
         views.setViewVisibility(R.id.detail, View.VISIBLE);
-        views.setTextViewText(R.id.detail, note.expandedDetail);
+        views.setTextViewText(R.id.detail, StationText.translate(note.expandedDetail));
         views.setTextColor(R.id.detail, context.getColor(R.color.waiting));
     }
 
@@ -412,11 +413,11 @@ final class StationNotifications {
         int ink = tone == StationNote.Tone.WAITING ? context.getColor(R.color.waiting)
                 : tone == StationNote.Tone.READY || "已开启".equals(state)
                 ? context.getColor(R.color.note_text) : quiet;
-        views.setTextViewText(label, name);
+        views.setTextViewText(label, StationText.translate(name));
         views.setTextColor(label, quiet);
-        views.setTextViewText(stateView, state);
+        views.setTextViewText(stateView, StationText.translate(state));
         views.setTextColor(stateView, ink);
-        views.setContentDescription(cell, description + "，" + state);
+        views.setContentDescription(cell, StationText.translate(description + "，" + state));
         // 位图走 RemoteViews 的标准入口，不依赖系统对向量着色反射方法的支持。
         int size = Math.max(1, Math.round(16 * context.getResources().getDisplayMetrics().density));
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
@@ -478,7 +479,7 @@ final class StationNotifications {
     private static void addAction(Context context, Notification.Builder builder, int icon,
             String title, PendingIntent intent) {
         builder.addAction(new Notification.Action.Builder(
-                Icon.createWithResource(context, icon), title, intent).build());
+                Icon.createWithResource(context, icon), StationText.translate(title), intent).build());
     }
 
     private static PendingIntent hideIntent(Context context, int postedToken) {
@@ -498,7 +499,7 @@ final class StationNotifications {
             return;
         }
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL, "手机工位", NotificationManager.IMPORTANCE_LOW);
+                CHANNEL, StationText.translate("手机工位"), NotificationManager.IMPORTANCE_LOW);
         channel.setShowBadge(false);
         channel.setSound(null, null);
         manager.createNotificationChannel(channel);

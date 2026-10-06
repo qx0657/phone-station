@@ -26,7 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** 应用白名单逐项保存，没有默认全选。搜索不改变已选择的应用。 */
-public final class NotificationAppsActivity extends Activity {
+public final class NotificationAppsActivity extends StationActivity {
     private StationChrome ui;
     private EditText search;
     private TextView count;
@@ -102,8 +102,8 @@ public final class NotificationAppsActivity extends Activity {
         } catch (RuntimeException error) {
             handler.post(() -> {
                 if (isDestroyed()) { return; }
-                count.setText("应用列表读取失败");
-                empty.setText("请返回后重新打开「选择应用」");
+                count.setText(StationText.translate("应用列表读取失败"));
+                empty.setText(StationText.translate("请返回后重新打开「选择应用」"));
             });
         }
     }
@@ -111,25 +111,25 @@ public final class NotificationAppsActivity extends Activity {
     private void render() {
         if (isDestroyed()) { return; }
         Set<String> selected = PhoneNotifications.selected(this);
-        count.setText("已选 " + selected.size() + " 个应用");
+        count.setText(StationText.translate("已选 " + selected.size() + " 个应用"));
         String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
         list.removeAllViews();
         int shown = 0;
         for (App app : apps) {
             if (!app.label.toLowerCase(Locale.ROOT).contains(query) && !app.pkg.toLowerCase(Locale.ROOT).contains(query)) { continue; }
             if (shown++ > 0) { ui.hairline(list, 62); }
-            StationChrome.Control row = ui.switchRow(list, R.drawable.ic_status_notify, app.label);
+            StationChrome.Control row = ui.switchRow(list, R.drawable.ic_status_notify, app.label, false);
             row.mark.icon.setImageDrawable(app.icon);
             row.mark.icon.clearColorFilter();
             row.toggle.setChecked(selected.contains(app.pkg));
-            row.toggle.setContentDescription("同步 " + app.label + " 的通知");
+            row.toggle.setContentDescription(StationText.translate("同步 " + app.label + " 的通知"));
             row.toggle.setOnCheckedChangeListener((button, on) -> {
                 PhoneNotifications.select(this, app.pkg, on);
-                count.setText("已选 " + PhoneNotifications.selected(this).size() + " 个应用");
+                count.setText(StationText.translate("已选 " + PhoneNotifications.selected(this).size() + " 个应用"));
             });
         }
         empty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
-        empty.setText(query.isEmpty() ? "没有可选择的应用" : "没有匹配的应用，试试名称或包名");
+        empty.setText(StationText.translate(query.isEmpty() ? "没有可选择的应用" : "没有匹配的应用，试试名称或包名"));
     }
     private static final class App {
         final String pkg, label;

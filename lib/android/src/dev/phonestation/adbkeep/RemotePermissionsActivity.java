@@ -13,7 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Phone-owned authorization. Navigation only focuses a row and never grants access. */
-public final class RemotePermissionsActivity extends Activity {
+public final class RemotePermissionsActivity extends StationActivity {
     static final String EXTRA_SCOPE = "dev.phonestation.adbkeep.REMOTE_SCOPE";
     private StationChrome ui;
     private TextView summary;
@@ -50,8 +50,8 @@ public final class RemotePermissionsActivity extends Activity {
                 if (painting) { return; }
                 boolean savedPermission = RemoteStore.setPermission(this, scope, allowed);
                 if (savedPermission && (KeeperStore.mcpEnabled(this) || RemoteStore.enabled(this))) { FileMcpService.start(this); }
-                feedback.setText(!savedPermission ? "权限未保存，请重试。" : RemotePermissionInfo.title(scope)
-                        + (allowed ? "已允许。" : "已关闭；已经执行的操作无法撤回。"));
+                feedback.setText(StationText.translate(!savedPermission ? "权限未保存，请重试。" : RemotePermissionInfo.title(scope)
+                        + (allowed ? "已允许。" : "已关闭；已经执行的操作无法撤回。")));
                 feedback.setTextColor(savedPermission ? ui.held() : getColor(R.color.error));
                 feedback.setVisibility(View.VISIBLE);
                 paint();
@@ -72,7 +72,7 @@ public final class RemotePermissionsActivity extends Activity {
                 ui.column.offsetDescendantRectToMyCoords(focus.row, bounds);
                 ui.scroll.smoothScrollTo(0, Math.max(0, bounds.top - ui.dp(72)));
                 focus.toggle.requestFocus();
-                focus.row.announceForAccessibility(RemotePermissionInfo.title(scope));
+                focus.row.announceForAccessibility(StationText.translate(RemotePermissionInfo.title(scope)));
             });
         }
     }
@@ -80,10 +80,10 @@ public final class RemotePermissionsActivity extends Activity {
     @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
     private void paint() {
         boolean configured = RemoteStore.configured(this);
-        summary.setText(RemoteStore.permissionSummary(this));
-        channel.setText(!configured ? "尚未配置远程通道。可预先选择访问范围；更换中继资料时需要重新确认。"
+        summary.setText(StationText.translate(RemoteStore.permissionSummary(this)));
+        channel.setText(StationText.translate(!configured ? "尚未配置远程通道。可预先选择访问范围；更换中继资料时需要重新确认。"
                 : !RemoteStore.enabled(this) ? "远程通道已关闭，授权选择已保留，开启通道后生效。"
-                : "远程通道 · " + PhoneRelayClient.connectionLabel(this));
+                : "远程通道 · " + PhoneRelayClient.connectionLabel(this)));
         painting = true;
         for (Map.Entry<String, StationChrome.Control> entry : controls.entrySet()) {
             boolean on = RemoteStore.permission(this, entry.getKey());

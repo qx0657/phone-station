@@ -5,46 +5,47 @@ struct MorePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("设置") { station.goBack(fallback: .main) }
+            StationRows.subpageHeader(StationL10n.text("设置")) { station.goBack(fallback: .main) }
             StationPageScroll(maxHeight: 560) {
                 VStack(alignment: .leading, spacing: 16) {
                     phoneStatus
+                    AppearanceSettings(appearance: station.appearance) { station.dialog = $0 }
                     VStack(alignment: .leading, spacing: 6) {
-                        StationRows.sectionTitle("手机管理")
+                        StationRows.sectionTitle(StationL10n.text("手机管理"))
                         VStack(spacing: 0) {
-                            StationRows.navigationRow("连接设置", symbol: "network") { station.page = .connection }
+                            StationRows.navigationRow(StationL10n.text("连接设置"), symbol: "network") { station.page = .connection }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted", detail: station.mcpPresentation.summary,
+                            StationRows.navigationRow(StationL10n.text("MCP 服务"), symbol: "point.3.connected.trianglepath.dotted", detail: station.mcpPresentation.summary,
                                                       needsAttention: station.mcpPresentation.needsAttention) { station.page = .mcp }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("手机功能管理", symbol: "switch.2", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : nil) { station.openFeatures() }
+                            StationRows.navigationRow(StationL10n.text("手机功能管理"), symbol: "switch.2", detail: station.phoneFeatures?.master == false ? StationL10n.text("手机工位已暂停") : nil) { station.openFeatures() }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("手机权限", symbol: "checkmark.shield") { station.setup.openPermissions(serial: station.link.serial) }
+                            StationRows.navigationRow(StationL10n.text("手机权限"), symbol: "checkmark.shield") { station.setup.openPermissions(serial: station.link.serial) }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("远程访问范围", symbol: "lock.shield") { station.openRemotePermissions() }
+                            StationRows.navigationRow(StationL10n.text("远程访问范围"), symbol: "lock.shield") { station.openRemotePermissions() }
                         }.elevatedGroup()
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        StationRows.sectionTitle("高级工具")
+                        StationRows.sectionTitle(StationL10n.text("高级工具"))
                         VStack(spacing: 0) {
-                            StationRows.navigationRow("命令与终端", symbol: "terminal") { station.page = .commands }
+                            StationRows.navigationRow(StationL10n.text("命令与终端"), symbol: "terminal") { station.page = .commands }
                             StationRows.groupDivider.padding(.leading, 38)
                             PhoneAppInstallControls(station: station)
                         }.elevatedGroup()
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        StationRows.sectionTitle("这台 Mac")
+                        StationRows.sectionTitle(StationL10n.text("这台 Mac"))
                         VStack(spacing: 0) {
-                            StationRows.toggleRow("开机自启", symbol: "desktopcomputer", subtitle: station.login.subtitle, isOn: loginBinding, enabled: true)
+                            StationRows.toggleRow(StationL10n.text("开机自启"), symbol: "desktopcomputer", subtitle: station.login.subtitle, isOn: loginBinding, enabled: true)
                             if station.login.needsApproval {
-                                Button("打开系统设置") { station.login.openSettings() }.buttonStyle(.borderless)
+                                Button(StationL10n.text("打开系统设置")) { station.login.openSettings() }.buttonStyle(.borderless)
                                     .padding(.leading, 38).padding(.bottom, 8).frame(maxWidth: .infinity, alignment: .leading)
                             }
                             StationRows.groupDivider.padding(.leading, 38)
-                            StationRows.navigationRow("关于", symbol: "info.circle", detail: "版本 \(StationRows.appVersion())") { station.page = .about }
+                            StationRows.navigationRow(StationL10n.text("关于"), symbol: "info.circle", detail: StationL10n.format("版本 {0}", "\(StationRows.appVersion())")) { station.page = .about }
                         }.elevatedGroup()
                     }
-                    DisclosureGroup("本机工具检查") {
+                    DisclosureGroup(StationL10n.text("本机工具检查")) {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(station.login.dependencyDetails, id: \.0) { item in
                                 HStack(spacing: 8) {
@@ -52,15 +53,15 @@ struct MorePage: View {
                                         .foregroundStyle(item.1 ? StationPalette.connected : StationPalette.caution).accessibilityHidden(true)
                                     Text(item.0)
                                     Spacer(minLength: 8)
-                                    Text(item.1 ? "已找到" : "未找到").foregroundStyle(.secondary)
+                                    Text(item.1 ? StationL10n.text("已找到") : StationL10n.text("未找到")).foregroundStyle(.secondary)
                                 }.font(.subheadline)
                             }
-                            Text("会话提醒按项目说明安装一次。手机文件通过 MCP 服务访问。")
+                            Text(StationL10n.text("会话提醒按项目说明安装一次。手机文件通过 MCP 服务访问。"))
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }.padding(.top, 8)
                     }.font(.subheadline)
                     StationOperationFeedback(station: station)
-                    Button("退出手机工位") { station.quit() }.buttonStyle(.borderless)
+                    Button(StationL10n.text("退出手机工位")) { station.quit() }.buttonStyle(.borderless)
                 }.padding(.horizontal, 16).padding(.bottom, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -70,7 +71,7 @@ struct MorePage: View {
     @ViewBuilder private var phoneStatus: some View {
         if station.phoneFeatures?.master != false && (!station.health.issues.isEmpty || station.health.failure != nil) {
             VStack(alignment: .leading, spacing: 8) {
-                StationRows.sectionTitle("手机权限与状态")
+                StationRows.sectionTitle(StationL10n.text("手机权限与状态"))
                 if !station.health.issues.isEmpty {
                     Group {
                         if station.health.issues.count > 1 {
@@ -79,7 +80,7 @@ struct MorePage: View {
                     }.padding(12).elevatedGroup()
                 }
                 if let failure = station.health.failure {
-                    Text(failure).font(.caption).foregroundStyle(.secondary)
+                    Text(StationL10n.text(failure)).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -94,12 +95,12 @@ struct MorePage: View {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(StationPalette.caution).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(issue.title).font(.system(size: 13, weight: .semibold))
+                            Text(StationL10n.text(issue.title)).font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(StationPalette.caution)
-                            Text(issue.detail).font(.caption).foregroundStyle(.secondary)
+                            Text(StationL10n.text(issue.detail)).font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text(issue.destination == "permissions" && station.link.serial != nil
-                                 ? "打开手机权限页" : "查看处理方法")
+                                 ? StationL10n.text("打开手机权限页") : StationL10n.text("查看处理方法"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "chevron.right").font(.caption)
@@ -131,7 +132,7 @@ struct AboutPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("关于") { station.goBack(fallback: .more) }
+            StationRows.subpageHeader(StationL10n.text("关于")) { station.goBack(fallback: .more) }
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 12) {
                     Image(nsImage: NSApp.applicationIconImage)
@@ -140,19 +141,19 @@ struct AboutPage: View {
                         .frame(width: 44, height: 44)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("手机工位")
+                        Text(StationL10n.text("手机工位"))
                             .font(.system(size: 16, weight: .semibold))
-                        Text("版本 \(StationRows.appVersion())")
+                        Text(StationL10n.format("版本 {0}", "\(StationRows.appVersion())"))
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                 }
-                Text("从菜单栏连接这台手机，掉线后自动重连，配对、安装手机上的应用、打开 MCP，投屏、截取画面、录屏，控制亮屏和闪光灯，并运行保存的 adb 命令。")
+                Text(StationL10n.text("从菜单栏连接这台手机，掉线后自动重连，配对、安装手机上的应用、打开 MCP，投屏、截取画面、录屏，控制亮屏和闪光灯，并运行保存的 adb 命令。"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("打开项目说明") { station.login.openGuide() }
+                Button(StationL10n.text("打开项目说明")) { station.login.openGuide() }
                     .buttonStyle(.bordered)
             }
             .padding(16)

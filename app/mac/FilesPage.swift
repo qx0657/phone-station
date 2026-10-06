@@ -5,9 +5,9 @@ struct FilesPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader("最近文件") { station.goBack(fallback: .main) }
+            StationRows.subpageHeader(StationL10n.text("最近文件")) { station.goBack(fallback: .main) }
             if station.files.recentFiles.isEmpty {
-                Text("截图和录屏完成后，会显示在这里。")
+                Text(StationL10n.text("截图和录屏完成后，会显示在这里。"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -45,13 +45,13 @@ struct FilesPage: View {
                         Text(name)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(recentMeta(file))
+                        Text(StationL10n.text(recentMeta(file)))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    Text(copied ? "已复制" : "复制")
+                    Text(copied ? StationL10n.text("已复制") : StationL10n.text("复制"))
                         .font(.system(size: 12))
                         .foregroundStyle(copied ? StationPalette.connected : Color.secondary)
                         .frame(width: 46, alignment: .trailing)
@@ -62,8 +62,8 @@ struct FilesPage: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressFadeStyle())
-            .accessibilityLabel(copied ? "已复制 \(name)" : "复制 \(name)")
-            .help(RecentFileStyle.kind(for: file) == "录屏" ? "把文件复制到剪贴板" : "把图片复制到剪贴板")
+            .accessibilityLabel(copied ? StationL10n.format("已复制 {0}", "\(name)") : StationL10n.format("复制 {0}", "\(name)"))
+            .help(RecentFileStyle.kind(for: file) == "录屏" ? StationL10n.text("把文件复制到剪贴板") : StationL10n.text("把图片复制到剪贴板"))
             Button {
                 station.files.reveal(file)
             } label: {
@@ -75,8 +75,8 @@ struct FilesPage: View {
             }
             .buttonStyle(PressFadeStyle())
             .padding(.trailing, 6)
-            .accessibilityLabel("在 Finder 中显示 \(name)")
-            .help("在 Finder 中显示")
+            .accessibilityLabel(StationL10n.format("在 Finder 中显示 {0}", "\(name)"))
+            .help(StationL10n.text("在 Finder 中显示"))
         }
         .background {
             HoverWash(

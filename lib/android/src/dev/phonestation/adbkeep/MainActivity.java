@@ -17,7 +17,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** Home shows everyday use; connection and permission choices have dedicated pages. */
-public final class MainActivity extends Activity {
+public final class MainActivity extends StationActivity {
     static final String EXTRA_PAGE = "dev.phonestation.adbkeep.PAGE";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private StationChrome ui;
@@ -123,7 +123,7 @@ public final class MainActivity extends Activity {
         if (savingMaster) { return; }
         boolean on = !StationFeatures.master(this);
         savingMaster = true;
-        feedback.setText(on ? "正在恢复…" : "正在暂停…");
+        feedback.setText(StationText.translate(on ? "正在恢复…" : "正在暂停…"));
         feedback.setTextColor(ui.muted());
         feedback.setVisibility(View.VISIBLE);
         render();
@@ -136,7 +136,7 @@ public final class MainActivity extends Activity {
             handler.post(() -> {
                 savingMaster = false;
                 if (isDestroyed()) { return; }
-                feedback.setText(result);
+                feedback.setText(StationText.translate(result));
                 feedback.setTextColor(getColor(R.color.error));
                 feedback.setVisibility(result.isEmpty() ? View.GONE : View.VISIBLE);
                 render();
@@ -184,18 +184,18 @@ public final class MainActivity extends Activity {
     private void render() {
         boolean enabled = StationFeatures.master(this);
         HostProbe host = HostProbe.current(this);
-        headline.setText(enabled ? host.headline : "已暂停");
+        headline.setText(StationText.translate(enabled ? host.headline : "已暂停"));
         headline.setTextColor(enabled && host.linked ? ui.held() : ui.ink());
         connectionIndicators.setVisibility(enabled ? View.VISIBLE : View.GONE);
         String hint = !enabled ? "同步与远程访问已暂停，设置已保留"
                 : !host.linked && !host.remoteChecking ? "从电脑连接这台手机，即可开始使用" : "";
-        connectionHint.setText(hint);
+        connectionHint.setText(StationText.translate(hint));
         connectionHint.setVisibility(hint.isEmpty() ? View.GONE : View.VISIBLE);
         paintConnections(host);
         paintDisc(enabled && host.linked);
-        master.setText(savingMaster ? "请稍候…" : enabled ? "暂停" : "恢复使用");
+        master.setText(StationText.translate(savingMaster ? "请稍候…" : enabled ? "暂停" : "恢复使用"));
         master.setEnabled(!savingMaster);
-        master.setContentDescription(enabled ? "暂停手机工位，保留设置" : "恢复手机工位");
+        master.setContentDescription(StationText.translate(enabled ? "暂停手机工位，保留设置" : "恢复手机工位"));
         int masterColor = enabled ? ui.ink() : ui.held();
         if (shownMasterColor != masterColor) {
             shownMasterColor = masterColor;
@@ -214,9 +214,9 @@ public final class MainActivity extends Activity {
     private void paintMcp() {
         Json state = FileMcpService.status(this);
         boolean available = state.get("available").boolValue();
-        mcpLink.value.setText(state.get("label").string());
+        mcpLink.value.setText(StationText.translate(state.get("label").string()));
         mcpLink.value.setTextColor(state.get("attention").boolValue() ? ui.waiting() : available ? ui.held() : ui.muted());
-        mcpLink.value.setContentDescription(state.get("detail").string());
+        mcpLink.value.setContentDescription(StationText.translate(state.get("detail").string()));
         ui.paintOn(mcpLink.mark, available);
     }
 
@@ -266,9 +266,9 @@ public final class MainActivity extends Activity {
     private void paintSignal(Signal signal, int iconRes, String label, String description, int iconColor, int textColor) {
         if (signal.iconRes != iconRes) { signal.iconRes = iconRes; signal.icon.setImageResource(iconRes); }
         if (signal.iconColor != iconColor) { signal.iconColor = iconColor; signal.icon.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN); }
-        signal.label.setText(label);
+        signal.label.setText(StationText.translate(label));
         signal.label.setTextColor(textColor);
-        signal.row.setContentDescription(description);
+        signal.row.setContentDescription(StationText.translate(description));
     }
 
     private static final class Signal {
@@ -290,10 +290,10 @@ public final class MainActivity extends Activity {
                 : "remotePermissions".equals(action) ? "远程未授权"
                 : "clipboard".equals(action) ? "待 Mac 接入"
                 : "none".equals(action) ? (title.contains("已跳过") ? "已跳过" : "已暂停") : "需检查";
-        clipboardLink.value.setText(value);
+        clipboardLink.value.setText(StationText.translate(value));
         boolean needsAction = StationFeatures.master(this) && shared && ("permissions".equals(action) || "mcp".equals(action) || "remotePermissions".equals(action));
         clipboardLink.value.setTextColor(ready ? ui.held() : needsAction ? ui.waiting() : ui.muted());
-        clipboardLink.value.setContentDescription(title);
+        clipboardLink.value.setContentDescription(StationText.translate(title));
         ui.paintOn(clipboardLink.mark, ready);
     }
     private void paintNotification() {
@@ -321,11 +321,11 @@ public final class MainActivity extends Activity {
                 : "Mac 正在接收手机通知，已选 " + count + " 个应用";
         description = !StationFeatures.master(this) ? "手机工位已暂停，两个方向的选择已保留"
                 : description + "；电脑提醒" + (!alerts ? "已关闭" : alertsReady ? "已开启" : "需要处理");
-        notificationLink.value.setText(value);
+        notificationLink.value.setText(StationText.translate(value));
         ready = overview.get("ready").boolValue();
         boolean needsAction = overview.get("attention").boolValue();
         notificationLink.value.setTextColor(ready ? ui.held() : needsAction ? ui.waiting() : ui.muted());
-        notificationLink.value.setContentDescription(description);
+        notificationLink.value.setContentDescription(StationText.translate(description));
         ui.paintOn(notificationLink.mark, ready);
     }
     private void paintHealth() {

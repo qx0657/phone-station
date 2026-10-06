@@ -12,7 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Every child switch displays the saved choice, including when permission is missing. */
-public final class FeaturesActivity extends Activity {
+public final class FeaturesActivity extends StationActivity {
     static final String EXTRA_GROUP = "feature_group";
     private StationChrome ui;
     private TextView summary;
@@ -82,7 +82,7 @@ public final class FeaturesActivity extends Activity {
     @Override protected void onResume() { super.onResume(); handler.post(refresh); }
     @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
     private void paint() {
-        summary.setText(StationFeatures.master(this) ? "手机工位已开启 · 按需选择功能" : "手机工位已暂停 · 子开关选择已保留");
+        summary.setText(StationText.translate(StationFeatures.master(this) ? "手机工位已开启 · 按需选择功能" : "手机工位已暂停 · 子开关选择已保留"));
         painting = true;
         for (String key : controls.keySet()) {
             boolean on = StationFeatures.selected(this, key);
@@ -92,7 +92,7 @@ public final class FeaturesActivity extends Activity {
             String reason = FeatureReadiness.reason(this, key);
             boolean needsAction = on && StationFeatures.master(this) && !"已开启".equals(reason);
             boolean feedbackVisible = key.equals(feedbackKey) && !feedbackMessage.isEmpty();
-            states.get(key).setText(feedbackVisible ? feedbackMessage : reason.replaceFirst("^已开启 · ", ""));
+            states.get(key).setText(StationText.translate(feedbackVisible ? feedbackMessage : reason.replaceFirst("^已开启 · ", "")));
             states.get(key).setVisibility(needsAction || feedbackVisible ? View.VISIBLE : View.GONE);
             permissionLinks.get(key).setVisibility(needsAction ? View.VISIBLE : View.GONE);
             states.get(key).setTextColor(feedbackVisible ? feedbackError ? getColor(R.color.error) : ui.muted() : ui.waiting());

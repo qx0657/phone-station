@@ -28,10 +28,11 @@
     </queries>
 
     <application
+        android:name=".StationApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:label="手机工位"
+        android:label="@string/app_name"
         android:supportsRtl="true">
 
         <meta-data
@@ -73,7 +74,7 @@
             android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.PhoneStation" />
 
         <service android:name=".PhoneNotificationListener" android:exported="true"
-            android:label="手机工位 · 手机通知同步"
+            android:label="@string/notification_listener_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

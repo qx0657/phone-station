@@ -14,6 +14,7 @@ from android.websocket_deps import jars as websocket_jars
 
 ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
+    "StationLocalization": ["StationLocalization"],
     "RemoteEventSession": ["RemoteEventSession"],
     "RemoteScreenSession": ["ClipboardProtocol", "ScreenVideoProtocol", "RemoteScreenSession"],
     "ScreenVideoProtocol": ["ScreenVideoProtocol"],
@@ -121,7 +122,7 @@ def main():
         command = [swift, "-parse-as-library", "-swift-version", "5", "-target", platform.machine() + "-apple-macosx13.0", "-sdk", sdk]
         for name, sources in MAC_TESTS.items():
             binary = work / (name + "Test")
-            run([*command, "-framework", "UserNotifications", *[mac / (source + ".swift") for source in sources], mac / (name + "Test.swift"), "-o", binary])
+            run([*command, "-framework", "UserNotifications", *[mac / (source + ".swift") for source in dict.fromkeys(["StationLocalization", *sources])], mac / (name + "Test.swift"), "-o", binary])
             run([binary])
         sources = sorted(file for file in mac.glob("*.swift") if not file.name.endswith("Test.swift") and file.name != "MakeIcon.swift")
         for framework in ("SwiftUI", "AppKit", "ServiceManagement", "QuartzCore", "AVFoundation", "ImageIO", "UserNotifications"):

@@ -8,7 +8,7 @@ struct MainPage: View {
         StationPageScroll(maxHeight: 640) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("手机工位").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                    Text(StationL10n.text("手机工位")).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                     Spacer()
                     Button { station.page = .more } label: {
                         HStack(spacing: 5) {
@@ -19,14 +19,14 @@ struct MainPage: View {
                             Image(systemName: "gearshape").font(.system(size: 15))
                         }
                         .frame(minWidth: 28, minHeight: 28).contentShape(Rectangle())
-                    }.buttonStyle(.borderless).help("设置 · " + settingsDetail)
-                        .accessibilityLabel("设置，\(settingsDetail)")
+                    }.buttonStyle(.borderless).help(StationL10n.text("设置 · ") + StationL10n.text(settingsDetail))
+                        .accessibilityLabel(StationL10n.format("设置，{0}", StationL10n.text("\(settingsDetail)")))
                 }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
                 header
                 VStack(alignment: .leading, spacing: 12) {
                     actionRow
                     if station.phoneFeatures?.master == false {
-                        Button("已暂停 · 查看恢复方法") { station.openFeatures() }
+                        Button(StationL10n.text("已暂停 · 查看恢复方法")) { station.openFeatures() }
                             .buttonStyle(.borderless).font(.subheadline).foregroundStyle(StationPalette.caution)
                     } else if station.link.serial == nil && station.link.remoteConnected {
                         if let blocker = station.remoteBlocker([.screen, .capture, .controls]) {
@@ -35,37 +35,37 @@ struct MainPage: View {
                     }
                     if let pending = station.remoteControls.pendingCapture {
                         HStack {
-                            Button(station.remoteControls.captureRecoveryTitle) { station.remoteControls.recoverCapture() }
-                            Button("放弃并清理") { station.remoteControls.discardCapture() }
+                            Button(StationL10n.text(station.remoteControls.captureRecoveryTitle)) { station.remoteControls.recoverCapture() }
+                            Button(StationL10n.text("放弃并清理")) { station.remoteControls.discardCapture() }
                         }.buttonStyle(.borderless).disabled(!station.remoteControls.canRecoverCapture)
-                        Text("截图编号：\(pending.id)").font(.caption.monospaced()).textSelection(.enabled)
+                        Text(StationL10n.format("截图编号：{0}", "\(pending.id)")).font(.caption.monospaced()).textSelection(.enabled)
                     }
                     if station.phoneFeatures?.master != false && (!station.featureAllows("screen") || !station.featureAllows("capture")) {
-                        Button("管理屏幕功能") { station.openFeatures(.screen) }
+                        Button(StationL10n.text("管理屏幕功能")) { station.openFeatures(.screen) }
                             .buttonStyle(.borderless).font(.subheadline)
                     }
                     controlGroup
                     StationOperationFeedback(station: station)
                     if station.torch.beatNeedsAudioPermission {
-                        Button("打开「系统录音」") { station.torch.openAudioCaptureSettings() }
+                        Button(StationL10n.text("打开「系统录音」")) { station.torch.openAudioCaptureSettings() }
                             .buttonStyle(.bordered)
                     }
                     VStack(spacing: 0) {
-                        StationRows.navigationRow("MCP 服务", symbol: "point.3.connected.trianglepath.dotted",
-                            detail: station.mcpPresentation.summary + " · 文件、命令与屏幕",
+                        StationRows.navigationRow(StationL10n.text("MCP 服务"), symbol: "point.3.connected.trianglepath.dotted",
+                            detail: StationL10n.text(station.mcpPresentation.summary) + StationL10n.text(" · 文件、命令与屏幕"),
                             needsAttention: station.mcpPresentation.needsAttention) { station.page = .mcp }
                         StationRows.groupDivider.padding(.horizontal, 10)
-                        StationRows.navigationRow("共享剪贴板", symbol: "doc.on.clipboard", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : station.clipboard.summary,
+                        StationRows.navigationRow(StationL10n.text("共享剪贴板"), symbol: "doc.on.clipboard", detail: station.phoneFeatures?.master == false ? StationL10n.text("手机工位已暂停") : station.clipboard.summary,
                                                   needsAttention: station.phoneFeatures?.master != false && station.clipboard.shared && station.clipboard.blocker != nil) {
                             station.page = .clipboard
                         }
                         StationRows.groupDivider.padding(.horizontal, 10)
-                        StationRows.navigationRow("手机通知", symbol: "bell.badge", detail: station.phoneFeatures?.master == false ? "手机工位已暂停" : station.notifications.summary,
+                        StationRows.navigationRow(StationL10n.text("手机通知"), symbol: "bell.badge", detail: station.phoneFeatures?.master == false ? StationL10n.text("手机工位已暂停") : station.notifications.summary,
                                                   needsAttention: notificationsNeedAttention) {
                             station.page = .notifications
                         }
                         StationRows.groupDivider.padding(.horizontal, 10)
-                        StationRows.navigationRow("最近文件", symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
+                        StationRows.navigationRow(StationL10n.text("最近文件"), symbol: "photo.on.rectangle.angled", detail: recentFilesDetail, detailLineLimit: 1) {
                             station.page = .files
                         }
                     }
@@ -91,39 +91,39 @@ struct MainPage: View {
     }
 
     private var settingsDetail: String {
-        if station.phoneFeatures?.master != false && !station.health.issues.isEmpty { return "\(station.health.issues.count) 项需要处理" }
-        if station.health.failure != nil { return "手机状态暂未确认" }
+        if station.phoneFeatures?.master != false && !station.health.issues.isEmpty { return StationL10n.format("{0} 项需要处理", "\(station.health.issues.count)") }
+        if station.health.failure != nil { return StationL10n.text("手机状态暂未确认") }
         if station.remoteControls.failure != nil || (station.remoteControls.reading != nil && station.remoteControls.reason != nil) {
-            return "查看远程控制状态"
+            return StationL10n.text("查看远程控制状态")
         }
-        return "权限、应用更新与设置"
+        return StationL10n.text("权限、应用更新与设置")
     }
 
     private var recentFilesDetail: String {
         switch station.files.recentFiles.count {
-        case 0: return "截图和录屏"
-        case 1: return "1 个文件"
-        default: return "\(station.files.recentFiles.count) 个文件"
+        case 0: return StationL10n.text("截图和录屏")
+        case 1: return StationL10n.text("1 个文件")
+        default: return StationL10n.format("{0} 个文件", "\(station.files.recentFiles.count)")
         }
     }
 
     private var actionRow: some View {
         HStack(spacing: 8) {
-            ActionTile(title: station.screen.isMirroring ? "关闭投屏" : "打开投屏",
+            ActionTile(title: station.screen.isMirroring ? StationL10n.text("关闭投屏") : StationL10n.text("打开投屏"),
                        symbol: "display",
                        active: station.screen.isMirroring,
                        tint: StationPalette.connected,
                        enabled: station.screen.isMirroring || station.canStartScreen) {
                 station.screen.isMirroring ? station.screen.stopMirror() : station.screen.startMirror()
             }
-            ActionTile(title: "截取画面", symbol: "camera", active: false,
+            ActionTile(title: StationL10n.text("截取画面"), symbol: "camera", active: false,
                        tint: StationPalette.connected, enabled: station.canScreenshot) {
                 station.screenshot()
             }
             ActionTile(
                 title: station.screen.isRecording
-                    ? (station.screen.isStoppingRecording ? "保存中…" : "停止录屏")
-                    : "开始录屏",
+                    ? (station.screen.isStoppingRecording ? StationL10n.text("保存中…") : StationL10n.text("停止录屏"))
+                    : StationL10n.text("开始录屏"),
                 symbol: station.screen.isRecording ? "stop.circle.fill" : "video",
                 active: station.screen.isRecording,
                 tint: StationPalette.recording,
@@ -136,20 +136,20 @@ struct MainPage: View {
     private var controlGroup: some View {
         DisclosureGroup(isExpanded: $showsControls) {
             VStack(spacing: 0) {
-                StationRows.toggleRow("保持亮屏", symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
+                StationRows.toggleRow(StationL10n.text("保持亮屏"), symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
                 StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
-                StationRows.toggleRow("手电筒", symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
+                StationRows.toggleRow(StationL10n.text("手电筒"), symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
                                       isOn: torchBinding, enabled: station.canTorch || station.torch.torchBeat)
                 StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
-                StationRows.toggleRow("灯光跟随声音", symbol: "waveform",
-                                      subtitle: "跟随 Mac 播放的声音，需要本地连接",
+                StationRows.toggleRow(StationL10n.text("灯光跟随声音"), symbol: "waveform",
+                                      subtitle: StationL10n.text("跟随 Mac 播放的声音，需要本地连接"),
                                       isOn: beatBinding, enabled: (station.link.serial != nil && station.canTorch) || station.torch.torchBeat)
             }
         } label: {
             HStack {
-                Label("手机控制", systemImage: "slider.horizontal.3")
+                Label(StationL10n.text("手机控制"), systemImage: "slider.horizontal.3")
                 Spacer(minLength: 6)
-                Text(controlSummary).font(.caption).foregroundStyle(.secondary)
+                Text(StationL10n.text(controlSummary)).font(.caption).foregroundStyle(.secondary)
             }.font(.subheadline)
         }
         .padding(10)
@@ -158,10 +158,10 @@ struct MainPage: View {
 
     private var controlSummary: String {
         var active: [String] = []
-        if stayAwakeBinding.wrappedValue { active.append("亮屏") }
-        if torchBinding.wrappedValue { active.append("手电筒") }
-        if beatBinding.wrappedValue { active.append("声音灯光") }
-        return active.isEmpty ? "亮屏与灯光" : active.joined(separator: " · ")
+        if stayAwakeBinding.wrappedValue { active.append(StationL10n.text("亮屏")) }
+        if torchBinding.wrappedValue { active.append(StationL10n.text("手电筒")) }
+        if beatBinding.wrappedValue { active.append(StationL10n.text("声音灯光")) }
+        return active.isEmpty ? StationL10n.text("亮屏与灯光") : active.joined(separator: " · ")
     }
 
     private var header: some View {
@@ -170,20 +170,20 @@ struct MainPage: View {
                 Image(systemName: station.link.isConnected ? "iphone" : "iphone.slash")
                     .font(.system(size: 23)).foregroundStyle(statusTint).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(station.link.headline)
+                    Text(StationL10n.text(station.link.headline))
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
-                        connectionIndicator(station.link.serial != nil ? (station.link.transport == "USB 连接" ? "USB" : "无线") : "本地未连接",
+                        connectionIndicator(station.link.serial != nil ? (station.link.transport == "USB 连接" ? "USB" : StationL10n.text("无线")) : StationL10n.text("本地未连接"),
                             symbol: station.link.transport == "USB 连接" ? "cable.connector" : station.link.serial != nil ? "wifi" : "wifi.slash",
                             online: station.link.serial != nil, checking: station.link.serial == nil && (station.link.isChecking || station.link.isReconnecting))
-                        connectionIndicator(station.mcp.remoteOnline ? "远程" : station.mcp.remoteChecking ? "远程确认中" : "远程未连接",
+                        connectionIndicator(station.mcp.remoteOnline ? StationL10n.text("远程") : station.mcp.remoteChecking ? StationL10n.text("远程确认中") : StationL10n.text("远程未连接"),
                             symbol: "network",
                             online: station.mcp.remoteOnline, checking: station.mcp.remoteChecking)
                     }
                     if !station.link.isConnected && !station.link.connectionLine.isEmpty {
-                        Text(station.link.connectionLine).font(.caption).foregroundStyle(.secondary)
+                        Text(StationL10n.text(station.link.connectionLine)).font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -196,14 +196,14 @@ struct MainPage: View {
         .background { HoverWash(radius: 12) }
         .elevatedGroup()
         .padding(.horizontal, 16).padding(.bottom, 12)
-        .help("连接设置与配对")
+        .help(StationL10n.text("连接设置与配对"))
     }
 
     private func connectionIndicator(_ title: String, symbol: String, online: Bool, checking: Bool) -> some View {
         Label(title, systemImage: symbol).font(.system(size: 11))
             .foregroundStyle(online ? StationPalette.connected : checking ? StationPalette.caution : Color.secondary)
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(title + (online ? "已连接" : checking ? "，检查中" : ""))
+            .accessibilityLabel(title + (online ? StationL10n.text("已连接") : checking ? StationL10n.text("，检查中") : ""))
     }
 
     private func batteryReadout(_ reading: BatteryReport.Reading) -> some View {
@@ -222,7 +222,7 @@ struct MainPage: View {
         .foregroundStyle(reading.percent < 20 && !reading.charging ? StationPalette.caution : Color.secondary)
         .fixedSize()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(reading.charging ? "电量 \(reading.percent)%，充电中" : "电量 \(reading.percent)%")
+        .accessibilityLabel(reading.charging ? StationL10n.format("电量 {0}%，充电中", "\(reading.percent)") : StationL10n.format("电量 {0}%", "\(reading.percent)"))
     }
 
     private func batterySymbol(_ percent: Int) -> String {

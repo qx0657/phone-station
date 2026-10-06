@@ -4,6 +4,27 @@ struct StationView: View {
     @ObservedObject var station: Station
 
     var body: some View {
+        ZStack {
+            pageContent
+                .disabled(station.dialog != nil)
+                .allowsHitTesting(station.dialog == nil)
+                .accessibilityHidden(station.dialog != nil)
+            if let dialog = station.dialog {
+                Color.black.opacity(0.24).onTapGesture { station.dialog = nil }
+                    .accessibilityHidden(true)
+                StationDialogContent(kind: dialog, appearance: station.appearance,
+                    removeRemote: { station.mcp.unpairRemote() }, cancel: { station.dialog = nil })
+                    .id(dialog).padding(16)
+            }
+        }
+        .frame(width: 360, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(StationPalette.background)
+        .environment(\.locale, station.appearance.locale)
+        .task { station.refresh() }
+    }
+
+    private var pageContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             switch station.page {
             case .main:
@@ -35,9 +56,5 @@ struct StationView: View {
                 NotificationPage(station: station, notifications: station.notifications)
             }
         }
-        .frame(width: 360, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(StationPalette.background)
-        .task { station.refresh() }
     }
 }

@@ -39,55 +39,55 @@ python3 "$ROOT/lib/build_keychain.py" --compiler "$SWIFTC" --target "$TARGET" --
   --source "$ROOT/lib/remote-gateway/keychain/main.swift" \
   --binary "$ROOT/build/.phone-station/phone-relay-keychain"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
-"$SWIFTC" -parse-as-library -swift-version 5 \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" \
   -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/Reconnect.swift" \
   "$ROOT/app/mac/ReconnectPolicyTest.swift" \
   -o "$POLICY_TEST"
 "$POLICY_TEST"
 ADB_TEST="$ROOT/build/.phone-station/adb-command-line-test"
-"$SWIFTC" -parse-as-library -swift-version 5 \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" \
   -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/AdbCommandLine.swift" \
   "$ROOT/app/mac/AdbCommandLineTest.swift" \
   -o "$ADB_TEST"
 "$ADB_TEST"
 RELAY_TEST="$ROOT/build/.phone-station/remote-relay-profile-test"
-"$SWIFTC" -parse-as-library -swift-version 5 \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" \
   -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/RemoteRelayProfile.swift" "$ROOT/app/mac/StationRunner.swift" \
   "$ROOT/app/mac/RemoteRelayProfileTest.swift" -o "$RELAY_TEST"
 "$RELAY_TEST"
 EVENT_TEST="$ROOT/build/.phone-station/remote-event-session-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/RemoteEventSession.swift" "$ROOT/app/mac/RemoteEventSessionTest.swift" -o "$EVENT_TEST"
 "$EVENT_TEST"
 RUNNER_TEST="$ROOT/build/.phone-station/station-runner-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/StationRunnerTest.swift" -o "$RUNNER_TEST"
 "$RUNNER_TEST"
 CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSyncPolicyTest.swift" \
   -o "$CLIPBOARD_TEST"
 "$CLIPBOARD_TEST"
 CLIPBOARD_SESSION_TEST="$ROOT/build/.phone-station/clipboard-session-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
   "$ROOT/app/mac/ClipboardSessionTest.swift" -o "$CLIPBOARD_SESSION_TEST"
 "$CLIPBOARD_SESSION_TEST"
 CLIPBOARD_TRANSPORT_TEST="$ROOT/build/.phone-station/clipboard-transport-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
   "$ROOT/app/mac/ClipboardTransportTest.swift" -o "$CLIPBOARD_TRANSPORT_TEST"
 "$CLIPBOARD_TRANSPORT_TEST"
 HEALTH_TEST="$ROOT/build/.phone-station/device-health-session-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/DeviceHealthSession.swift" \
   "$ROOT/app/mac/DeviceHealthSessionTest.swift" -o "$HEALTH_TEST"
 "$HEALTH_TEST"
 NOTIFICATION_TEST="$ROOT/build/.phone-station/notification-session-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   -framework UserNotifications \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/NotificationProtocol.swift" \
   "$ROOT/app/mac/NotificationDelivery.swift" "$ROOT/app/mac/NotificationSession.swift" \
@@ -95,22 +95,26 @@ NOTIFICATION_TEST="$ROOT/build/.phone-station/notification-session-test"
   "$ROOT/app/mac/NotificationSessionTest.swift" -o "$NOTIFICATION_TEST"
 "$NOTIFICATION_TEST"
 BANNER_TEST="$ROOT/build/.phone-station/notification-banner-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/NotificationProtocol.swift" "$ROOT/app/mac/NotificationBanner.swift" \
   "$ROOT/app/mac/NotificationBannerTest.swift" -o "$BANNER_TEST"
 "$BANNER_TEST"
 python3 "$ROOT/lib/test_notify_mcp.py"
 python3 "$ROOT/lib/test_remote_ops.py"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/InstallTask.swift" "$ROOT/app/mac/InstallTaskTest.swift" \
   -o "$ROOT/build/.phone-station/install-task-test"
 "$ROOT/build/.phone-station/install-task-test"
-"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+"$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/StationState.swift" "$ROOT/app/mac/StationRunner.swift" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/AdbCommandLine.swift" \
   "$ROOT/app/mac/CommandSession.swift" "$ROOT/app/mac/CommandSessionTest.swift" \
   -o "$ROOT/build/.phone-station/command-session-test"
 "$ROOT/build/.phone-station/command-session-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/StationLocalization.swift" "$ROOT/app/mac/StationLocalizationTest.swift" \
+  -o "$ROOT/build/.phone-station/localization-test"
+(cd "$ROOT" && "$ROOT/build/.phone-station/localization-test")
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"
@@ -120,6 +124,8 @@ RESOURCES="$CONTENTS/Resources/phone-station"
 trap 'rm -rf "$STAGING"' EXIT INT TERM
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES/scripts" "$RESOURCES/lib"
 cp "$ROOT/app/mac/Info.plist" "$CONTENTS/Info.plist"
+cp "$ROOT/app/i18n/en.json" "$CONTENTS/Resources/ui-en.json"
+cp -R "$ROOT/app/mac/en.lproj" "$ROOT/app/mac/zh-Hans.lproj" "$CONTENTS/Resources/"
 cp "$ROOT/README.md" "$RESOURCES/README.md"
 mkdir -p "$RESOURCES/licenses"
 cp "$ROOT/docs/licenses/"*.txt "$RESOURCES/licenses/"

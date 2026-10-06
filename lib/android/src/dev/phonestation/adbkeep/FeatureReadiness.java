@@ -1,7 +1,6 @@
 package dev.phonestation.adbkeep;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import java.util.ArrayList;
 import java.util.List;
@@ -83,12 +82,10 @@ final class FeatureReadiness {
         if (!StationFeatures.active(activity, key)) { return; }
         String reason = reason(activity, key);
         if ("已开启".equals(reason)) { return; }
-        new AlertDialog.Builder(activity).setTitle(FeaturePolicy.title(key) + "已开启")
-                .setMessage(reason + "。开关选择会保留；完成设置后重新检查，操作不会自动补执行。")
-                .setNegativeButton("稍后", null)
-                .setPositiveButton("完成所需设置", (dialog, which) -> activity.startActivity(
-                        new Intent(activity, PermissionActivity.class).putExtra("feature", key)))
-                .show();
+        StationDialog.confirm(activity, R.drawable.ic_status_permission, FeaturePolicy.title(key) + "已开启",
+                reason + "。开关选择会保留；完成设置后重新检查，操作不会自动补执行。",
+                "稍后", "完成所需设置", false, () -> activity.startActivity(
+                        new Intent(activity, PermissionActivity.class).putExtra("feature", key)));
     }
     static void promptMaster(Activity activity) {
         if (!StationFeatures.master(activity)) { return; }
@@ -101,11 +98,9 @@ final class FeatureReadiness {
             if (!"已开启".equals(reason)) { missing.add(FeaturePolicy.title(key) + "：" + reason.replaceFirst("^已开启 · ", "")); }
         }
         if (missing.isEmpty()) { return; }
-        new AlertDialog.Builder(activity).setTitle("手机工位已开启")
-                .setMessage(String.join("\n", missing) + "\n\n原有开关选择已保留。完成设置后恢复可用功能，不补执行旧操作。")
-                .setNegativeButton("稍后", null)
-                .setPositiveButton("查看所需权限", (dialog, which) -> activity.startActivity(new Intent(activity, PermissionActivity.class)))
-                .show();
+        StationDialog.confirm(activity, R.drawable.ic_status_permission, "手机工位已开启",
+                String.join("\n", missing) + "\n\n原有开关选择已保留。完成设置后恢复可用功能，不补执行旧操作。",
+                "稍后", "查看所需权限", false, () -> activity.startActivity(new Intent(activity, PermissionActivity.class)));
     }
     private FeatureReadiness() {}
 }

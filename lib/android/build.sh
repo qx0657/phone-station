@@ -55,6 +55,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/McpStatus.java" \
   "$here/src/dev/phonestation/adbkeep/AboutCopy.java" \
   "$here/src/dev/phonestation/adbkeep/StationNote.java" \
+  "$here/src/dev/phonestation/adbkeep/StationText.java" \
   "$here/src/dev/phonestation/adbkeep/FilePolicy.java" \
   "$here/src/dev/phonestation/adbkeep/Json.java" \
   "$here/src/dev/phonestation/adbkeep/StationPlaces.java" \
@@ -94,6 +95,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/McpStatusTest.java" \
   "$here/test/AboutCopyTest.java" \
   "$here/test/StationNoteTest.java" \
+  "$here/test/StationTextTest.java" \
   "$here/test/JsonTest.java" \
   "$here/test/FilePolicyTest.java" \
   "$here/test/FileOpsTest.java" \
@@ -127,6 +129,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.McpHelpTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpStatusTest
 java -cp "$work/policy" dev.phonestation.adbkeep.AboutCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.StationNoteTest
+(cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.StationTextTest)
 java -cp "$work/policy" dev.phonestation.adbkeep.JsonTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest
@@ -192,8 +195,9 @@ unzip -p "$repo/build/third_party/websocket/slf4j-nop-2.0.13.jar" META-INF/servi
 print -r -- "构建 Android PTY…"
 go -C "$here/terminal" test -race ./...
 mkdir -p "$work/assets"
+cp "$repo/app/i18n/en.json" "$work/assets/ui-en.json"
 GOOS=android GOARCH=arm64 CGO_ENABLED=0 go -C "$here/terminal" build -trimpath -ldflags='-s -w' -o "$work/assets/terminal-arm64" .
-(cd "$work" && zip -q unsigned.apk assets/terminal-arm64)
+(cd "$work" && zip -q unsigned.apk assets/terminal-arm64 assets/ui-en.json)
 
 print -r -- "构建远程视频桥…"
 go -C "$here/screen" test -race ./...

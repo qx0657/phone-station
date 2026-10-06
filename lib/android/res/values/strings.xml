@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">手机工位</string>
+    <string name="notification_listener_name">手机工位 · 手机通知同步</string>
+</resources>

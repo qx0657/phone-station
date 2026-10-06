@@ -12,7 +12,7 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-public final class ConnectionActivity extends Activity {
+public final class ConnectionActivity extends StationActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private StationChrome ui;
     private StationChrome.Control keep;
@@ -198,7 +198,7 @@ public final class ConnectionActivity extends Activity {
         row.setPadding(dp(16), dp(8), dp(16), dp(8));
         if (Build.VERSION.SDK_INT >= 28) { row.setScreenReaderFocusable(true); }
         TextView name = ui.text(14);
-        name.setText(label);
+        name.setText(StationText.translate(label));
         name.setTextColor(ui.muted());
         name.setIncludeFontPadding(false);
         TextView value = ui.text(14);
@@ -221,11 +221,11 @@ public final class ConnectionActivity extends Activity {
     private void paintChecksExpanded() {
         checksRows.setVisibility(checksExpanded ? View.VISIBLE : View.GONE);
         checksLink.chevron.setRotation(checksExpanded ? 270 : 90);
-        checksLink.row.setContentDescription("连接检查，网络、通道与权限，"
-                + (checksExpanded ? "收起" : "展开"));
+        checksLink.row.setContentDescription(StationText.translate("连接检查，网络、通道与权限，"
+                + (checksExpanded ? "收起" : "展开")));
         checksLink.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         if (Build.VERSION.SDK_INT >= 30) {
-            checksLink.row.setStateDescription(checksExpanded ? "已展开" : "已折叠");
+            checksLink.row.setStateDescription(StationText.translate(checksExpanded ? "已展开" : "已折叠"));
         }
     }
     private void paintChecks(KeeperCopy copy) {
@@ -243,7 +243,7 @@ public final class ConnectionActivity extends Activity {
         paintCheck(writeState, canWrite ? "已授权" : "未授权", canWrite);
     }
     private void paintCheck(TextView value, String state, boolean ready) {
-        if (!state.contentEquals(value.getText())) { value.setText(state); }
+        if (!state.contentEquals(value.getText())) { value.setText(StationText.translate(state)); }
         value.setTextColor(ready ? ui.held() : ui.ink());
     }
     private void paintNotice(KeeperCopy copy) {
@@ -254,7 +254,7 @@ public final class ConnectionActivity extends Activity {
             return;
         }
         notice.view.setVisibility(View.VISIBLE);
-        notice.view.setText(line);
+        notice.view.setText(StationText.translate(line));
         int tone = manualMessage.isEmpty() ? toneColor(copy) : getColor(R.color.error);
         notice.view.setTextColor(tone);
         notice.fill.setColor((tone & 0x00FFFFFF) | 0x1A000000);
@@ -263,7 +263,7 @@ public final class ConnectionActivity extends Activity {
         boolean enabled = RemoteStore.enabled(this);
         String value = PhoneRelayClient.connectionLabel(this);
         boolean connected = StationFeatures.master(this) && enabled && PhoneRelayClient.connected();
-        remoteLink.value.setText(value);
+        remoteLink.value.setText(StationText.translate(value));
         remoteLink.value.setTextColor(connected ? ui.held() : ui.muted());
         ui.paintOn(remoteLink.mark, connected);
     }

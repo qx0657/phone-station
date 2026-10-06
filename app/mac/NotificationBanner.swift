@@ -20,7 +20,7 @@ struct NotificationBannerView: View {
                         }
                     }.scaledToFit().frame(width: 42, height: 42).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(event.app) · 手机").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        Text(StationL10n.format("{0} · 手机", "\(event.app)")).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                             .lineLimit(1)
                         Text(event.title.isEmpty ? event.app : event.title)
                             .font(.system(size: 14, weight: .semibold)).lineLimit(2)
@@ -29,11 +29,11 @@ struct NotificationBannerView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityHint("打开手机通知设置")
+            }.buttonStyle(.plain).accessibilityHint(StationL10n.text("打开手机通知设置"))
             Button(action: dismiss) {
                 Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary).frame(width: 24, height: 24).contentShape(Rectangle())
-            }.buttonStyle(.plain).help("关闭这条横幅").accessibilityLabel("关闭这条横幅")
+            }.buttonStyle(.plain).help(StationL10n.text("关闭这条横幅")).accessibilityLabel(StationL10n.text("关闭这条横幅"))
         }.padding(14).onHover(perform: hover)
     }
 }
@@ -171,6 +171,7 @@ final class NotificationBannerCenter {
     func dismissAll() { queue.clear(); render() }
 
     private func dismiss(_ id: String) { queue.dismiss(id); render() }
+    func refreshAppearance() { if !queue.entries.isEmpty { render() } }
     private func render() {
         let ids = Set(queue.entries.map { $0.event.sourceID })
         for id in Array(panels.keys) where !ids.contains(id) {
@@ -217,7 +218,7 @@ final class NotificationBannerCenter {
     private func makePanel() -> NSPanel {
         let panel = NotificationBannerPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
-        panel.title = "手机通知横幅"
+        panel.title = StationL10n.text("手机通知横幅")
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear

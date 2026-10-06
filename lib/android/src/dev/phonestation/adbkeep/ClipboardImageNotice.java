@@ -25,9 +25,9 @@ final class ClipboardImageNotice {
                     != PackageManager.PERMISSION_GRANTED) { return; }
             NotificationManager manager = context.getSystemService(NotificationManager.class);
             if (manager == null || !manager.areNotificationsEnabled()) { return; }
-            NotificationChannel channel = new NotificationChannel(CHANNEL, "剪贴板图片已保存",
+            NotificationChannel channel = new NotificationChannel(CHANNEL, StationText.translate("剪贴板图片已保存"),
                     NotificationManager.IMPORTANCE_DEFAULT);
-            channel.setDescription("Mac 图片保存到相册后的提示，点击查看图片。默认无声、无震动。");
+            channel.setDescription(StationText.translate("Mac 图片保存到相册后的提示，点击查看图片。默认无声、无震动。"));
             channel.setSound(null, null);
             channel.enableVibration(false);
             channel.setShowBadge(false);
@@ -39,8 +39,8 @@ final class ClipboardImageNotice {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             Notification receipt = new Notification.Builder(context, CHANNEL)
                     .setSmallIcon(R.drawable.ic_stat_station)
-                    .setContentTitle("Mac 图片已保存到相册")
-                    .setContentText("已保存到「手机工位」，点此查看图片")
+                    .setContentTitle(StationText.translate("Mac 图片已保存到相册"))
+                    .setContentText(StationText.translate("已保存到「手机工位」，点此查看图片"))
                     .setContentIntent(pending)
                     .setCategory(Notification.CATEGORY_STATUS)
                     .setVisibility(Notification.VISIBILITY_PRIVATE)

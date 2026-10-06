@@ -17,7 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Phone-side service, capability readiness and setup; credentials are never displayed. */
-public final class McpHelpActivity extends Activity {
+public final class McpHelpActivity extends StationActivity {
     private StationChrome ui;
     private TextView status;
     private TextView summary;
@@ -106,7 +106,7 @@ public final class McpHelpActivity extends Activity {
     private void saveLocal(boolean on) {
         if (saving) { return; }
         saving = true;
-        feedback.setText("正在保存…"); feedback.setTextColor(ui.muted()); feedback.setVisibility(View.VISIBLE);
+        feedback.setText(StationText.translate("正在保存…")); feedback.setTextColor(ui.muted()); feedback.setVisibility(View.VISIBLE);
         paint();
         Context context = getApplicationContext();
         new Thread(() -> {
@@ -122,7 +122,7 @@ public final class McpHelpActivity extends Activity {
                 if (isDestroyed()) { return; }
                 String message = !result.isEmpty() ? result : !StationFeatures.master(this)
                         ? "已保存，恢复手机工位后生效。" : "";
-                feedback.setText(message); feedback.setTextColor(result.isEmpty() ? ui.muted() : getColor(R.color.error));
+                feedback.setText(StationText.translate(message)); feedback.setTextColor(result.isEmpty() ? ui.muted() : getColor(R.color.error));
                 feedback.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
                 paint();
             });
@@ -133,9 +133,9 @@ public final class McpHelpActivity extends Activity {
         boolean master = StationFeatures.master(this);
         Json service = FileMcpService.status(this);
         boolean available = service.get("available").boolValue();
-        status.setText(service.get("label").string());
+        status.setText(StationText.translate(service.get("label").string()));
         status.setTextColor(service.get("attention").boolValue() ? ui.waiting() : available ? ui.held() : ui.muted());
-        summary.setText(service.get("detail").string());
+        summary.setText(StationText.translate(service.get("detail").string()));
         resume.setVisibility(master ? View.GONE : View.VISIBLE);
         painting = true;
         if (!saving) { local.toggle.setChecked(KeeperStore.mcpEnabled(this)); }
@@ -143,7 +143,7 @@ public final class McpHelpActivity extends Activity {
         painting = false;
         retry.setVisibility(master && KeeperStore.mcpEnabled(this) && !service.get("localReady").boolValue() ? View.VISIBLE : View.GONE);
         retry.setEnabled(!saving);
-        remote.value.setText(service.get("remoteLabel").string());
+        remote.value.setText(StationText.translate(service.get("remoteLabel").string()));
         remote.value.setTextColor(service.get("remoteReady").boolValue() ? ui.held() : ui.muted());
         ui.paintOn(remote.mark, service.get("remoteReady").boolValue());
         for (String group : capabilities.keySet()) {
@@ -154,20 +154,20 @@ public final class McpHelpActivity extends Activity {
                 if (master && !"已开启".equals(FeatureReadiness.reason(this, key))) { blocked++; }
             }
             StationChrome.Link link = capabilities.get(group);
-            link.value.setText(McpStatus.capabilities(master, available, selected, blocked));
+            link.value.setText(StationText.translate(McpStatus.capabilities(master, available, selected, blocked)));
             boolean ready = master && available && selected > 0 && blocked == 0;
             link.value.setTextColor(master && blocked > 0 ? ui.waiting() : ready ? ui.held() : ui.muted());
-            link.value.setContentDescription(link.value.getText() + "，已开启 " + selected + " 项"
-                    + (blocked > 0 ? "，其中 " + blocked + " 项需处理权限或访问范围" : ""));
+            link.value.setContentDescription(StationText.translate(link.value.getText() + "，已开启 " + selected + " 项"
+                    + (blocked > 0 ? "，其中 " + blocked + " 项需处理权限或访问范围" : "")));
             ui.paintOn(link.mark, ready);
         }
         boolean live = service.get("localReady").boolValue();
         address.setVisibility(live ? View.VISIBLE : View.GONE);
-        if (live) { address.setText(FileMcpService.listenUrl()); }
-        addressHint.setText(live
+        if (live) { address.setText(StationText.translate(FileMcpService.listenUrl())); }
+        addressHint.setText(StationText.translate(live
                 ? "此地址只在手机本机使用。电脑端的地址和授权信息请从 Mac「MCP 服务」中获取。"
                 : !master ? "恢复手机工位后显示本地接入地址。"
-                : "本地接入运行后显示地址；远程接入不需要此地址。");
+                : "本地接入运行后显示地址；远程接入不需要此地址。"));
     }
 
     private void addSection(StationChrome ui, LinearLayout card, McpHelp.Section section) {
@@ -177,7 +177,7 @@ public final class McpHelpActivity extends Activity {
         block.setPadding(side, ui.dp(12), side, ui.dp(12));
 
         TextView title = ui.text(16);
-        title.setText(section.title);
+        title.setText(StationText.translate(section.title));
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         title.setIncludeFontPadding(false);
         if (Build.VERSION.SDK_INT >= 28) {
@@ -186,7 +186,7 @@ public final class McpHelpActivity extends Activity {
         block.addView(title, matchWrap());
 
         TextView body = ui.text(15);
-        body.setText(section.body);
+        body.setText(StationText.translate(section.body));
         body.setIncludeFontPadding(false);
         body.setLineSpacing(0f, 1.3f);
         body.setTextIsSelectable(true);

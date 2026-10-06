@@ -12,7 +12,7 @@ import android.widget.TextView;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public final class ClipboardActivity extends Activity {
+public final class ClipboardActivity extends StationActivity {
     private StationChrome ui;
     private android.widget.Switch shared;
     private StationChrome.Disclosure help;
@@ -72,7 +72,7 @@ public final class ClipboardActivity extends Activity {
         help = ui.disclosure("使用说明与权限", saved != null && saved.getBoolean("help_expanded"));
         LinearLayout details = help.body;
         session = ui.valueRow(details, "Mac 连接");
-        session.setText("正在核对");
+        session.setText(StationText.translate("正在核对"));
         ui.paragraph(details, "在任意应用复制，再到另一端粘贴。首次连接后，请重新复制一次。");
         ui.paragraph(details, "Mac 手机工位需保持运行并连接 MCP 服务；手机需启动并授权 Shizuku。本地连接和远程通道都可同步，无需打开投屏。");
         ui.linkRow(details, R.drawable.ic_status_permission, "查看 Shizuku 权限",
@@ -106,15 +106,15 @@ public final class ClipboardActivity extends Activity {
                 String reason = availability.get("reason").string();
                 resolution = availability.get("action").string();
                 String title = availability.get("status").string();
-                status.setText(title + (reason.isEmpty() ? "" : "\n" + reason));
+                status.setText(StationText.translate(title + (reason.isEmpty() ? "" : "\n" + reason)));
                 boolean needsAction = "permissions".equals(resolution) || "mcp".equals(resolution) || "remotePermissions".equals(resolution) || "master".equals(resolution);
                 status.setTextColor(enabled && needsAction ? ui.waiting()
                         : enabled && automatic && availability.get("ready").boolValue() ? ui.held() : ui.muted());
-                session.setText(!enabled ? "已停止" : state.get("macOnline").boolValue() ? "已连接" : "等待连接");
+                session.setText(StationText.translate(!enabled ? "已停止" : state.get("macOnline").boolValue() ? "已连接" : "等待连接"));
                 session.setTextColor(enabled && state.get("macOnline").boolValue() ? ui.held() : ui.muted());
                 resolve.setVisibility(needsAction ? View.VISIBLE : View.GONE);
-                resolve.setText("master".equals(resolution) ? "前往首页恢复使用" : "remotePermissions".equals(resolution) ? "去授权剪贴板与通知"
-                        : "mcp".equals(resolution) ? "查看 MCP 服务" : "查看 Shizuku 权限");
+                resolve.setText(StationText.translate("master".equals(resolution) ? "前往首页恢复使用" : "remotePermissions".equals(resolution) ? "去授权剪贴板与通知"
+                        : "mcp".equals(resolution) ? "查看 MCP 服务" : "查看 Shizuku 权限"));
                 resume.setVisibility(enabled && !automatic ? View.VISIBLE : View.GONE);
             });
         });
@@ -143,8 +143,8 @@ public final class ClipboardActivity extends Activity {
                 images.setEnabled(true);
                 resume.setEnabled(true);
                 if (!active) { return; }
-                if (error != null) { message.setText(error); message.setTextColor(getColor(R.color.error)); message.setVisibility(View.VISIBLE); }
-                else if (!StationFeatures.master(this)) { message.setText("已保存，恢复使用后生效。"); message.setTextColor(ui.muted()); message.setVisibility(View.VISIBLE); }
+                if (error != null) { message.setText(StationText.translate(error)); message.setTextColor(getColor(R.color.error)); message.setVisibility(View.VISIBLE); }
+                else if (!StationFeatures.master(this)) { message.setText(StationText.translate("已保存，恢复使用后生效。")); message.setTextColor(ui.muted()); message.setVisibility(View.VISIBLE); }
                 load();
                 if (error == null && args.get("shared") != null && args.get("shared").boolValue()) { FeatureReadiness.prompt(this, "clipboard"); }
             });

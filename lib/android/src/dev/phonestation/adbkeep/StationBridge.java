@@ -358,7 +358,7 @@ final class StationBridge implements StationHost {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(context, AlertNote.QUIET_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_station)
-                .setContentTitle("打开文件")
+                .setContentTitle(StationText.translate("打开文件"))
                 .setContentText(name)
                 .setStyle(new Notification.BigTextStyle().bigText(path.toString()))
                 .setContentIntent(pending)

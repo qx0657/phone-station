@@ -22,7 +22,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** 会话提醒用哪段铃声。点一项就选定，并试听。静音不播。 */
-public final class AlertToneActivity extends Activity {
+public final class AlertToneActivity extends StationActivity {
     private StationChrome ui;
     private LinearLayout rows;
     private final Typeface medium = Typeface.create("sans-serif-medium", Typeface.NORMAL);
@@ -119,7 +119,7 @@ public final class AlertToneActivity extends Activity {
         line.setTag(label);
 
         TextView name = ui.text(16);
-        name.setText(label);
+        name.setText(stored == null || AlertSoundPlan.SILENT_TOKEN.equals(stored) ? StationText.translate(label) : label);
         name.setIncludeFontPadding(false);
         name.setMaxLines(1);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -129,7 +129,7 @@ public final class AlertToneActivity extends Activity {
         ImageView check = new ImageView(this);
         check.setImageResource(R.drawable.ic_check);
         check.setColorFilter(ui.held(), PorterDuff.Mode.SRC_IN);
-        check.setContentDescription("已选择");
+        check.setContentDescription(StationText.translate("已选择"));
         check.setVisibility(View.GONE);
         LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22));
         checkParams.setMarginStart(ui.dp(12));

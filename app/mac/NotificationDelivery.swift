@@ -30,7 +30,7 @@ final class NotificationDelivery: NSObject, UNUserNotificationCenterDelegate {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = event.title.isEmpty ? event.app : event.title
-        content.subtitle = "\(event.app) · 手机"
+        content.subtitle = StationL10n.format("{0} · 手机", event.app)
         content.body = event.text
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { return }
@@ -45,7 +45,7 @@ final class NotificationDelivery: NSObject, UNUserNotificationCenterDelegate {
         guard UserDefaults.standard.object(forKey: "receivePhoneNotifications") as? Bool != false else { return }
         var banner = event
         if settings.showPreviewsSetting == .never {
-            banner.title = "收到一条新通知"; banner.text = ""
+            banner.title = StationL10n.text("收到一条新通知"); banner.text = ""
         }
         if custom, UserDefaults.standard.object(forKey: "phoneNotificationBanners") as? Bool != false,
            NotificationBannerCenter.shared.show(banner), settings.soundSetting == .enabled {

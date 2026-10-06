@@ -15,7 +15,6 @@ final class McpSession: ObservableObject {
     @Published private(set) var remoteChecking = false
     @Published private(set) var remoteConfigured: Bool?
     @Published var configurePhone = false
-    @Published var confirmingRemoteRemoval = false
     @Published private(set) var remoteProfile = RemoteRelayProfile()
     @Published private(set) var remoteProfileLoading = false
     @Published var remoteDraft = RemoteRelayDraft()

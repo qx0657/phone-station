@@ -34,6 +34,8 @@ final class StationChrome {
     final boolean night;
     final LinearLayout column;
     final ScrollView scroll;
+    private android.os.Bundle displayState;
+    private final java.util.List<Disclosure> disclosures = new java.util.ArrayList<>();
     private final Typeface medium = Typeface.create("sans-serif-medium", Typeface.NORMAL);
 
     StationChrome(Activity activity) {
@@ -70,6 +72,17 @@ final class StationChrome {
                 ViewGroup.LayoutParams.MATCH_PARENT));
         activity.setContentView(scroll);
         scroll.requestApplyInsets();
+        if (activity instanceof StationActivity) { ((StationActivity) activity).chrome(this); }
+    }
+
+    void restoreDisplayState(android.os.Bundle state) {
+        displayState = state;
+        if (state != null) { scroll.post(() -> scroll.scrollTo(0, state.getInt("station_scroll"))); }
+    }
+
+    void saveDisplayState(android.os.Bundle state) {
+        state.putInt("station_scroll", scroll.getScrollY());
+        for (Disclosure item : disclosures) { state.putBoolean("disclosure_" + item.title, item.expanded); }
     }
 
     LinearLayout card() {
@@ -92,7 +105,7 @@ final class StationChrome {
 
     void groupTitle(LinearLayout card, String label) {
         TextView title = text(20);
-        title.setText(label);
+        title.setText(StationText.translate(label));
         title.setTypeface(medium);
         title.setIncludeFontPadding(false);
         heading(title);
@@ -109,7 +122,10 @@ final class StationChrome {
     /** Infrequent help stays available without filling the settings page. */
     Disclosure disclosure(String title, boolean expanded) {
         LinearLayout card = card();
-        return new Disclosure(card, title, expanded);
+        Disclosure item = new Disclosure(card, title, displayState != null
+                ? displayState.getBoolean("disclosure_" + title, expanded) : expanded);
+        disclosures.add(item);
+        return item;
     }
 
     final class Disclosure {
@@ -135,10 +151,10 @@ final class StationChrome {
         private void paint() {
             body.setVisibility(expanded ? View.VISIBLE : View.GONE);
             link.chevron.setRotation(expanded ? 270 : 90);
-            link.row.setContentDescription(title + (expanded ? "，收起" : "，展开"));
+            link.row.setContentDescription(StationText.translate(title + (expanded ? "，收起" : "，展开")));
             link.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
             if (Build.VERSION.SDK_INT >= 30) {
-                link.row.setStateDescription(expanded ? "已展开" : "已折叠");
+                link.row.setStateDescription(StationText.translate(expanded ? "已展开" : "已折叠"));
             }
         }
     }
@@ -149,7 +165,7 @@ final class StationChrome {
         line.setMinimumHeight(dp(60));
         line.setPadding(dp(16), dp(6), dp(8), 0);
         TextView title = text(20);
-        title.setText(label);
+        title.setText(StationText.translate(label));
         title.setTypeface(medium);
         title.setIncludeFontPadding(false);
         heading(title);
@@ -159,7 +175,7 @@ final class StationChrome {
         line.addView(title, titleParams);
         Switch toggle = new Switch(activity);
         toggle.setId(View.generateViewId());
-        toggle.setContentDescription(controlLabel);
+        toggle.setContentDescription(StationText.translate(controlLabel));
         toggle.setMinimumWidth(dp(48));
         toggle.setMinimumHeight(dp(48));
         toggle.setSplitTrack(false);
@@ -183,13 +199,13 @@ final class StationChrome {
         hit.setMinimumHeight(dp(48));
         ImageView mark = glyph(R.drawable.ic_back, 22, ink());
         hit.addView(mark, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-        hit.setContentDescription("返回");
+        hit.setContentDescription(StationText.translate("返回"));
         hit.setClickable(true);
         hit.setOnClickListener(view -> activity.finish());
         ripple(hit);
         bar.addView(hit, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = text(22);
-        title.setText(label);
+        title.setText(StationText.translate(label));
         title.setTypeface(medium);
         title.setIncludeFontPadding(false);
         heading(title);
@@ -203,7 +219,7 @@ final class StationChrome {
     void homeHeader(String label, View.OnClickListener settings) {
         LinearLayout bar = row();
         TextView title = text(22);
-        title.setText(label);
+        title.setText(StationText.translate(label));
         title.setTypeface(medium);
         heading(title);
         bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -215,8 +231,8 @@ final class StationChrome {
         settingsButton.setBackground(null);
         settingsButton.setMinimumWidth(dp(48));
         settingsButton.setMinimumHeight(dp(48));
-        settingsButton.setContentDescription("设置");
-        settingsButton.setTooltipText("设置");
+        settingsButton.setContentDescription(StationText.translate("设置"));
+        settingsButton.setTooltipText(StationText.translate("设置"));
         settingsButton.setOnClickListener(settings);
         ripple(settingsButton);
         bar.addView(settingsButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -247,7 +263,7 @@ final class StationChrome {
 
     Button textAction(String label, View.OnClickListener click) {
         Button button = new Button(activity, null, android.R.attr.borderlessButtonStyle);
-        button.setText(label);
+        button.setText(StationText.translate(label));
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         button.setTextColor(ink());
         button.setAllCaps(false);
@@ -274,7 +290,7 @@ final class StationChrome {
         line.setMinimumHeight(dp(46));
         line.setPadding(dp(16), dp(6), dp(16), dp(6));
         TextView name = text(16);
-        name.setText(label);
+        name.setText(StationText.translate(label));
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -297,7 +313,7 @@ final class StationChrome {
         ImageView icon = glyph(iconRes, 22, muted());
         line.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22)));
         TextView name = text(16);
-        name.setText(label);
+        name.setText(StationText.translate(label));
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -312,13 +328,17 @@ final class StationChrome {
     }
 
     Control switchRow(LinearLayout card, int iconRes, String label) {
+        return switchRow(card, iconRes, label, true);
+    }
+
+    Control switchRow(LinearLayout card, int iconRes, String label, boolean localize) {
         Mark mark = mark(iconRes);
         LinearLayout line = row();
         line.setMinimumHeight(dp(56));
         line.setPadding(dp(14), 0, dp(8), 0);
         line.addView(mark.plate, new LinearLayout.LayoutParams(dp(36), dp(36)));
         TextView name = text(16);
-        name.setText(label);
+        name.setText(localize ? StationText.translate(label) : label);
         name.setIncludeFontPadding(false);
         // Let long names grow with the user's font size.
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
@@ -327,7 +347,7 @@ final class StationChrome {
         line.addView(name, nameParams);
         Switch toggle = new Switch(activity);
         toggle.setId(View.generateViewId());
-        toggle.setContentDescription(label);
+        toggle.setContentDescription(localize ? StationText.translate(label) : label);
         toggle.setMinimumWidth(dp(48));
         toggle.setMinimumHeight(dp(48));
         toggle.setSplitTrack(false);
@@ -355,12 +375,12 @@ final class StationChrome {
         LinearLayout words = new LinearLayout(activity);
         words.setOrientation(LinearLayout.VERTICAL);
         TextView name = text(16);
-        name.setText(title);
+        name.setText(StationText.translate(title));
         name.setTypeface(medium);
         name.setTextColor(waiting());
         words.addView(name, matchWrap());
         TextView explanation = text(14);
-        explanation.setText(detail);
+        explanation.setText(StationText.translate(detail));
         explanation.setTextColor(muted());
         explanation.setLineSpacing(0, 1.2f);
         LinearLayout.LayoutParams gap = matchWrap();
@@ -371,7 +391,7 @@ final class StationChrome {
         LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(dp(18), dp(18));
         arrowParams.setMarginStart(dp(8));
         line.addView(arrow, arrowParams);
-        line.setContentDescription(title + "。" + detail + "。查看处理方法");
+        line.setContentDescription(StationText.translate(title + "。" + detail + "。查看处理方法"));
         line.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         words.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -395,7 +415,7 @@ final class StationChrome {
         line.setPadding(dp(14), 0, dp(10), 0);
         line.addView(mark.plate, new LinearLayout.LayoutParams(dp(36), dp(36)));
         TextView name = text(16);
-        name.setText(label);
+        name.setText(StationText.translate(label));
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -406,7 +426,7 @@ final class StationChrome {
         words.addView(name, matchWrap());
         if (subtitle != null) {
             TextView detail = text(14);
-            detail.setText(subtitle);
+            detail.setText(StationText.translate(subtitle));
             detail.setTextColor(muted());
             detail.setPadding(0, dp(4), 0, 0);
             words.addView(detail, matchWrap());
@@ -464,7 +484,7 @@ final class StationChrome {
 
     TextView paragraph(LinearLayout parent, String value) {
         TextView view = text(14);
-        view.setText(value);
+        view.setText(StationText.translate(value));
         view.setTextColor(muted());
         view.setLineSpacing(0, 1.2f);
         view.setPadding(dp(16), dp(8), dp(16), dp(12));
@@ -477,7 +497,7 @@ final class StationChrome {
         group.setOrientation(LinearLayout.VERTICAL);
         group.setPadding(dp(16), dp(10), dp(16), dp(8));
         TextView title = text(14);
-        title.setText(label);
+        title.setText(StationText.translate(label));
         title.setTypeface(medium);
         group.addView(title, matchWrap());
         EditText input = new EditText(activity);
@@ -485,7 +505,7 @@ final class StationChrome {
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         input.setTextColor(ink());
         input.setHintTextColor(muted());
-        input.setHint(hint);
+        input.setHint(StationText.translate(hint));
         input.setSingleLine(true);
         input.setMinimumHeight(dp(48));
         input.setInputType(secret ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -501,7 +521,7 @@ final class StationChrome {
 
     Button action(LinearLayout parent, String label, boolean primary, View.OnClickListener listener) {
         Button button = new Button(activity);
-        button.setText(label);
+        button.setText(StationText.translate(label));
         button.setAllCaps(false);
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         button.setMinHeight(dp(48));

@@ -34,9 +34,9 @@ final class AlertChannel {
         }
         NotificationChannel popup = new NotificationChannel(
                 AlertNote.CHANNEL_ID,
-                AlertNote.CHANNEL_NAME,
+                StationText.translate(AlertNote.CHANNEL_NAME),
                 NotificationManager.IMPORTANCE_HIGH);
-        popup.setDescription("电脑上的会话提醒。在屏幕上弹出，不另响一声。");
+        popup.setDescription(StationText.translate("电脑上的会话提醒。在屏幕上弹出，不另响一声。"));
         AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -66,8 +66,8 @@ final class AlertChannel {
 
     private static void create(
             NotificationManager manager, String id, String name, int importance, String description) {
-        NotificationChannel channel = new NotificationChannel(id, name, importance);
-        channel.setDescription(description);
+        NotificationChannel channel = new NotificationChannel(id, StationText.translate(name), importance);
+        channel.setDescription(StationText.translate(description));
         channel.setSound(null, null);
         channel.enableVibration(false);
         channel.setShowBadge(false);

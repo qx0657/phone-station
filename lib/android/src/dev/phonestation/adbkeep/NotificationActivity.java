@@ -1,7 +1,6 @@
 package dev.phonestation.adbkeep;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.ActivityNotFoundException;
@@ -18,7 +17,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 /** 两个方向独立设置：手机应用通知同步到 Mac；电脑会话提醒发到手机。 */
-public final class NotificationActivity extends Activity {
+public final class NotificationActivity extends StationActivity {
     private StationChrome ui;
     private Switch receiveAlerts;
     private TextView alertsStatus;
@@ -123,7 +122,7 @@ public final class NotificationActivity extends Activity {
         updatingAlert = false;
         ui.paintOn(alert.mark, alert.toggle.isChecked());
         refreshDisplay();
-        soundValue.setText(soundLabel(KeeperStore.alertSound(this)));
+        soundValue.setText(StationText.translate(soundLabel(KeeperStore.alertSound(this))));
         rebindListener();
         handler.post(refresh);
     }
@@ -144,29 +143,29 @@ public final class NotificationActivity extends Activity {
         painting = false;
         String alertsReason = FeatureReadiness.reason(this, "alerts");
         boolean alertProblem = master && alerts && !"已开启".equals(alertsReason);
-        alertsStatus.setText(alertsReason.replaceFirst("^已开启 · ", ""));
+        alertsStatus.setText(StationText.translate(alertsReason.replaceFirst("^已开启 · ", "")));
         alertsStatus.setTextColor(ui.waiting());
         alertsStatus.setVisibility(alertProblem ? android.view.View.VISIBLE : android.view.View.GONE);
         alertAccess.row.setVisibility(master && alerts && !PermissionProbe.read(this).notifications ? android.view.View.VISIBLE : android.view.View.GONE);
         remoteAlerts.row.setVisibility(master && alerts && RemoteStore.enabled(this) && !RemoteStore.permission(this, "controls")
                 ? android.view.View.VISIBLE : android.view.View.GONE);
-        access.value.setText(granted ? "已授权" : "未授权");
+        access.value.setText(StationText.translate(granted ? "已授权" : "未授权"));
         access.row.setVisibility(master && on && (!granted || !state.get("listenerConnected").boolValue()) ? android.view.View.VISIBLE : android.view.View.GONE);
-        appsValue.setText(count == 0 ? "未选择" : count + " 个");
+        appsValue.setText(StationText.translate(count == 0 ? "未选择" : count + " 个"));
         boolean remoteOnly = HostProbe.remoteOnly(this);
         boolean blocked = remoteOnly && !RemoteStore.permission(this, "personal");
         remoteSync.setVisibility(master && on && blocked ? android.view.View.VISIBLE : android.view.View.GONE);
         boolean mcpReady = FileMcpService.listening() || PhoneRelayClient.connected();
         mcpAccess.row.setVisibility(master && on && !mcpReady ? android.view.View.VISIBLE : android.view.View.GONE);
         syncStatus.setVisibility(master && on ? android.view.View.VISIBLE : android.view.View.GONE);
-        syncStatus.setText(!StationFeatures.master(this) ? "总开关已关闭，同步选择已保留" : !on ? "同步已关闭，可先选择应用"
+        syncStatus.setText(StationText.translate(!StationFeatures.master(this) ? "总开关已关闭，同步选择已保留" : !on ? "同步已关闭，可先选择应用"
                 : !granted ? "请点「通知使用权」，在系统设置中允许手机工位读取通知"
                 : count == 0 ? "请点「选择应用」，勾选要同步的应用"
                 : !mcpReady ? "接入服务未运行，请查看 MCP 服务"
                 : !state.get("listenerConnected").boolValue() ? "等待系统连接通知服务；可重新检查通知使用权"
                 : blocked ? "远程通知接收未授权，请在「远程访问范围」中允许「剪贴板与通知」"
                 : !state.get("macOnline").boolValue() ? "等待 Mac 接收；断线期间不补发旧通知"
-                : "Mac 正在接收");
+                : "Mac 正在接收"));
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -177,7 +176,7 @@ public final class NotificationActivity extends Activity {
     }
     private void saveFeature(String key, boolean on, TextView feedback) {
         saving = true;
-        feedback.setText("正在保存…"); feedback.setTextColor(ui.muted());
+        feedback.setText(StationText.translate("正在保存…")); feedback.setTextColor(ui.muted());
         feedback.setVisibility(android.view.View.VISIBLE);
         refreshSync();
         android.content.Context context = getApplicationContext();
@@ -190,7 +189,7 @@ public final class NotificationActivity extends Activity {
             handler.post(() -> {
                 saving = false;
                 if (isDestroyed()) { return; }
-                feedback.setText(error == null ? "" : error);
+                feedback.setText(StationText.translate(error == null ? "" : error));
                 feedback.setTextColor(getColor(R.color.error));
                 feedback.setVisibility(error == null ? android.view.View.GONE : android.view.View.VISIBLE);
                 refreshSync();
@@ -218,20 +217,17 @@ public final class NotificationActivity extends Activity {
     }
 
     private void refreshDisplay() {
-        displayValue.setText(KeeperStore.alertStacks(this) ? "每条都显示" : "只显示最新一条");
+        displayValue.setText(StationText.translate(KeeperStore.alertStacks(this) ? "每条都显示" : "只显示最新一条"));
     }
 
     private void pickDisplay() {
-        new AlertDialog.Builder(this)
-                .setTitle("电脑提醒显示方式")
-                .setSingleChoiceItems(new String[] {"只显示最新一条", "每条都显示"},
+        StationDialog.choices(this, R.drawable.ic_status_notify, "电脑提醒显示方式",
+                        new String[] {"只显示最新一条", "每条都显示"},
                         KeeperStore.alertStacks(this) ? 1 : 0, (dialog, which) -> {
                             KeeperStore.setAlertStacks(this, which == 1);
                             refreshDisplay();
                             dialog.dismiss();
-                        })
-                .setNegativeButton("取消", null)
-                .show();
+                        });
     }
 
     private void pickSound() {

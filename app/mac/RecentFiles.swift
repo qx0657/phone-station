@@ -3,12 +3,12 @@ import AVFoundation
 import ImageIO
 
 enum RecentFileStyle {
-    static let date: DateFormatter = {
+    static var date: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日 HH:mm"
+        formatter.locale = Locale(identifier: StationL10n.english() ? "en" : "zh-Hans")
+        formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
         return formatter
-    }()
+    }
 
     static func kind(for url: URL) -> String {
         ["mp4", "mkv"].contains(url.pathExtension.lowercased()) ? "录屏" : "截图"

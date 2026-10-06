@@ -38,10 +38,10 @@ enum StationRows {
     static func connectionRow(_ title: String, symbol: String, status: String, online: Bool, checking: Bool = false) -> some View {
         HStack(spacing: 10) {
             Image(systemName: symbol).frame(width: 18).foregroundStyle(.secondary).accessibilityHidden(true)
-            Text(title).font(.subheadline)
+            Text(StationL10n.text(title)).font(.subheadline)
             Spacer(minLength: 8)
             if checking { ProgressView().controlSize(.mini).accessibilityHidden(true) }
-            Text(status).font(.system(size: 12, weight: online ? .medium : .regular))
+            Text(StationL10n.text(status)).font(.system(size: 12, weight: online ? .medium : .regular))
                 .foregroundStyle(online ? StationPalette.connected : checking ? StationPalette.caution : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }.padding(.horizontal, 12).padding(.vertical, 11)
@@ -56,7 +56,7 @@ enum StationRows {
     }
 
     static func sectionTitle(_ title: String) -> some View {
-        Text(title)
+        Text(StationL10n.text(title))
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 2)
@@ -68,7 +68,7 @@ enum StationRows {
                 Image(systemName: "chevron.left")
                     .font(.caption.weight(.semibold))
                     .accessibilityHidden(true)
-                Text(title)
+                Text(StationL10n.text(title))
                     .font(.system(size: 16, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -78,8 +78,8 @@ enum StationRows {
         .buttonStyle(PressFadeStyle())
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .accessibilityLabel("返回")
-        .accessibilityHint("返回上一页，当前页面：\(title)")
+        .accessibilityLabel(StationL10n.text("返回"))
+        .accessibilityHint(StationL10n.format("返回上一页，当前页面：{0}", StationL10n.text("\(title)")))
     }
 
     static func navigationRow(_ title: String, symbol: String, detail: String? = nil,
@@ -92,14 +92,14 @@ enum StationRows {
                     .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
+                    Text(StationL10n.text(title))
                     if let detail {
-                        Text(detail)
+                        Text(StationL10n.text(detail))
                             .font(.caption)
                             .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
                             .lineLimit(detailLineLimit)
                             .fixedSize(horizontal: false, vertical: true)
-                            .help(detail)
+                            .help(StationL10n.text(detail))
                     }
                 }
                 Spacer(minLength: 8)
@@ -127,10 +127,10 @@ enum StationRows {
                     .frame(width: 18)
                     .foregroundStyle(isOn.wrappedValue ? Color.primary : Color.secondary)
                     .accessibilityHidden(true)
-                Text(title)
+                Text(StationL10n.text(title))
                     .font(.body)
                 Spacer(minLength: 8)
-                Toggle(title, isOn: isOn)
+                Toggle(StationL10n.text(title), isOn: isOn)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
@@ -138,7 +138,7 @@ enum StationRows {
                     .disabled(!enabled)
             }
             if let subtitle {
-                Text(subtitle)
+                Text(StationL10n.text(subtitle))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -156,7 +156,7 @@ enum StationRows {
             if busy {
                 ProgressView().controlSize(.small)
             }
-            Text(text)
+            Text(StationL10n.text(text))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -170,7 +170,7 @@ enum StationRows {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let build = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if short.isEmpty { return "未知" }
+        if short.isEmpty { return StationL10n.text("未知") }
         if build.isEmpty || build == short { return short }
         return "\(short) (\(build))"
     }
@@ -187,7 +187,7 @@ struct StationOperationFeedback: View {
                     Button { station.feedback.notice = nil } label: {
                         Image(systemName: "xmark").font(.system(size: 10, weight: .medium))
                             .frame(width: 22, height: 22).contentShape(Rectangle())
-                    }.buttonStyle(.borderless).help("收起操作反馈").accessibilityLabel("收起操作反馈")
+                    }.buttonStyle(.borderless).help(StationL10n.text("收起操作反馈")).accessibilityLabel(StationL10n.text("收起操作反馈"))
                 }
             }
         }
@@ -253,7 +253,7 @@ struct ActionTile: View {
                     .font(.system(size: 16, weight: .medium))
                     .symbolRenderingMode(active ? .monochrome : .hierarchical)
                     .foregroundStyle(active ? tint : Color.primary)
-                Text(title)
+                Text(StationL10n.text(title))
                     .font(.system(size: 12))
                     .foregroundStyle(active ? tint : Color.primary)
                     .lineLimit(1)
@@ -277,7 +277,7 @@ struct ActionTile: View {
         .disabled(!enabled)
         .opacity(enabled || active ? 1 : 0.4)
         .animation(.easeOut(duration: 0.16), value: active)
-        .accessibilityLabel(title)
+        .accessibilityLabel(StationL10n.text(title))
     }
 }
 
@@ -402,7 +402,7 @@ struct PhoneAppInstallControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { station.setup.install() } label: {
-                Label("安装或更新手机应用", systemImage: "arrow.down.app")
+                Label(StationL10n.text("安装或更新手机应用"), systemImage: "arrow.down.app")
                     .font(.body).padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(PressFadeStyle())
                 .disabled(station.feedback.activity != nil || !station.featureAllows("shell") || !station.featureAllows("files.read") || !station.featureAllows("files.write") || (station.link.serial == nil && station.remoteBlocker([.install]) != nil))
@@ -411,11 +411,11 @@ struct PhoneAppInstallControls: View {
             }
             if let id = station.setup.installJobID {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("上次安装任务").font(.caption).foregroundStyle(.secondary)
-                    Text(id).font(.caption.monospaced()).textSelection(.enabled)
+                    Text(StationL10n.text("上次安装任务")).font(.caption).foregroundStyle(.secondary)
+                    Text(StationL10n.text(id)).font(.caption.monospaced()).textSelection(.enabled)
                     HStack {
-                        Button("查询原任务") { station.setup.queryInstall() }.disabled(station.feedback.activity != nil)
-                        Button("复制编号") { station.setup.copyInstallJobID() }
+                        Button(StationL10n.text("查询原任务")) { station.setup.queryInstall() }.disabled(station.feedback.activity != nil)
+                        Button(StationL10n.text("复制编号")) { station.setup.copyInstallJobID() }
                     }.buttonStyle(.borderless)
                 }.padding(10)
             }

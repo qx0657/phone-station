@@ -1,7 +1,6 @@
 package dev.phonestation.adbkeep;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,7 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Configure this phone independently of adb. Stored credentials are never displayed. */
-public final class RemoteRelayActivity extends Activity {
+public final class RemoteRelayActivity extends StationActivity {
     private StationChrome ui;
     private EditText endpoint;
     private EditText pin;
@@ -76,6 +75,10 @@ public final class RemoteRelayActivity extends Activity {
         endpoint.setText(RemoteStore.endpoint(this));
         pin = ui.field(form, "证书指纹 · SPKI SHA-256", "64 位十六进制指纹", false);
         pin.setText(RemoteStore.pin(this));
+        if (state != null) {
+            endpoint.setText(state.getString("endpoint_draft", RemoteStore.endpoint(this)));
+            pin.setText(state.getString("pin_draft", RemoteStore.pin(this)));
+        }
         token = ui.field(form, "手机令牌", RemoteStore.configured(this) ? "留空保留已有令牌" : "64 位十六进制令牌", true);
         token.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         token.setOnEditorActionListener((view, action, event) -> {
@@ -110,29 +113,31 @@ public final class RemoteRelayActivity extends Activity {
         remote.toggle.setChecked(configured && RemoteStore.enabled(this));
         updatingRemote = false;
         remote.setEnabled(configured && !busy);
-        permissionLink.value.setText(RemoteStore.permissionSummary(this));
+        permissionLink.value.setText(StationText.translate(RemoteStore.permissionSummary(this)));
         permissionLink.value.setTextColor(ui.muted());
         paintConfig();
         ui.paintOn(remote.mark, remote.toggle.isChecked());
         String label = PhoneRelayClient.connectionLabel(this);
-        if (!label.contentEquals(status.getText())) { status.setText(label); }
+        if (!label.contentEquals(status.getText())) { status.setText(StationText.translate(label)); }
         status.setTextColor(online ? ui.held() : PhoneRelayClient.checking() ? ui.waiting() : ui.muted());
     }
 
     private void showMessage(String value, boolean error) {
-        message.setText(value);
+        message.setText(StationText.translate(value));
         message.setTextColor(error ? getColor(R.color.error) : ui.held());
         message.setVisibility(View.VISIBLE);
     }
 
     private void paintConfig() {
         configFields.setVisibility(configExpanded ? View.VISIBLE : View.GONE);
-        configLink.value.setText(RemoteStore.configured(this) ? "已保存" : "未配置");
+        configLink.value.setText(StationText.translate(RemoteStore.configured(this) ? "已保存" : "未配置"));
         configLink.chevron.setRotation(configExpanded ? 270 : 90);
-        configLink.row.setContentDescription("中继配置，" + configLink.value.getText() + "，" + (configExpanded ? "收起" : "展开"));
+        configLink.row.setContentDescription(StationText.translate("中继配置，" + configLink.value.getText() + "，" + (configExpanded ? "收起" : "展开")));
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
+        state.putString("endpoint_draft", endpoint.getText().toString());
+        state.putString("pin_draft", pin.getText().toString());
         state.putBoolean("config_expanded", configExpanded); super.onSaveInstanceState(state);
     }
 
@@ -140,7 +145,7 @@ public final class RemoteRelayActivity extends Activity {
         busy = value;
         endpoint.setEnabled(!value); pin.setEnabled(!value); token.setEnabled(!value);
         save.setEnabled(!value); forget.setEnabled(!value);
-        save.setText(value ? "正在保存…" : "保存并连接");
+        save.setText(StationText.translate(value ? "正在保存…" : "保存并连接"));
         remote.setEnabled(!value && RemoteStore.configured(this));
         configLink.row.setEnabled(!value);
     }
@@ -166,7 +171,7 @@ public final class RemoteRelayActivity extends Activity {
                 setBusy(false);
                 if (saved) {
                     endpoint.setText(RemoteStore.endpoint(this));
-                    token.setText(""); token.setHint("留空保留已有令牌");
+                    token.setText(""); token.setHint(StationText.translate("留空保留已有令牌"));
                     forget.setVisibility(View.VISIBLE);
                     showMessage(StationFeatures.master(this) ? "配置已保存，正在连接。连接结果见上方状态。" : "配置已保存，恢复手机工位后连接。", false);
                 } else { showMessage("配置未保存，请检查手机安全存储后重试。", true); }
@@ -177,10 +182,9 @@ public final class RemoteRelayActivity extends Activity {
 
     private void confirmForget() {
         if (busy) { return; }
-        new AlertDialog.Builder(this).setTitle("清除手机配置？")
-                .setMessage("手机会停止连接中继，服务器地址和手机令牌将从本机移除。Mac 的配置需要在电脑上单独清除。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("清除", (dialog, which) -> {
+        StationDialog.confirm(this, R.drawable.ic_status_cloud, "清除手机配置？",
+                "手机会停止连接中继，服务器地址和手机令牌将从本机移除。Mac 的配置需要在电脑上单独清除。",
+                "取消", "清除", true, () -> {
                     if (!RemoteStore.forget(this)) {
                         showMessage("配置未清除，请检查手机存储后重试。", true);
                         return;
@@ -189,10 +193,10 @@ public final class RemoteRelayActivity extends Activity {
                     else { FileMcpService.stop(this); }
                     configExpanded = true;
                     endpoint.setText(""); pin.setText(""); token.setText("");
-                    token.setHint("64 位十六进制令牌");
+                    token.setHint(StationText.translate("64 位十六进制令牌"));
                     forget.setVisibility(View.GONE);
                     showMessage("手机配置已清除，本地 MCP 服务可继续使用。", false);
                     paintStatus();
-                }).show();
+                });
     }
 }

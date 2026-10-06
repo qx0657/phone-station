@@ -107,7 +107,7 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
         view.scroll = { [weak self] point, x, y in self?.scroll(point: point, x: x, y: y) }
         self.view = view
         let w = NSWindow(contentRect: view.bounds, styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = "手机工位 · 远程投屏"; w.contentView = view; w.delegate = self; w.isReleasedWhenClosed = false
+        w.title = StationL10n.text("手机工位 · 远程投屏"); w.contentView = view; w.delegate = self; w.isReleasedWhenClosed = false
         w.center(); w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); window = w
     }
     func windowWillClose(_ notification: Notification) { stop(reason: "远程投屏已关闭。") }

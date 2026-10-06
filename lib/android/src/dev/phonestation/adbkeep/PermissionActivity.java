@@ -26,7 +26,7 @@ import android.widget.Toast;
 import rikka.shizuku.Shizuku;
 
 /** 能读到的权限，以及还没开时怎么去开。 */
-public final class PermissionActivity extends Activity {
+public final class PermissionActivity extends StationActivity {
     private static final int REQUEST_NOTIFY = 2;
     private static final int REQUEST_SHIZUKU = 3;
     private static final String[][] HONOR_STARTUP = {
@@ -137,7 +137,7 @@ public final class PermissionActivity extends Activity {
         boolean shizukuPending = false;
         StringBuilder key = new StringBuilder(issues.emit());
         String remoteSummary = RemoteStore.permissionSummary(this);
-        remotePermissions.value.setText(remoteSummary);
+        remotePermissions.value.setText(StationText.translate(remoteSummary));
         remotePermissions.value.setTextColor(ui.muted());
         key.append(remoteSummary);
         for (PermissionCopy.Row row : board.rows) {
@@ -181,7 +181,7 @@ public final class PermissionActivity extends Activity {
         }
         int granted = (int) java.util.Arrays.stream(board.rows).filter(row -> row.tone == PermissionCopy.Tone.HELD).count();
         allowed.setVisibility(granted == 0 ? View.GONE : View.VISIBLE);
-        allowedLink.value.setText(granted + " 项");
+        allowedLink.value.setText(StationText.translate(granted + " 项"));
         allowedLink.value.setTextColor(ui.muted());
         ui.paintOn(allowedLink.mark, true);
         manual.setVisibility(manual.getChildCount() == 0 ? View.GONE : View.VISIBLE);
@@ -192,10 +192,10 @@ public final class PermissionActivity extends Activity {
         allowedRows.setVisibility(expanded ? View.VISIBLE : View.GONE);
         allowedLink.chevron.setRotation(expanded ? 270 : 90);
         String label = "已满足的权限，" + allowedLink.value.getText() + "，" + (expanded ? "收起" : "展开");
-        allowedLink.row.setContentDescription(label);
+        allowedLink.row.setContentDescription(StationText.translate(label));
         allowedLink.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         if (Build.VERSION.SDK_INT >= 30) {
-            allowedLink.row.setStateDescription(expanded ? "已展开" : "已折叠");
+            allowedLink.row.setStateDescription(StationText.translate(expanded ? "已展开" : "已折叠"));
         }
     }
 
@@ -233,13 +233,13 @@ public final class PermissionActivity extends Activity {
         line.setOrientation(LinearLayout.HORIZONTAL);
         line.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = ui.text(16);
-        title.setText(row.title);
+        title.setText(StationText.translate(row.title));
         title.setIncludeFontPadding(false);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         line.addView(title, titleParams);
         TextView value = ui.text(15);
-        value.setText(row.value);
+        value.setText(StationText.translate(row.value));
         value.setIncludeFontPadding(false);
         value.setGravity(Gravity.END);
         value.setTextColor(toneColor(row.tone));
@@ -262,7 +262,7 @@ public final class PermissionActivity extends Activity {
         String detail = row.tone == PermissionCopy.Tone.WAITING ? PermissionCopy.impact(row) + row.hint : row.hint;
         if (!detail.isEmpty()) {
             TextView hint = ui.text(13);
-            hint.setText(detail);
+            hint.setText(StationText.translate(detail));
             hint.setTextColor(ui.muted());
             hint.setIncludeFontPadding(false);
             hint.setLineSpacing(0f, 1.3f);
@@ -385,7 +385,7 @@ public final class PermissionActivity extends Activity {
             return;
         }
         Log.w(KeeperEngine.TAG, "startup settings unavailable");
-        Toast.makeText(this, "无法打开，请在系统设置中查找应用的后台运行或自启动设置。", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, StationText.translate("无法打开，请在系统设置中查找应用的后台运行或自启动设置。"), Toast.LENGTH_LONG).show();
     }
 
     private boolean start(Intent intent) {
