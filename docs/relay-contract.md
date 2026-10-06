@@ -1,6 +1,6 @@
 # 公网中继协议与恢复边界
 
-公网服务端源码在 [server/relay](../server/relay/README.md)，Mac 网关在 `lib/remote-gateway/`。这是三端共用的协议入口；个人运维记录只维护实际部署。当前中继 3 沿用中继 2 的 durable-epochs-v1 持久协议，另增加 [独立屏幕连接](remote-screen.md)，Mac 20 支持握手，Android 透传编号。
+公网服务端源码在 [server/relay](../server/relay/README.md)，Mac 网关在 `lib/remote-gateway/`。这是三端共用的协议入口；个人运维记录只维护实际部署。中继 5 沿用中继 2 的 durable-epochs-v1 持久协议和中继 3 的 [独立屏幕连接](remote-screen.md)，新增 WSS 控制与事件协议，见 [远程控制与事件](remote-control.md)。Mac 20 起支持持久会话握手，Android 透传编号。
 
 ## 接口与身份
 
@@ -10,8 +10,11 @@
 
 | 接口 | 角色 | 请求与应答 |
 |---|---|---|
-| `GET /v1/desktop/status` | 电脑 | 返回 deviceId、online、version、durable、operationEpoch；握手可能推进会话代号并清理过期回执，不调用手机工具 |
+| `GET /v1/desktop/status` | 电脑 | 返回 deviceId、online、version、durable、operationEpoch，以及 controlProtocol、controlConnected、controlSession；握手可能推进会话代号并清理过期回执，不调用手机工具 |
 | `POST /v1/desktop/call` | 电脑 | `{operationId,payload:<MCP请求>}`；完成返回 `{status,body:<MCP应答>}` |
+| `POST /v1/phone/capabilities` | 手机 | `{}`；返回支持的 controlProtocol，不执行手机操作 |
+| `GET /v1/phone/control` | 手机 | WSS control-v1：指令、结果、心跳与订阅租约 |
+| `GET /v1/desktop/events` | 电脑 | WSS events-v1：订阅、变化信号与心跳，不传正文 |
 | `POST /v1/phone/poll` | 手机 | `{waitMs:2000}`；范围 250–25000 ms；空闲返回 `{idle:true,operationId:null}`，有请求返回 `{operationId,payload}` |
 | `POST /v1/phone/result` | 手机 | `{operationId,response:{status,body}}`；收到并持久确认后返回 200 JSON；202 结果可省略 body |
 | `GET /v1/desktop/operation?id=…` | 电脑 | 查看 queued/running/complete/expired/unknown，不重新提交；不存在也为 unknown |
@@ -33,9 +36,9 @@ Mac 20 对没有代号的旧中继仍使用旧随机编号，以支持先升级�
 | 状态或事件 | 行为 |
 |---|---|
 | 新操作，队列或回执容量满 | 返回 429 及 `X-Phone-Station-Not-Queued: 1`，不留下接收记录 |
-| 接收成功 | 持久 queued 后才发布给轮询队列 |
-| 手机 poll | 持久 running 后才向手机发送；重复 poll 不重派 |
-| 手机 result | 正文和 complete 回执可靠提交后才确认；同结果重传返回 200，冲突结果 409 |
+| 接收成功 | 持久 queued 后才唤醒手机控制连接或旧版轮询 |
+| WSS 派发或手机 poll | 持久 running 后才向手机发送；连接接替与重复 poll 不重派已运行操作 |
+| WSS 或 HTTP result | 正文和 complete 回执可靠提交后才确认；同结果重传返回 200，冲突结果 409 |
 | 电脑取消或断线 | 未派发标为 expired；已派发 ping 可标 unknown 并释放，其他操作等待原结果；不重做 |
 | 重启 | queued/running 保守转 unknown，不恢复派发；complete 返回原结果或正文已过期的 410 |
 | 旧编号结果未知、正文过期或代号过期 | 返回 409/410 或 unknown；都不是重提许可 |

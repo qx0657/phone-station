@@ -17,6 +17,7 @@
 | [mcp-clients.md](mcp-clients.md) | `mcp.sh clients` | 独立令牌、文件读写与 shell 权限、撤销和隔离边界 |
 | [relay-contract.md](relay-contract.md) | `scripts/check-relay.sh` | 共用协议、会话编号、持久回执、仓库内联合检查与公网隔离验收 |
 | [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/terminal.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku 单次命令与交互终端、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
+| [remote-control.md](remote-control.md) | Android 69 / Mac 32 / 中继 5 | 控制长连接、通知与剪贴板事件订阅、心跳租约、断线恢复与旧版兼容 |
 | [remote-screen.md](remote-screen.md) | Mac 远程实时投屏与录屏 | 独立 WSS、H.264/AAC、原生播放与 MP4、控制输入、权限和断线清理 |
 | [remote-controls.md](remote-controls.md) | Mac 首页远程截屏、亮屏和手电筒 | 三项控件的权限与机型判断、截图下载校验及清理、Shizuku 持续持灯、断线后只核实状态 |
 | [clipboard.md](clipboard.md) | 两端「共享剪贴板」页与 `station_clipboard_*` | Shizuku 后台读取、双向交换、回传和冲突处理、重连基线、敏感内容及文字范围 |

@@ -69,14 +69,20 @@ type health struct {
 }
 
 type gateway struct {
-	state    health
-	remoteMu remoteGate
+	statusToken string
+	state       health
+	remoteMu    remoteGate
 	// Overrides let transport tests use isolated servers without real credentials.
-	localURL    string
-	readConfig  func() (config, error)
-	readClients func() (clientRegistry, error)
-	callRemote  func(context.Context, config, []byte) (relayResponse, error)
-	screenToken func(config) (string, error)
+	localURL                   string
+	readConfig                 func() (config, error)
+	readClients                func() (clientRegistry, error)
+	callRemote                 func(context.Context, config, []byte) (relayResponse, error)
+	screenToken                func(config) (string, error)
+	controlStatus              func(context.Context, config) (controlHealth, error)
+	statusClient               *http.Client
+	statusProfile              string
+	probeProfile, probeSession string
+	probeAt                    time.Time
 }
 
 // One bounded queue shared by App, CLI, and health probes. FIFO within each priority.
@@ -704,6 +710,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMCPError(w, nil, http.StatusInternalServerError, "网关配置不可用")
 		return
 	}
+	if r.URL.Path == "/__subscription" {
+		g.subscriptions(w, r, value)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/__screen/") {
 		g.screen(w, r, value)
 		return
@@ -1055,10 +1065,31 @@ func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	var presence controlHealth
+	// Test overrides without a status transport retain the legacy probe behavior.
+	if g.callRemote == nil || g.controlStatus != nil {
+		var err error
+		presence, err = g.readControlHealth(ctx, value)
+		if err != nil || !presence.Online {
+			g.probeAt = time.Time{}
+			return probeResult{}, true
+		}
+		if presence.Protocol == "control-v1" && presence.Connected && presence.Session != "" &&
+			g.probeProfile == value.remoteProfileKey() && g.probeSession == presence.Session && time.Since(g.probeAt) < time.Minute {
+			g.state.mu.RLock()
+			rtt, healthy := g.state.remoteRTT, g.state.remoteOnline
+			g.state.mu.RUnlock()
+			if healthy {
+				return probeResult{ok: true, rtt: rtt}, true
+			}
+		}
+	}
 	response, err := g.remoteCall(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`))
 	if err != nil || response.Status != http.StatusOK || !validMCPReply(response.Body) {
 		return probeResult{}, true
 	}
+	g.probeAt = time.Now()
+	g.probeProfile, g.probeSession = value.remoteProfileKey(), presence.Session
 	return probeResult{ok: true, rtt: time.Since(start)}, true
 }
 

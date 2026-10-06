@@ -159,6 +159,22 @@ enum NotificationSessionTest {
         expect(remote.calls.count == completed, "remote background notification polls wait after the prior response")
         await tick(remoteSession)
         expect(remote.calls.count > completed, "explicit refresh is not delayed by the background cooldown")
+        let subscribed = Fake(), subscribedSession = subscribed.session()
+        subscribedSession.remote = { true }
+        await tick(subscribedSession)
+        subscribedSession.subscribed(true)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let idleCount = subscribed.calls.count
+        subscribedSession.refresh(background: true)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(subscribed.calls.count == idleCount, "subscription suppresses idle polls")
+        subscribedSession.invalidate()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(subscribed.calls.count > idleCount, "invalidation bypasses cooldown")
+        let activeCount = subscribed.calls.count
+        subscribedSession.subscribed(false)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(subscribed.calls.count > activeCount, "lost subscription immediately reconciles")
         print("Mac 手机通知权限、去重、暂停和断线恢复通过")
     }
     static func expect(_ value: Bool, _ message: String) { if !value { fatalError(message) } }

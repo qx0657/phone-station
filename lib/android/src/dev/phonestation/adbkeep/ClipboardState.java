@@ -45,6 +45,17 @@ final class ClipboardState {
     private String client;
     private String macVersion;
     private long macSeen;
+    private String subscriber = "";
+    private long leaseAt = -1;
+
+    synchronized boolean lease(String id, long now) {
+        if (id.isEmpty()) { subscriber = ""; leaseAt = -1; return false; }
+        if (!id.equals(client) || !(now - macSeen < 10_000L || leased(now))) { return false; }
+        subscriber = id; leaseAt = now; return true;
+    }
+    private boolean leased(long now) {
+        return subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L;
+    }
 
     synchronized Json refresh(Access access, long now) {
         observe(access.read());
@@ -72,7 +83,7 @@ final class ClipboardState {
             boolean current = revision.equals(value(args, "phoneVersion"));
             // Resume only a newer Mac event after a fresh read; the phone version must still match.
             boolean resume = args.get("resume") != null && args.get("resume").boolValue();
-            boolean recent = now - macSeen < (resume ? 30_000L : 10_000L);
+            boolean recent = now - macSeen < (resume ? 30_000L : 10_000L) || leased(now);
             if (automatic && images && changed && current && recent && "image".equals(incoming.kind)
                     && !"locked".equals(phone.kind) && !"sensitive".equals(phone.kind)
                     && value(args, "macImage") != null) {
@@ -131,13 +142,14 @@ final class ClipboardState {
     }
 
     synchronized Json snapshot(long now) {
-        boolean online = mac != null && now - macSeen < 10_000L;
+        boolean online = mac != null && (now - macSeen < 10_000L || leased(now));
         return Json.obj().put("phone", phone == null ? Json.nul() : phone.json())
                 .put("phoneVersion", revision)
                 .put("sessionId", sessionId)
                 .put("mac", online ? mac.json() : Json.nul()).put("macOnline", online);
     }
     synchronized void clear() {
+        subscriber = ""; leaseAt = -1;
         phone = null; mac = null; client = null; macVersion = null; macSeen = 0;
         revision = UUID.randomUUID().toString();
         sessionId = UUID.randomUUID().toString();

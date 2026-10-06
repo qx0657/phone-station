@@ -20,6 +20,14 @@ final class NotificationSyncState {
     private String client = "";
     private long sequence;
     private long lastPoll = -1;
+    private String subscriber = "";
+    private long leaseAt = -1;
+
+    synchronized boolean lease(String id, long now) {
+        if (id.isEmpty()) { subscriber = ""; leaseAt = -1; return false; }
+        if (!id.equals(client) || !online(now)) { return false; }
+        subscriber = id; leaseAt = now; return true;
+    }
     private final ArrayDeque<Event> events = new ArrayDeque<>();
     private final LinkedHashMap<String, String> seen = new LinkedHashMap<>();
 
@@ -100,7 +108,12 @@ final class NotificationSyncState {
         return result.put("events", batch).put("baseline", baseline);
     }
 
-    private boolean online(long now) { return lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS; }
+    synchronized long nextEventExpiry(long now) {
+        prune(now);
+        return events.isEmpty() ? -1 : Math.max(1L, events.peekFirst().time + MAX_AGE_MS - now);
+    }
+    private boolean online(long now) { return (lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS)
+            || (subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L); }
     private String cursor() { return session + ":" + sequence; }
     private long parseCursor(String value) {
         if (value == null || !value.startsWith(session + ":")) { return -1; }
@@ -108,6 +121,7 @@ final class NotificationSyncState {
         catch (NumberFormatException error) { return -1; }
     }
     private void reset() {
+        subscriber = ""; leaseAt = -1;
         session = UUID.randomUUID().toString(); sequence = 0; lastPoll = -1; client = "";
         events.clear(); seen.clear();
     }

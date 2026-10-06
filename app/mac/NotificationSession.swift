@@ -24,6 +24,18 @@ final class NotificationSession: ObservableObject {
     }
     private var nextPoll = Date.distantPast
     private let clientID = UUID().uuidString
+    private var eventsActive = false
+    private var eventVersion = 0
+    var eventClient: String {
+        remote() && receiving && permission == .authorized && connected && remoteBlocker == nil &&
+            snapshot?.enabled == true && snapshot?.accessGranted == true && snapshot?.listenerConnected == true &&
+            (snapshot?.selectedCount ?? 0) > 0 ? clientID : ""
+    }
+    func subscribed(_ active: Bool) {
+        guard eventsActive != active else { return }
+        eventsActive = active; invalidate()
+    }
+    func invalidate() { eventVersion += 1; nextPoll = .distantPast; refresh(background: true) }
     private var policy = NotificationReceivePolicy()
     private var timer: Timer?
     private var inFlight = false
@@ -155,8 +167,13 @@ final class NotificationSession: ObservableObject {
         guard !background || Date() >= nextPoll else { return }
         guard !inFlight, !busy else { return }
         inFlight = true
+        let observedEvent = eventVersion
         Task {
-            defer { inFlight = false; nextPoll = Date().addingTimeInterval(remote() ? 2 : 0) }
+            defer {
+                inFlight = false
+                nextPoll = eventVersion == observedEvent ? Date().addingTimeInterval(remote() ? (eventsActive ? 15 : 2) : 0) : .distantPast
+                if eventVersion != observedEvent { refresh(background: true) }
+            }
             if Date().timeIntervalSince(permissionTime) >= 10 {
                 permission = await readPermission()
                 permissionTime = Date()

@@ -8,11 +8,14 @@
 - shell 与 Python 语法；自动发现 `lib/` 和 `.agents/` 下的 Python 回归。
 - 网关、中继、Android PTY、屏幕媒体四个 Go 模块的 race 检查与 Android/arm64 交叉编译、真实中继持久化与 TLS 联合合约，以及临时网关构建。Linux CI 另验证真实 PTY、目录保持、Ctrl-C、中文与窗口尺寸。配对测试使用这次编出的网关和模拟钥匙串，不依赖旧构建产物。
 - `lib/android/test/*Test.java` 的全部纯 Java 回归，不需要 Android SDK。
+- 实际 Java WSS 客户端与 Go 中继的本机 TLS 联合验证，覆盖错误 SPKI、原操作执行与结果确认；证书、令牌、状态目录均为临时测试数据。Java-WebSocket 与 SLF4J 固定依赖首次从 Maven Central 获取并校验 SHA-256，缓存放在忽略的 `build/third_party/websocket/`，后续复用同摘要缓存。
 - Swift 测试与 Mac 全量源码编译。新增 `*Test.swift` 必须在 `lib/check.py` 登记依赖，漏登会失败。
 
 任何一步失败都会返回非零；完整检查不会因为缺工具而静默略过。`.github/workflows/check.yml` 在 push、pull request 或手动触发时执行同一命令，只授予仓库读取权限，不带部署凭据。Action 配置依据 [checkout](https://github.com/actions/checkout)、[setup-python](https://github.com/actions/setup-python)、[setup-java](https://github.com/actions/setup-java) 和 [setup-go](https://github.com/actions/setup-go) 官方说明。
 
 该入口不连接手机、不启动真实网关、不使用发布签名。Android XML 资源、Shizuku 依赖与完整 APK 用 `lib/android/build.sh` 验证；Mac 可安装包用 `scripts/build-mac-app.sh`。真机权限、系统生命周期、公网网络切换与实际安装恢复需要在对应设备操作的授权范围内另行验证。
+
+控制长连接的验收要区分手机 WSS 就绪、实际 MCP 调用、事件主题被接受与真实变化到达。空订阅或未知 clientId 被拒绝可以验证传输和授权边界，不能证明系统剪贴板回调或通知即时同步已通过；相关实测边界见 [远程控制与事件](remote-control.md#发布和验证边界)。
 
 ## 界面改动验收
 

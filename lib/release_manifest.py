@@ -50,7 +50,7 @@ def source_versions():
     manifest = ET.parse(ROOT / "lib/android/AndroidManifest.xml").getroot()
     android = manifest.attrib["{http://schemas.android.com/apk/res/android}versionName"]
     mac = plistlib.loads((ROOT / "app/mac/Info.plist").read_bytes())
-    return {"android": android, "mac": mac["CFBundleShortVersionString"] + " (" + mac["CFBundleVersion"] + ")", "relay": "4"}
+    return {"android": android, "mac": mac["CFBundleShortVersionString"] + " (" + mac["CFBundleVersion"] + ")", "relay": "5"}
 
 
 def main():

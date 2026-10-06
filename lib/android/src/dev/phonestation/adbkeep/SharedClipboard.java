@@ -19,13 +19,44 @@ final class SharedClipboard {
     private static volatile long macContact = -1;
     private static volatile String phoneKind = "";
     private static volatile String macKind = "";
+    private static volatile long leaseAt = -1;
+    private static IBinder watchedBinder;
+    private static final android.os.Binder changes = new android.os.Binder() {
+        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
+            if (code != FIRST_CALL_TRANSACTION || (android.os.Binder.getCallingUid() != 2000 && android.os.Binder.getCallingUid() != 0)) { return false; }
+            data.enforceInterface(ClipboardUserService.CHANGES);
+            PhoneRelayClient.event("clipboard");
+            return true;
+        }
+    };
+    static synchronized boolean lease(Context context, String client) {
+        long now = SystemClock.elapsedRealtime();
+        boolean active = !client.isEmpty() && StationFeatures.active(context, "clipboard") && STATE.lease(client, now);
+        IBinder binder = connection == null ? null : connection.binder;
+        if (active && binder != null && binder.isBinderAlive()) {
+            if (watchedBinder == binder || watch(binder, changes)) { watchedBinder = binder; leaseAt = now; return true; }
+        }
+        if (watchedBinder != null) { watch(watchedBinder, null); watchedBinder = null; }
+        leaseAt = -1; STATE.lease("", now); return false;
+    }
+    private static boolean watch(IBinder binder, IBinder observer) {
+        Parcel input = Parcel.obtain(), output = Parcel.obtain();
+        try {
+            input.writeInterfaceToken(ClipboardUserService.DESCRIPTOR); input.writeStrongBinder(observer);
+            if (!binder.transact(ClipboardUserService.WATCH, input, output, 0)) { return false; }
+            output.readException();
+            Json result = Json.parse(output.readString());
+            return result.get("watching") != null && result.get("watching").boolValue();
+        } catch (android.os.RemoteException | RuntimeException error) { return false; }
+        finally { input.recycle(); output.recycle(); }
+    }
     // Home diagnostics must not wait on a Shizuku bind or read any clipboard content.
     static Json health(Context context) {
         if (!StationFeatures.master(context)) { return Json.obj().put("shared", shared(context)).put("automatic", automatic(context)).put("ready", false).put("status", "手机工位已暂停").put("reason", "请在首页开启总开关，子开关选择已保留").put("action", "master"); }
         long now = SystemClock.elapsedRealtime();
         Json state = ClipboardAvailability.present(shared(context), automatic(context), (FileMcpService.listening() || PhoneRelayClient.connected()),
                 HostProbe.current(context).linked, ShizukuShell.status(context),
-                macContact >= 0 && now >= macContact && now - macContact < 10_000L, lastFailure,
+                (macContact >= 0 && now >= macContact && now - macContact < 10_000L) || (leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L), lastFailure,
                 HostProbe.remoteOnly(context) && !RemoteStore.permission(context, "personal"));
         return ClipboardAvailability.withContent(state, phoneKind, macKind);
     }
@@ -120,7 +151,7 @@ final class SharedClipboard {
         if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
             close();
             serviceArgs = new Shizuku.UserServiceArgs(new ComponentName(context, ClipboardUserService.class))
-                    .tag("station-clipboard").processNameSuffix("clipboard").daemon(false).version(42);
+                    .tag("station-clipboard").processNameSuffix("clipboard").daemon(false).version(69);
             Connection next = new Connection();
             connection = next;
             try {
@@ -151,7 +182,7 @@ final class SharedClipboard {
         if (connection != null && serviceArgs != null) {
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
-        connection = null; serviceArgs = null; STATE.clear();
+        connection = null; serviceArgs = null; watchedBinder = null; leaseAt = -1; STATE.clear();
         macContact = -1; lastFailure = ""; phoneKind = ""; macKind = "";
     }
     private static void recordKinds(Json state) {

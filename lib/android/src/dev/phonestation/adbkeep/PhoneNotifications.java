@@ -15,6 +15,8 @@ final class PhoneNotifications {
     private static NotificationSyncState state;
     private static final Handler expiry = new Handler(Looper.getMainLooper());
     private static Runnable expire;
+    private static Runnable contentExpire;
+    private static long contentExpiryAt = -1;
     private PhoneNotifications() {}
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences("notification_sync", Context.MODE_PRIVATE);
@@ -46,6 +48,32 @@ final class PhoneNotifications {
         if (on != null && !on.isNull()) { prefs(context).edit().putBoolean("enabled", on.boolValue()).apply(); }
         StationFeatures.publish(context);
         return status(context);
+    }
+    // Content expiry is independent of lease renewals: an idle subscription must
+    // never postpone removal of the bounded notification queue.
+    static synchronized void eventsChanged() {
+        if (state == null) { return; }
+        long now = SystemClock.elapsedRealtime();
+        long delay = state.nextEventExpiry(now);
+        if (delay < 0) {
+            if (contentExpire != null) { expiry.removeCallbacks(contentExpire); }
+            contentExpire = null; contentExpiryAt = -1; return;
+        }
+        if (contentExpiryAt >= now && contentExpiryAt <= now + delay) { return; }
+        if (contentExpire != null) { expiry.removeCallbacks(contentExpire); }
+        contentExpiryAt = now + delay;
+        contentExpire = () -> {
+            synchronized (PhoneNotifications.class) { contentExpiryAt = -1; eventsChanged(); }
+        };
+        expiry.postDelayed(contentExpire, delay);
+    }
+    static synchronized boolean lease(Context context, String id) {
+        NotificationSyncState current = state(context);
+        boolean active = current.lease(id, SystemClock.elapsedRealtime());
+        if (expire != null) { expiry.removeCallbacks(expire); }
+        expire = () -> current.status(SystemClock.elapsedRealtime());
+        expiry.postDelayed(expire, active ? 45_000L : NotificationSyncState.ONLINE_MS);
+        return active;
     }
     static Json status(Context context) { return state(context).status(SystemClock.elapsedRealtime()).put("enabled", enabled(context)).put("stationEnabled", StationFeatures.master(context)); }
     static synchronized Json poll(Context context, Json args) {

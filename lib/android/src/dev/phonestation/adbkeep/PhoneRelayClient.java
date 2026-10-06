@@ -13,19 +13,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
-/** Long-polls the configured relay and runs requests through the existing MCP dispatcher. */
+/** Maintains the control socket, with a negotiated legacy long-poll fallback. */
 final class PhoneRelayClient implements Runnable {
     private static final String TAG = "StationRelay";
     private static final int BODY_LIMIT = 18 * 1024 * 1024;
@@ -49,6 +42,15 @@ final class PhoneRelayClient implements Runnable {
     private Network defaultNetwork;
     private int networkKind = -1;
     private volatile HttpsURLConnection inFlight;
+    private volatile RelaySocket control;
+    private volatile RemoteEvents events;
+
+    static void event(String topic) {
+        PhoneRelayClient client = activeClient;
+        RemoteEvents events = client == null ? null : client.events;
+        if (events != null) { events.changed(topic); }
+    }
+    private long legacyUntil;
 
     static boolean connected() {
         PhoneRelayClient client = activeClient;
@@ -125,6 +127,8 @@ final class PhoneRelayClient implements Runnable {
         ShizukuScreen.close();
         ShizukuTerminal.closeSessions(context, terminalIds);
         retry.changed();
+        RelaySocket socket = control;
+        if (socket != null) { socket.close(); }
         if (networkCallback != null) {
             connectivity.unregisterNetworkCallback(networkCallback);
             networkCallback = null;
@@ -142,7 +146,12 @@ final class PhoneRelayClient implements Runnable {
         long backoff = 1_000L;
         while (!stopped.get()) {
             long revision = retry.revision();
+            long attemptStarted = SystemClock.elapsedRealtime();
             try {
+                if (SystemClock.elapsedRealtime() >= legacyUntil && supportsControl()) {
+                    runControl(revision);
+                    continue;
+                }
                 // A short negotiated idle reply also bounds handover when the
                 // old cellular network stays alive and disconnect cannot wake a read.
                 Json next = post("/v1/phone/poll", "{\"waitMs\":2000}", 5_000);
@@ -155,19 +164,61 @@ final class PhoneRelayClient implements Runnable {
                     continue;
                 }
                 if (stopped.get()) { break; }
-                deliver(operation.string(), next.get("payload").emit());
+                deliver(operation.string(), next.get("payload").emit(), null);
             } catch (Exception error) {
                 setWaiting(error instanceof RelayHttpFailure && (((RelayHttpFailure) error).status == 401
                         || ((RelayHttpFailure) error).status == 403)
                         ? "认证失败 · 请检查令牌" : "连接失败 · 重试中");
                 if (!stopped.get()) {
                     Log.w(TAG, "relay connection failed: " + error.getClass().getSimpleName());
+                    if (SystemClock.elapsedRealtime() - attemptStarted >= 20_000L) { backoff = 1_000L; }
                     retry.pause(backoff, revision);
                     backoff = revision == retry.revision() ? Math.min(backoff * 2L, 30_000L) : 1_000L;
                 }
             }
         }
         setConnected(false);
+    }
+
+    private boolean supportsControl() throws IOException {
+        try {
+            Json info = post("/v1/phone/capabilities", "{}", 5_000);
+            if (!"control-v1".equals(info.get("controlProtocol").string())) { throw new IOException("unsupported control protocol"); }
+            return true;
+        } catch (RelayHttpFailure failure) {
+            if (failure.status != 404) { throw failure; }
+            legacyUntil = SystemClock.elapsedRealtime() + 300_000L;
+            return false;
+        }
+    }
+
+    private void runControl(long revision) throws Exception {
+        RelaySocket socket = new RelaySocket(endpoint, RemoteStore.decryptToken(encryptedToken),
+                RelayTls.context(pin).getSocketFactory(), () -> {
+                    synchronized (retry) {
+                        if (!stopped.get() && revision == retry.revision()) { setConnected(true); }
+                    }
+                }, () -> {
+                    synchronized (retry) {
+                        if (!stopped.get() && revision == retry.revision()) { setWaiting("连接失败 · 重试中"); }
+                    }
+                });
+        control = socket;
+        try {
+            if (stopped.get() || revision != retry.revision()) { return; }
+            socket.open();
+            events = new RemoteEvents(context, socket, this::authorize, () -> activeClient == this);
+            while (!stopped.get() && revision == retry.revision()) {
+                Json next = socket.next();
+                if (stopped.get() || revision != retry.revision()) { break; }
+                if ("subscribe".equals(next.get("type").string())) { events.update(next); }
+                else { deliver(next.get("operationId").string(), next.get("payload").emit(), socket); }
+            }
+        } finally {
+            if (events != null) { events.close(); events = null; }
+            socket.close();
+            if (control == socket) { control = null; }
+        }
     }
 
     private void watchNetwork() {
@@ -216,6 +267,8 @@ final class PhoneRelayClient implements Runnable {
             setWaiting("连接中");
         }
         StationNotifications.connectionChanged();
+        RelaySocket socket = control;
+        if (socket != null) { socket.close(); }
         HttpsURLConnection connection = inFlight;
         if (connection != null) {
             // Never block ConnectivityManager's callback thread on socket cleanup.
@@ -229,7 +282,8 @@ final class PhoneRelayClient implements Runnable {
         if (!value || stopped.get()) { setWaiting("连接失败 · 重试中"); return; }
         long now = SystemClock.elapsedRealtime();
         String previous = state.label(now);
-        state.confirmed(now);
+        RelaySocket socket = control;
+        state.confirmed(now, socket != null && socket.isReady() ? RelaySocket.FRESH_MS : RelayConnection.FRESH_MS);
         if (previous.equals(state.label(now))) { return; }
         // 旧客户端退出时不能清掉新客户端的状态。通知始终重读当前客户端。
         StationNotifications.connectionChanged();
@@ -241,7 +295,7 @@ final class PhoneRelayClient implements Runnable {
         if (!previous.equals(phase)) { StationNotifications.connectionChanged(); }
     }
 
-    private void deliver(String operationID, String payload) throws Exception {
+    private void deliver(String operationID, String payload, RelaySocket socket) throws Exception {
         FileOps files = FileOps.device();
         files.setMediaNotice(new MediaScan(context));
         McpProtocol.Reply reply = McpProtocol.handle(
@@ -256,6 +310,15 @@ final class PhoneRelayClient implements Runnable {
                 .put("response", response)
                 .emit();
 
+        if (socket != null) {
+            try {
+                int status = socket.result(result);
+                if (status == 200 || status == 404 || status == 409 || status == 410) { return; }
+            } catch (IOException unavailable) {
+                // Only the original result may be retried; the dispatcher is never re-entered.
+            }
+            socket.close();
+        }
         long deadline = System.currentTimeMillis() + RESULT_WINDOW_MS;
         long backoff = 1_000L;
         boolean attempted = false;
@@ -300,7 +363,7 @@ final class PhoneRelayClient implements Runnable {
             connection = (HttpsURLConnection) new URL(endpoint + path).openConnection();
             inFlight = connection;
             if (revision != retry.revision()) { throw new IOException("network changed before request"); }
-            connection.setSSLSocketFactory(pinnedContext(pin).getSocketFactory());
+            connection.setSSLSocketFactory(RelayTls.context(pin).getSocketFactory());
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(5_000);
@@ -322,7 +385,7 @@ final class PhoneRelayClient implements Runnable {
             }
             Json reply = Json.parse(new String(response, StandardCharsets.UTF_8));
             synchronized (retry) {
-                if (revision == retry.revision()) { setConnected(true); }
+                if (revision == retry.revision() && !path.equals("/v1/phone/capabilities")) { setConnected(true); }
             }
             return reply;
         } finally {
@@ -330,53 +393,6 @@ final class PhoneRelayClient implements Runnable {
             if (connection != null) {
                 connection.disconnect();
             }
-        }
-    }
-
-    private static SSLContext pinnedContext(final String expectedPin) throws IOException {
-        try {
-            X509TrustManager manager = new X509TrustManager() {
-                @Override
-                public void checkClientTrusted(X509Certificate[] chain, String authType)
-                        throws CertificateException {
-                    throw new CertificateException("client certificate is not expected");
-                }
-
-                @Override
-                public void checkServerTrusted(X509Certificate[] chain, String authType)
-                        throws CertificateException {
-                    if (chain == null || chain.length == 0) {
-                        throw new CertificateException("relay certificate is missing");
-                    }
-                    try {
-                        byte[] digest = MessageDigest.getInstance("SHA-256")
-                                .digest(chain[0].getPublicKey().getEncoded());
-                        StringBuilder hex = new StringBuilder(digest.length * 2);
-                        for (byte item : digest) {
-                            hex.append(String.format(Locale.US, "%02x", item & 0xff));
-                        }
-                        if (!MessageDigest.isEqual(
-                                hex.toString().getBytes(StandardCharsets.US_ASCII),
-                                expectedPin.getBytes(StandardCharsets.US_ASCII))) {
-                            throw new CertificateException("relay certificate pin did not match");
-                        }
-                    } catch (CertificateException error) {
-                        throw error;
-                    } catch (Exception error) {
-                        throw new CertificateException("cannot verify relay certificate", error);
-                    }
-                }
-
-                @Override
-                public X509Certificate[] getAcceptedIssuers() {
-                    return new X509Certificate[0];
-                }
-            };
-            SSLContext ssl = SSLContext.getInstance("TLS");
-            ssl.init(null, new TrustManager[] {manager}, new SecureRandom());
-            return ssl;
-        } catch (Exception error) {
-            throw new IOException("cannot configure relay TLS", error);
         }
     }
 

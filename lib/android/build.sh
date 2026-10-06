@@ -31,6 +31,9 @@ trap 'rm -rf "$work"' EXIT
 
 python3 "$here/test_signing_key.py"
 
+websocket_jars=("${(@f)$(python3 "$here/websocket_deps.py")}")
+websocket_cp=${(j.:.)websocket_jars}
+
 print -r -- "检查打开时机…"
 javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/KeeperPolicy.java" \
@@ -79,6 +82,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/HostLinkTest.java" \
   "$here/test/RelayRetryTest.java" \
   "$here/test/RelayConnectionTest.java" \
+  "$here/test/EventLeaseTest.java" \
   "$here/test/RelayProfileTest.java" \
   "$here/test/RemotePolicyTest.java" \
   "$here/test/FeaturePolicyTest.java" \
@@ -111,6 +115,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.KeeperCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.HostLinkTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayRetryTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayConnectionTest
+java -cp "$work/policy" dev.phonestation.adbkeep.EventLeaseTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayProfileTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RemotePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FeaturePolicyTest
@@ -173,13 +178,16 @@ done
 shizuku_cp=${(j.:.)shizuku_jars}
 
 print -r -- "编译…"
-javac --release 17 -classpath "$jar:$shizuku_cp" -d "$work/classes" \
+javac --release 17 -classpath "$jar:$shizuku_cp:$websocket_cp" -d "$work/classes" \
   "$work/gen/dev/phonestation/adbkeep/R.java" \
   "$here"/src/dev/phonestation/adbkeep/*.java
 mkdir -p "$work/dex"
 class_files=("${(@f)$(find "$work/classes" -name '*.class')}")
-"$bt/d8" --min-api 29 --lib "$jar" --output "$work/dex" "${class_files[@]}" "${shizuku_jars[@]}"
+"$bt/d8" --min-api 29 --lib "$jar" --output "$work/dex" "${class_files[@]}" "${shizuku_jars[@]}" "${websocket_jars[@]}"
 zip -j -q "$work/unsigned.apk" "$work/dex/classes.dex"
+mkdir -p "$work/META-INF/services"
+unzip -p "$repo/build/third_party/websocket/slf4j-nop-2.0.13.jar" META-INF/services/org.slf4j.spi.SLF4JServiceProvider > "$work/META-INF/services/org.slf4j.spi.SLF4JServiceProvider"
+(cd "$work" && zip -q unsigned.apk META-INF/services/org.slf4j.spi.SLF4JServiceProvider)
 
 print -r -- "构建 Android PTY…"
 go -C "$here/terminal" test -race ./...
@@ -203,7 +211,9 @@ fi
 cp "$screen_server" "$work/assets/scrcpy-server"
 cp "$repo/docs/licenses/scrcpy.txt" "$work/assets/scrcpy-license.txt"
 cp "$repo/docs/licenses/coder-websocket.txt" "$work/assets/coder-websocket-license.txt"
-(cd "$work" && zip -q unsigned.apk assets/screen-arm64 assets/scrcpy-server assets/scrcpy-license.txt assets/coder-websocket-license.txt)
+cp "$repo/docs/licenses/java-websocket.txt" "$work/assets/java-websocket-license.txt"
+cp "$repo/docs/licenses/slf4j.txt" "$work/assets/slf4j-license.txt"
+(cd "$work" && zip -q unsigned.apk assets/screen-arm64 assets/scrcpy-server assets/scrcpy-license.txt assets/coder-websocket-license.txt assets/java-websocket-license.txt assets/slf4j-license.txt)
 
 mkdir -p "$repo/build"
 # 签过名的钥匙不放进 build/。删掉构建目录或换一台电脑时，把这一份拷到同一路径再编，才不用卸掉重装。

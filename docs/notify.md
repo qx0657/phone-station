@@ -10,7 +10,7 @@ Android 47 新增 `PhoneNotificationListener`，由系统按 `BIND_NOTIFICATION_
 
 监听先核对当前用户、开关、系统授权、监听连接、包名白名单和 Mac 接收会话，再读取 extras。手机工位自身、常驻通知、分组汇总及空内容跳过。标题来自 `EXTRA_TITLE`，正文依次取 `EXTRA_BIG_TEXT`、`EXTRA_TEXT`、最后一条 `EXTRA_TEXT_LINES`。标题最多 200 个、正文最多 4000 个 UTF-16 单元，截断不拆开 emoji 的代理对。Android 15 对检测到验证码的通知可能隐藏内容，遵循 [Android 15 通知监听保护](https://developer.android.com/about/versions/15/behavior-changes-all#otp-redaction)，不尝试绕过。
 
-`NotificationSyncState` 是可在电脑上测试的纯 Java 状态。在线会话租期 15 秒，队列最多 64 条、事件最多保留 20 秒；到期安排主线程清理，即使没有后续请求也不长期留存。选择变化、关闭同步、授权撤销或监听断开会更换会话并清除队列。首个 cursor、未知 cursor、新客户端及租期过期都只建立基线，不返回先前事件。Mac 未接收时不收集正文。去重按通知 key 和内容；内容改变时产生新事件，Mac 用包名与 key 的 SHA-256 作为系统条目标识。
+`NotificationSyncState` 是可在电脑上测试的纯 Java 状态。轮询会话租期 15 秒；Android 69 / Mac 32 / 中继 5 的 [事件订阅](remote-control.md) 可为已有同 clientId 会话续租，单次最长 45 秒。队列最多 64 条、事件最多保留 20 秒，正文过期计时不随订阅续租延长；到期安排主线程清理，即使没有后续请求也不长期留存。选择变化、关闭同步、授权撤销或监听断开会更换会话并清除队列。首个 cursor、未知 cursor、新客户端及租期过期都只建立基线，不返回先前事件。Mac 未接收时不收集正文。去重按通知 key 和内容；内容改变时产生新事件，Mac 用包名与 key 的 SHA-256 作为系统条目标识。
 
 同一个 MCP 服务新增：
 
@@ -20,7 +20,7 @@ Android 47 新增 `PhoneNotificationListener`，由系统按 `BIND_NOTIFICATION_
 | `station_notification_configure` | 必须带布尔值 `enabled`；不改变应用白名单，也不授予通知使用权 |
 | `station_notification_poll` | Mac 传本次运行的 `clientId` 和上次成功处理的 `cursor`，刷新接收会话；首次和断线后省略 cursor；非只读、不自动重放 |
 
-Mac `NotificationSession` 每 2 秒检查。未允许 Mac 系统通知或本机暂停时，只查状态、不接收正文；通知授权只由页面按钮申请。暂停、路由变化及未知结果会丢弃接收基线并收起横幅，不重放旧请求。通知内容不写 App 偏好或日志；进入 macOS 通知中心后由系统管理。没有操作按钮，也不联动清除。
+Mac `NotificationSession` 在轮询模式下每 2 秒检查。事件订阅确认后按变化信号立即读取，保留 15 秒补查；断线或订阅失效后立即补查并恢复轮询。未允许 Mac 系统通知或本机暂停时，只查状态、不接收正文；通知授权只由页面按钮申请。暂停、路由变化及未知结果会丢弃接收基线并收起横幅，不重放旧请求。通知内容不写 App 偏好或日志；进入 macOS 通知中心后由系统管理。没有操作按钮，也不联动清除。
 
 Android 48 / Mac 0.1.0 (6) 默认用 `NotificationBannerCenter` 的非激活 `NSPanel` 显示自定义横幅，左侧使用手机真实应用图标。新增只读 `station_notification_icon`：必须已开启同步、已授予通知使用权且包名仍在白名单里，只返回 96×96 PNG，最多 64 KiB；省略包名时读第一个已选应用供预览。不读取联系人头像、未选应用或通知正文。Mac 图标只在内存缓存，最长 10 分钟、最多 48 个；失败 30 秒后可重试，每次读取最长 2 秒，失败不丢文字通知。Mac 拒绝超限或无效 PNG，图标缺失时使用系统 `app.fill` 符号。
 

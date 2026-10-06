@@ -178,6 +178,7 @@ enum ClipboardSessionTest {
                      "the single share switch always enables automatic syncing")
         await imageTests()
         await remotePollingTests()
+        await eventSubscriptionTests()
         await schedulerTests()
         print("ClipboardSessionTest passed")
     }
@@ -243,6 +244,28 @@ enum ClipboardSessionTest {
         fake.copy("new-copy")
         session.refresh(); await waitFor { fake.calls.count > count }
         precondition(fake.calls.last!.1["macText"] as? String == "new-copy", "new copies bypass the idle delay")
+    }
+    @MainActor static func eventSubscriptionTests() async {
+        let fake = Fake(), session = fake.session()
+        session.remote = { true }
+        session.refresh(); await waitFor { session.connected }
+        precondition(!session.eventClient.isEmpty)
+        var count = fake.calls.count
+        session.subscribed(true); await waitFor { fake.calls.count > count }
+        for _ in 0..<100 { await Task.yield() }
+        count = fake.calls.count; fake.time += 5
+        session.refresh(); for _ in 0..<100 { await Task.yield() }
+        precondition(fake.calls.count == count, "confirmed subscription suppresses idle polling")
+        fake.holdExchange = true; session.invalidate(); await waitFor { fake.exchangeWait != nil }
+        count = fake.calls.count; session.invalidate() // A second change while the read is in flight must survive its completion.
+        fake.exchangeWait!.resume(returning: fake.reply())
+        await waitFor { fake.calls.count > count }
+        for _ in 0..<100 { await Task.yield() }
+        count = fake.calls.count; session.subscribed(false)
+        await waitFor { fake.calls.count > count }
+        for _ in 0..<100 { await Task.yield() }
+        count = fake.calls.count; fake.time += 3; session.refresh()
+        await waitFor { fake.calls.count > count }
     }
     @MainActor static func schedulerTests() async {
         let queue = StationRPCQueue()

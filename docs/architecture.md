@@ -9,7 +9,8 @@ flowchart LR
   Gateway --> Forward[本机 adb 转发 :18766]
   Forward --> Phone[Android MCP :8765]
   Gateway -->|HTTPS 与电脑角色令牌| Relay[公网中继]
-  Phone -->|HTTPS 长轮询与手机角色令牌| Relay
+  Phone <-->|WSS 控制长连接与手机角色令牌| Relay
+  Gateway <-->|WSS 变化订阅| Relay
   Phone --> Files[普通文件与应用能力]
   Phone --> Shizuku[已授权 Shizuku UserService]
   App --> ADB[本机 adb / scrcpy]
@@ -18,7 +19,7 @@ flowchart LR
   Gateway -->|WebSocket| App
 ```
 
-手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，中继 3 另提供独立 WSS 屏幕连接；不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。
+手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，中继 3 另提供独立 WSS 屏幕连接；不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。Android 69 / Mac 32 / 中继 5 的控制长连接、事件订阅和旧版兼容见 [远程控制与事件](remote-control.md)。
 
 | 组件 | 源码 | 职责与交付 |
 |---|---|---|

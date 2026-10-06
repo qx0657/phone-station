@@ -14,6 +14,10 @@ public final class ClipboardUserService extends Binder {
     static final String DESCRIPTOR = "dev.phonestation.adbkeep.ClipboardUserService";
     static final int READ = IBinder.FIRST_CALL_TRANSACTION;
     static final int WRITE = READ + 1;
+    static final int WATCH = READ + 2;
+    static final String CHANGES = "dev.phonestation.adbkeep.ClipboardChanges";
+    private IBinder observer;
+    private Object systemListener;
     private final int ownerUid;
     private Object clipboard;
 
@@ -29,14 +33,16 @@ public final class ClipboardUserService extends Binder {
             System.exit(0);
             return true;
         }
-        if (code != READ && code != WRITE) { return super.onTransact(code, data, reply, flags); }
+        if (code != READ && code != WRITE && code != WATCH) { return super.onTransact(code, data, reply, flags); }
         data.enforceInterface(DESCRIPTOR);
         if (Binder.getCallingUid() != ownerUid) { throw new SecurityException("只允许手机工位调用"); }
         long identity = Binder.clearCallingIdentity();
         Json result;
         try {
             if (Process.myUid() != 2000 && Process.myUid() != 0) { throw new SecurityException("没有 shell/root 身份"); }
-            if (code == WRITE) {
+            if (code == WATCH) {
+                result = watch(data.readStrongBinder());
+            } else if (code == WRITE) {
                 String text = data.readString();
                 if (text == null || text.length() > ClipboardState.LIMIT) { throw new IllegalArgumentException("文字太长"); }
                 invoke("setPrimaryClip", ClipData.newPlainText("手机工位", text));
@@ -53,7 +59,32 @@ public final class ClipboardUserService extends Binder {
         reply.writeString(result.emit());
         return true;
     }
-    private Object invoke(String name, ClipData clip) throws Exception {
+    private synchronized Json watch(IBinder target) throws Exception {
+        if (java.util.Objects.equals(observer, target)) { return Json.obj().put("watching", target != null); }
+        if (systemListener != null) { invoke("removePrimaryClipChangedListener", systemListener); systemListener = null; }
+        observer = target;
+        if (target != null) {
+            Binder changes = new Binder() {
+                @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+                    if (code == INTERFACE_TRANSACTION) { reply.writeString("android.content.IOnPrimaryClipChangedListener"); return true; }
+                    if (code != FIRST_CALL_TRANSACTION) { return super.onTransact(code, data, reply, flags); }
+                    data.enforceInterface("android.content.IOnPrimaryClipChangedListener");
+                    if (Binder.getCallingUid() != 1000 && Binder.getCallingUid() != Process.myUid()) { return false; }
+                    Parcel signal = Parcel.obtain();
+                    long identity = Binder.clearCallingIdentity();
+                    try { signal.writeInterfaceToken(CHANGES); target.transact(FIRST_CALL_TRANSACTION, signal, null, FLAG_ONEWAY); }
+                    finally { signal.recycle(); Binder.restoreCallingIdentity(identity); }
+                    return true;
+                }
+            };
+            Object listener = Class.forName("android.content.IOnPrimaryClipChangedListener$Stub")
+                    .getMethod("asInterface", IBinder.class).invoke(null, changes);
+            try { invoke("addPrimaryClipChangedListener", listener); systemListener = listener; }
+            catch (Exception error) { observer = null; throw error; }
+        }
+        return Json.obj().put("watching", target != null);
+    }
+    private Object invoke(String name, Object clip) throws Exception {
         if (clipboard == null) {
             IBinder binder = (IBinder) Class.forName("android.os.ServiceManager")
                     .getMethod("getService", String.class).invoke(null, "clipboard");
@@ -63,7 +94,7 @@ public final class ClipboardUserService extends Binder {
         for (Method method : clipboard.getClass().getMethods()) {
             if (!name.equals(method.getName())) { continue; }
             Class<?>[] types = method.getParameterTypes();
-            if (clip != null && (types.length == 0 || types[0] != ClipData.class)) { continue; }
+            if (clip != null && (types.length == 0 || !types[0].isInstance(clip))) { continue; }
             Object[] values = ClipboardMethods.arguments(types, clip != null, clip, ownerUid / 100_000);
             if (values == null) { continue; }
             method.setAccessible(true);

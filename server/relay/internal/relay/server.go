@@ -35,16 +35,19 @@ type Config struct {
 }
 
 type Server struct {
-	config  Config
-	screens screenHub
-	device  *device
-	store   *diskStore
+	config    Config
+	screens   screenHub
+	eventsHub eventHub
+	device    *device
+	store     *diskStore
 }
 
 type device struct {
 	mu             sync.Mutex
 	changed        chan struct{}
 	polling        bool
+	control        bool
+	controlSession string
 	pollGeneration uint64
 	pollCancel     chan struct{}
 	lastSeen       time.Time
@@ -70,8 +73,9 @@ type operation struct {
 
 func New(config Config) *Server {
 	return &Server{
-		config: config,
-		device: &device{changed: make(chan struct{}), operations: make(map[string]*operation)},
+		config:    config,
+		eventsHub: eventHub{changed: make(chan struct{})},
+		device:    &device{changed: make(chan struct{}), operations: make(map[string]*operation)},
 	}
 }
 
@@ -122,6 +126,7 @@ func Open(config Config) (*Server, error) {
 
 func (s *Server) Close() error {
 	s.screens.close()
+	s.eventsHub.close()
 	s.device.mu.Lock()
 	defer s.device.mu.Unlock()
 	if s.device.closed {
@@ -180,6 +185,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/screen/") {
 		s.screen(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/desktop/events" {
+		if s.authorized(w, r, s.config.DesktopToken) {
+			s.events(w, r)
+		}
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/phone/capabilities" {
+		if s.authorized(w, r, s.config.PhoneToken) {
+			var input struct{}
+			if decode(w, r, &input) {
+				writeJSON(w, 200, map[string]string{"controlProtocol": "control-v1"})
+			}
+		}
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/phone/control" {
+		if s.authorized(w, r, s.config.PhoneToken) {
+			s.control(w, r)
+		}
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/phone/poll" {
@@ -259,17 +285,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 		d.mu.Unlock()
 		return
 	}
-	if d.polling {
-		// Wi-Fi may disappear without delivering a TCP close. Let the same
-		// authenticated phone take over its idle poll on the new network.
-		close(d.pollCancel)
-	}
-	d.polling = true
-	d.pollGeneration++
-	generation := d.pollGeneration
-	replaced := make(chan struct{})
-	d.pollCancel = replaced
-	d.lastSeen = time.Now()
+	generation, replaced := s.claimPhoneLocked(false)
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
@@ -293,55 +309,16 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.lastSeen = time.Now()
-		if op := d.active; op != nil && op.state == "queued" {
-			if time.Since(op.createdAt) > callTimeout {
-				op.state = "expired"
-				op.payload = nil
-				op.completedAt = time.Now()
-				if !s.persist(op) {
-					s.available(w)
-					d.mu.Unlock()
-					return
-				}
-				if !op.doneClosed {
-					close(op.done)
-					op.doneClosed = true
-				}
-				d.active = nil
-				signal(d)
-				d.mu.Unlock()
-				continue
-			}
-			op.state = "running"
-			op.startedAt = time.Now()
-			if !s.persist(op) {
-				s.available(w)
-				d.mu.Unlock()
-				return
-			}
-			out := pollReply{OperationID: op.id, Payload: op.payload}
+		out, err := s.nextOperationLocked()
+		if err != nil {
+			s.available(w)
+			d.mu.Unlock()
+			return
+		}
+		if out != nil {
 			d.mu.Unlock()
 			writeJSON(w, http.StatusOK, out)
 			return
-		}
-		if op := d.active; op != nil && op.state == "running" &&
-			(time.Since(op.startedAt) > callTimeout || (op.probe && time.Since(op.startedAt) > 15*time.Second)) {
-			op.state = "unknown"
-			op.completedAt = time.Now()
-			if !s.persist(op) {
-				s.available(w)
-				d.mu.Unlock()
-				return
-			}
-			op.payload = nil
-			if !op.doneClosed {
-				close(op.done)
-				op.doneClosed = true
-			}
-			d.active = nil
-			signal(d)
-			d.mu.Unlock()
-			continue
 		}
 		changed := d.changed
 		d.mu.Unlock()
@@ -359,41 +336,106 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Both transports share one dispatch generation and the same durable transition.
+// A new authenticated network replaces the old reader without redispatching running work.
+func (s *Server) claimPhoneLocked(control bool) (uint64, <-chan struct{}) {
+	d := s.device
+	if d.polling {
+		close(d.pollCancel)
+	}
+	d.polling = true
+	d.control = control
+	d.controlSession = ""
+	d.pollGeneration++
+	d.pollCancel = make(chan struct{})
+	d.lastSeen = time.Now()
+	return d.pollGeneration, d.pollCancel
+}
+
+func (s *Server) nextOperationLocked() (*pollReply, error) {
+	d := s.device
+	for {
+		if op := d.active; op != nil && op.state == "queued" {
+			if time.Since(op.createdAt) > callTimeout {
+				op.state = "expired"
+				op.payload = nil
+				op.completedAt = time.Now()
+				if !s.persist(op) {
+					return nil, errors.New("relay storage unavailable")
+				}
+				if !op.doneClosed {
+					close(op.done)
+					op.doneClosed = true
+				}
+				d.active = nil
+				signal(d)
+				continue
+			}
+			op.state = "running"
+			op.startedAt = time.Now()
+			if !s.persist(op) {
+				return nil, errors.New("relay storage unavailable")
+			}
+			out := pollReply{OperationID: op.id, Payload: op.payload}
+			return &out, nil
+		}
+		if op := d.active; op != nil && op.state == "running" &&
+			(time.Since(op.startedAt) > callTimeout || (op.probe && time.Since(op.startedAt) > 15*time.Second)) {
+			op.state = "unknown"
+			op.completedAt = time.Now()
+			if !s.persist(op) {
+				return nil, errors.New("relay storage unavailable")
+			}
+			op.payload = nil
+			if !op.doneClosed {
+				close(op.done)
+				op.doneClosed = true
+			}
+			d.active = nil
+			signal(d)
+			continue
+		}
+
+		return nil, nil
+	}
+}
+
 func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	var input resultRequest
 	if !decode(w, r, &input) {
 		return
 	}
+	status, reply := s.acceptResult(input)
+	writeJSON(w, status, reply)
+}
+
+// Confirmation is sent only after the result body and receipt are durably committed.
+func (s *Server) acceptResult(input resultRequest) (int, any) {
 	if input.OperationID == "" || input.Response.Status < 200 || input.Response.Status > 599 ||
 		(input.Response.Status != http.StatusAccepted && (len(input.Response.Body) == 0 || !json.Valid(input.Response.Body))) ||
 		(input.Response.Status == http.StatusAccepted && len(input.Response.Body) != 0 && !json.Valid(input.Response.Body)) {
-		writeError(w, http.StatusBadRequest, "invalid result")
-		return
+		return http.StatusBadRequest, map[string]string{"error": "invalid result"}
 	}
 	d := s.device
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if !s.available(w) {
-		return
+	if s.device.closed || (s.store != nil && s.store.err != nil) {
+		return http.StatusServiceUnavailable, map[string]string{"error": "relay storage unavailable; outcome may be unknown"}
 	}
 	d.lastSeen = time.Now()
 	op := d.operations[input.OperationID]
 	if len(input.OperationID) > 128 {
-		writeError(w, http.StatusBadRequest, "invalid operation ID")
-		return
+		return http.StatusBadRequest, map[string]string{"error": "invalid operation ID"}
 	}
 	if op == nil || d.active != op || op.state != "running" {
 		if op != nil && op.state == "complete" && op.response.Status == input.Response.Status &&
 			op.responseDigest == sha256.Sum256(input.Response.Body) {
-			writeJSON(w, http.StatusOK, map[string]string{"state": "complete"})
-			return
+			return http.StatusOK, map[string]string{"state": "complete"}
 		}
 		if op != nil && op.state == "complete" {
-			writeError(w, http.StatusConflict, "operation already completed with a different result")
-			return
+			return http.StatusConflict, map[string]string{"error": "operation already completed with a different result"}
 		}
-		writeError(w, http.StatusNotFound, "operation is not active")
-		return
+		return http.StatusNotFound, map[string]string{"error": "operation is not active"}
 	}
 	next := *op
 	next.response = responseEnvelope{
@@ -407,20 +449,17 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	if err := s.prune(time.Now(), &next); err != nil {
 		s.store.err = err
 		signal(s.device)
-		s.available(w)
-		return
+		return http.StatusServiceUnavailable, map[string]string{"error": "relay storage unavailable; outcome may be unknown"}
 	}
 	if s.store != nil && next.response.Body != nil {
 		if err := s.store.atomic(s.store.name(next.id)+".body", next.response.Body); err != nil {
 			s.store.err = err
 			signal(s.device)
-			s.available(w)
-			return
+			return http.StatusServiceUnavailable, map[string]string{"error": "relay storage unavailable; outcome may be unknown"}
 		}
 	}
 	if !s.persist(&next) {
-		s.available(w)
-		return
+		return http.StatusServiceUnavailable, map[string]string{"error": "relay storage unavailable; outcome may be unknown"}
 	}
 	op.response, op.responseDigest = next.response, next.responseDigest
 	op.payload, op.state, op.completedAt = next.payload, next.state, next.completedAt
@@ -430,7 +469,7 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 		op.doneClosed = true
 	}
 	signal(d)
-	writeJSON(w, http.StatusOK, map[string]string{"state": "complete"})
+	return http.StatusOK, map[string]string{"state": "complete"}
 }
 
 func (s *Server) call(w http.ResponseWriter, r *http.Request) {
@@ -634,12 +673,14 @@ func (s *Server) status(w http.ResponseWriter) {
 	}
 	online := !d.lastSeen.IsZero() && time.Since(d.lastSeen) <= phoneFresh
 	lastSeen := d.lastSeen
+	control := d.control && d.polling && online
+	controlSession := d.controlSession
 	d.mu.Unlock()
 	var seen *time.Time
 	if !lastSeen.IsZero() {
 		seen = &lastSeen
 	}
-	writeJSON(w, http.StatusOK, statusReply{DeviceID: s.config.DeviceID, Online: online, LastSeen: seen, Version: "2", OperationEpoch: epoch, Durable: s.store != nil})
+	writeJSON(w, http.StatusOK, statusReply{DeviceID: s.config.DeviceID, Online: online, LastSeen: seen, Version: "2", OperationEpoch: epoch, Durable: s.store != nil, ControlProtocol: "control-v1", ControlConnected: control, ControlSession: controlSession})
 }
 
 func (s *Server) operationStatus(w http.ResponseWriter, r *http.Request) {
@@ -806,12 +847,15 @@ type responseEnvelope struct {
 }
 
 type statusReply struct {
-	DeviceID       string     `json:"deviceId"`
-	Online         bool       `json:"online"`
-	LastSeen       *time.Time `json:"lastSeen,omitempty"`
-	Version        string     `json:"version"`
-	OperationEpoch string     `json:"operationEpoch,omitempty"`
-	Durable        bool       `json:"durable"`
+	ControlSession   string     `json:"controlSession,omitempty"`
+	ControlProtocol  string     `json:"controlProtocol,omitempty"`
+	ControlConnected bool       `json:"controlConnected"`
+	DeviceID         string     `json:"deviceId"`
+	Online           bool       `json:"online"`
+	LastSeen         *time.Time `json:"lastSeen,omitempty"`
+	Version          string     `json:"version"`
+	OperationEpoch   string     `json:"operationEpoch,omitempty"`
+	Durable          bool       `json:"durable"`
 }
 
 type operationReply struct {

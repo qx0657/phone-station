@@ -220,7 +220,7 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 
 ## 文件
 
-读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，打开固定的本机网关地址并给出 `Authorization` 头。网关优先走 adb，无线断开时切到已配置的中继；完整 adb 与本地投屏、录屏脚本仍需本地 adb，Mac 的远程实时投屏与录屏见 [远程屏幕](docs/remote-screen.md)，远程 shell 和安装升级见 [远程命令与安装](#远程命令与安装)。远程通道转发手机工位已有的 MCP 工具。手机与 Mac 可各自配置；通过 adb 同时配置或清除两端资料时才需要 adb 在线。
+读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，打开固定的本机网关地址并给出 `Authorization` 头。网关优先走 adb，无线断开时切到已配置的中继；完整 adb 与本地投屏、录屏脚本仍需本地 adb，Mac 的远程实时投屏与录屏见 [远程屏幕](docs/remote-screen.md)，远程 shell 和安装升级见 [远程命令与安装](#远程命令与安装)。远程通道转发手机工位已有的 MCP 工具。Android 69 / Mac 32 / 中继 5 增加控制长连接及通知、剪贴板变化订阅，旧版兼容与部署状态见 [远程控制与事件](docs/remote-control.md)。手机与 Mac 可各自配置；通过 adb 同时配置或清除两端资料时才需要 adb 在线。
 
 Mac 19 起，`./scripts/mcp.sh clients create '资料读取' status,files.read` 可生成独立客户端令牌，按需授予状态、文件读写或 shell 权限；`clients list` 查看，`clients revoke <编号>` 撤销。创建时只显示一次令牌，详细范围见 [客户端权限](docs/mcp-clients.md)。
 

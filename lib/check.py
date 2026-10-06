@@ -10,9 +10,11 @@ import sys
 import tempfile
 
 from doc_links import check as check_doc_links
+from android.websocket_deps import jars as websocket_jars
 
 ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
+    "RemoteEventSession": ["RemoteEventSession"],
     "RemoteScreenSession": ["ClipboardProtocol", "ScreenVideoProtocol", "RemoteScreenSession"],
     "ScreenVideoProtocol": ["ScreenVideoProtocol"],
     "ReconnectPolicy": ["Reconnect"],
@@ -100,10 +102,11 @@ def main():
         for test in tests:
             print(f"运行 {test.relative_to(ROOT)}", flush=True)
             run([sys.executable, test])
+        java_cp = os.pathsep.join(str(p) for p in websocket_jars())
         java_tests = sorted((ROOT / "lib/android/test").glob("*Test.java"))
-        run(["javac", "--release", "17", "-sourcepath", ROOT / "lib/android/src", "-d", work / "java", *java_tests])
+        run(["javac", "--release", "17", "-classpath", java_cp, "-sourcepath", ROOT / "lib/android/src", "-d", work / "java", *java_tests])
         for test in java_tests:
-            run(["java", "-cp", work / "java", "dev.phonestation.adbkeep." + test.stem])
+            run(["java", "-cp", str(work / "java") + os.pathsep + java_cp, "dev.phonestation.adbkeep." + test.stem])
         print(f"Java 测试 {len(java_tests)} 个通过", flush=True)
         if args.core:
             print("跨平台检查通过；--core 未验证 Swift。")

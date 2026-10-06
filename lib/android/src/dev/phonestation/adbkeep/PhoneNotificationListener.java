@@ -37,6 +37,8 @@ public final class PhoneNotificationListener extends NotificationListenerService
             try { app = getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)).toString(); }
             catch (PackageManager.NameNotFoundException ignored) { }
             state.posted(pkg, posted.getKey(), app, title, body, false, false, now);
+            PhoneNotifications.eventsChanged();
+            PhoneRelayClient.event("notifications");
         } catch (RuntimeException malformed) {
             // 来自其他应用的 extras 可能不符合类型；不让一个通知断掉整个监听。
         }

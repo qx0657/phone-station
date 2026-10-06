@@ -16,6 +16,7 @@ final class Station: ObservableObject {
     let setup: SetupSession
     let clipboard: ClipboardSession
     let notifications: NotificationSession
+    let remoteEvents = RemoteEventSession()
     let health: DeviceHealthSession
     let remoteControls: RemoteControlsSession
     private var navigation = StationNavigation()
@@ -148,6 +149,18 @@ final class Station: ObservableObject {
     }
 
     private func wire() {
+        remoteEvents.route = { [weak self] in
+            guard let self, self.mcp.channel == "remote", self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
+        remoteEvents.clients = { [weak self] in (self?.clipboard.eventClient ?? "", self?.notifications.eventClient ?? "") }
+        remoteEvents.onSubscription = { [weak self] clip, notes in
+            self?.clipboard.subscribed(clip); self?.notifications.subscribed(notes)
+        }
+        remoteEvents.onEvent = { [weak self] topic in
+            if topic == "clipboard" { self?.clipboard.invalidate() }
+            if topic == "notifications" { self?.notifications.invalidate() }
+        }
         remoteControls.accessMonitoring = { [weak self] in
             guard let self else { return false }
             return self.mcp.requestAvailable

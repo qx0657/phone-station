@@ -24,6 +24,14 @@ final class ClipboardSession: ObservableObject {
     var access: () -> RemoteAccessState = { .legacy }
     @Published private(set) var remoteBlocker: RemotePermissionBlocker?
     private let clientID = UUID().uuidString
+    private var eventsActive = false
+    private var eventVersion = 0
+    var eventClient: String { remote() && shared && connected && blocker == nil && remoteBlocker == nil ? clientID : "" }
+    func subscribed(_ active: Bool) {
+        guard eventsActive != active else { return }
+        eventsActive = active; invalidate()
+    }
+    func invalidate() { eventVersion += 1; nextPoll = 0; refresh() }
     private var policy = ClipboardSyncPolicy()
     private var recovery = ClipboardRecovery()
     private var timer: Timer?
@@ -146,6 +154,7 @@ final class ClipboardSession: ObservableObject {
         guard clock() >= nextPoll || (shared && local.count != lastSentCount) else { return }
         let needsProbe = recovery.recovering || policy.phoneVersion == nil
         let wasRecovering = recovering
+        let observedEvent = eventVersion
         inFlight = true
         requestStarted = nil
         Task {
@@ -154,8 +163,8 @@ final class ClipboardSession: ObservableObject {
                 inFlight = false
                 checking = false
                 requestStarted = nil
-                nextPoll = clock() + (remote() ? 2 : 0)
-                if !permissionBlocked(), shared, sample().count != sentCount, !busy { refresh() }
+                nextPoll = eventVersion == observedEvent ? clock() + (remote() ? (eventsActive ? 30 : 2) : 0) : 0
+                if !permissionBlocked(), !busy, eventVersion != observedEvent || (shared && sample().count != sentCount) { refresh() }
             }
             do {
                 var current = local
