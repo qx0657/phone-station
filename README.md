@@ -45,6 +45,8 @@ open "/Applications/手机工位.app"
 
 更新已安装版本时，先退出旧版 App 并保留备份，再复制并打开新版本；本机网关的替换步骤见 [docs/mac-app.md](docs/mac-app.md)。
 
+旧包不要改名成隐藏 `.app` 留在「应用程序」里：清理软件仍会把它列为已安装应用。退出旧 App 与随包网关后，可运行 `./scripts/archive-mac-app.sh "/Applications/手机工位.app"`，它先压缩、解压核对整包，再移除旧目录。默认压缩包在 `~/Library/Application Support/Phone Station/Backups/`，之后再复制新包。已有旧副本可逐一传给同一脚本；恢复时用 `ditto -x -k <压缩包> <恢复目录>`。
+
 ### 主页
 
 首页上方是手机连接概览和电量，点击概览进入连接设置；右上角齿轮「设置」集中放置配置与高级工具。投屏、截图、录屏保留为直接操作。亮屏、手电筒和灯光跟随声音归入可展开的「手机控制」，正在使用时显示当前状态。仅远程连接时的实时投屏与录屏见 [远程屏幕](docs/remote-screen.md)。

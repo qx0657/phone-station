@@ -51,7 +51,7 @@ final class McpSession: ObservableObject {
     func startWatch() {
         guard statusStream == nil else { return }
         let stream = ConnectionStream(executable: URL(fileURLWithPath: "/bin/zsh"),
-                                      arguments: [StationRunner.script("mcp.sh").path, "watch"], format: .lines)
+                                      arguments: [StationRunner.script("mcp.sh").path, "watch"])
         stream.onFrame = { [weak self] output in
             guard let self else { return }
             self.streamedAt = Date()

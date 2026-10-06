@@ -1,38 +1,19 @@
 import Foundation
 
-/// Both adb track-devices and the gateway deliver framed snapshots over stdout.
-/// A frame can span reads, and an empty adb frame is a real disconnection.
+/// Gateway NDJSON snapshots can span reads.
 struct ConnectionFrames {
-    enum Format { case adb, lines }
-    let format: Format
     private var buffer = Data()
-
-    init(format: Format) {
-        self.format = format
-    }
 
     mutating func append(_ bytes: Data) -> [String] {
         buffer.append(bytes)
         var frames: [String] = []
         while true {
-            switch format {
-            case .adb:
-                guard buffer.count >= 4 else { return frames }
-                guard let header = String(data: buffer.prefix(4), encoding: .ascii),
-                      let count = Int(header, radix: 16) else {
-                    buffer.removeAll(); return frames
-                }
-                guard buffer.count >= 4 + count else { return frames }
-                frames.append(String(decoding: buffer.dropFirst(4).prefix(count), as: UTF8.self))
-                buffer.removeFirst(4 + count)
-            case .lines:
-                guard let end = buffer.firstIndex(of: 10) else {
-                    if buffer.count > 65536 { buffer.removeAll() }
-                    return frames
-                }
-                frames.append(String(decoding: buffer[..<end], as: UTF8.self))
-                buffer.removeSubrange(...end)
+            guard let end = buffer.firstIndex(of: 10) else {
+                if buffer.count > 65536 { buffer.removeAll() }
+                return frames
             }
+            frames.append(String(decoding: buffer[..<end], as: UTF8.self))
+            buffer.removeSubrange(...end)
         }
     }
 }
@@ -57,14 +38,14 @@ struct AdbDevice: Equatable {
 final class ConnectionStream {
     private var task: Task<Void, Never>?
     private var process: Process?
+    private var lifetime: Pipe?
     private let executable: URL
     private let arguments: [String]
-    private let format: ConnectionFrames.Format
     var onFrame: (String) -> Void = { _ in }
     var onDisconnect: () -> Void = {}
 
-    init(executable: URL, arguments: [String], format: ConnectionFrames.Format) {
-        self.executable = executable; self.arguments = arguments; self.format = format
+    init(executable: URL, arguments: [String]) {
+        self.executable = executable; self.arguments = arguments
     }
 
     func start() {
@@ -74,19 +55,22 @@ final class ConnectionStream {
                 guard let self else { return }
                 let child = Process()
                 let pipe = Pipe()
+                let lifetime = Pipe()
                 child.executableURL = self.executable
                 child.arguments = self.arguments
                 child.environment = StationRunner.environment
-                child.standardInput = FileHandle.nullDevice
+                child.environment?["PHONE_STATION_WATCH_STDIN"] = "1"
+                child.standardInput = lifetime
                 child.standardOutput = pipe
                 child.standardError = FileHandle.nullDevice
                 self.process = child
+                self.lifetime = lifetime
                 do {
                     try child.run()
-                    let format = self.format
+                    try? lifetime.fileHandleForReading.close()
                     let owner = self
                     await Task.detached(priority: .utility) {
-                        var decoder = ConnectionFrames(format: format)
+                        var decoder = ConnectionFrames()
                         while true {
                             let bytes = pipe.fileHandleForReading.availableData
                             if bytes.isEmpty { break }
@@ -96,8 +80,11 @@ final class ConnectionStream {
                         try? pipe.fileHandleForReading.close()
                     }.value
                 } catch { }
+                try? lifetime.fileHandleForReading.close()
+                try? lifetime.fileHandleForWriting.close()
                 if self.process === child {
                     self.process = nil
+                    self.lifetime = nil
                     self.onDisconnect()
                 }
                 if Task.isCancelled { return }
@@ -113,6 +100,7 @@ final class ConnectionStream {
 
     func stop() {
         task?.cancel(); task = nil
+        try? lifetime?.fileHandleForWriting.close(); lifetime = nil
         if let process, process.isRunning { process.terminate() }
         process = nil
     }

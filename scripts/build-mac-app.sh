@@ -66,6 +66,10 @@ RUNNER_TEST="$ROOT/build/.phone-station/station-runner-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/StationRunnerTest.swift" -o "$RUNNER_TEST"
 "$RUNNER_TEST"
+STREAM_TEST="$ROOT/build/.phone-station/adb-device-stream-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/AdbDeviceStream.swift" "$ROOT/app/mac/AdbDeviceStreamTest.swift" -o "$STREAM_TEST"
+"$STREAM_TEST"
 CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSyncPolicyTest.swift" \

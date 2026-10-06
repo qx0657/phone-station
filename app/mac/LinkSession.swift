@@ -48,7 +48,7 @@ final class LinkSession: ObservableObject {
     private var trustedSerial: String?
     private var linkWatch: Task<Void, Never>?
     private static let linkWatchInterval: UInt64 = 1_000_000_000
-    private var deviceStream: ConnectionStream?
+    private var deviceStream: AdbDeviceStream?
     private var probeInFlight = false
     private var probeAgain = false
     private var controlsRequested = false
@@ -152,8 +152,9 @@ final class LinkSession: ObservableObject {
     /// adb 列表事件立即触发复查，另每秒验证实际应答，避免僵死 TCP 会话仍显示在线。
     func startWatch() {
         guard linkWatch == nil else { return }
-        if let adb = StationRunner.executable("adb") {
-            let stream = ConnectionStream(executable: adb, arguments: ["track-devices", "-l"], format: .adb)
+        if StationRunner.executable("adb") != nil,
+           let endpoint = AdbDeviceStream.Endpoint.configured(StationRunner.environment) {
+            let stream = AdbDeviceStream(endpoint: endpoint)
             stream.onFrame = { [weak self] listing in self?.devicesChanged(listing) }
             stream.onDisconnect = { [weak self] in self?.devicesChanged("") }
             deviceStream = stream

@@ -30,6 +30,7 @@ MAC_TESTS = {
     "NotificationBanner": ["NotificationProtocol", "NotificationBanner"],
     "InstallTask": ["InstallTask"],
     "StationRunner": ["StationRunner"],
+    "AdbDeviceStream": ["AdbDeviceStream"],
 }
 
 

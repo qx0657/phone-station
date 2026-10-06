@@ -1452,9 +1452,32 @@ func watchJSONStatus() error {
 	if err != nil {
 		return err
 	}
-	request, _ := http.NewRequest(http.MethodGet, "http://"+listenAddress+"/__events", nil)
-	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
+	var lifetime io.Reader
+	if os.Getenv("PHONE_STATION_WATCH_STDIN") == "1" {
+		lifetime = os.Stdin
+	}
+	return streamJSONStatus("http://"+listenAddress+"/__events", value.GatewayToken, lifetime, os.Stdout)
+}
+
+// The app keeps stdin open for the lifetime of this watcher. EOF also arrives
+// when it crashes or is killed, cancelling an idle HTTP read without polling.
+// Plain CLI watchers keep their existing stdin-independent behavior.
+func streamJSONStatus(endpoint, token string, lifetime io.Reader, output io.Writer) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if lifetime != nil {
+		go func() {
+			_, _ = io.Copy(io.Discard, lifetime)
+			cancel()
+		}()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
 	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: time.Second}, CheckRedirect: rejectRelayRedirect}
+	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -1463,13 +1486,13 @@ func watchJSONStatus() error {
 	if response.StatusCode != http.StatusOK {
 		return errors.New("status stream unavailable")
 	}
-	decoder, encoder := json.NewDecoder(response.Body), json.NewEncoder(os.Stdout)
+	decoder, encoder := json.NewDecoder(response.Body), json.NewEncoder(output)
 	for {
 		var status statusReply
 		if err := decoder.Decode(&status); err != nil {
 			return err
 		}
-		status.Endpoint, status.Token = publicAddress, value.GatewayToken
+		status.Endpoint, status.Token = publicAddress, token
 		if err := encoder.Encode(status); err != nil {
 			return err
 		}
