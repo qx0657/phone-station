@@ -16,9 +16,14 @@ import sys
 import termios
 import time
 
-# 空值不会关闭自动连接，adb 仍会连上 _adb-tls-connect。
-# 未指定时关掉，避免和 connect.sh 的 adb connect 各开一条 TLS。
-if not os.environ.get("ADB_MDNS_AUTO_CONNECT"):
+# 空值不会关闭。未指定时关掉 adb 自带的 mDNS：实例名带空格和 (2) 会让
+# adb 37 的解析线程 abort，服务退出后重连就会让手机弹出「无线调试已连接」。
+# 自动连接也会和 connect.sh 的 adb connect 各开一条 TLS。发现仍用 dns-sd。
+_mdns_was_unset = not os.environ.get("ADB_MDNS")
+_auto_connect_was_unset = not os.environ.get("ADB_MDNS_AUTO_CONNECT")
+if _mdns_was_unset:
+    os.environ["ADB_MDNS"] = "0"
+if _auto_connect_was_unset:
     os.environ["ADB_MDNS_AUTO_CONNECT"] = "0"
 
 CONNECT = "_adb-tls-connect._tcp"
@@ -475,6 +480,10 @@ def main(argv: list[str]) -> int:
         assert read_pick_records("adb-phone (2)\t192.168.0.101\t37547\n") == [
             ("adb-phone (2)", "192.168.0.101", 37547),
         ]
+        if _mdns_was_unset:
+            assert os.environ["ADB_MDNS"] == "0"
+        if _auto_connect_was_unset:
+            assert os.environ["ADB_MDNS_AUTO_CONNECT"] == "0"
         print("self-check ok")
         return 0
     if args.cmd == "has-device":
