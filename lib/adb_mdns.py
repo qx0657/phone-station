@@ -9,14 +9,21 @@ import os
 import pty
 import re
 import select
+import socket
 import struct
 import subprocess
 import sys
 import termios
 import time
 
+# 空值不会关闭自动连接，adb 仍会连上 _adb-tls-connect。
+# 未指定时关掉，避免和 connect.sh 的 adb connect 各开一条 TLS。
+if not os.environ.get("ADB_MDNS_AUTO_CONNECT"):
+    os.environ["ADB_MDNS_AUTO_CONNECT"] = "0"
+
 CONNECT = "_adb-tls-connect._tcp"
 PAIRING = "_adb-tls-pairing._tcp"
+COLLISION_SUFFIX = re.compile(r" \(\d+\)$")
 
 
 class Dns:
@@ -86,9 +93,9 @@ def browse_instances(service: str, timeout: float, name_contains: str | None = N
                 continue
             if not re.search(r"\sAdd\s", line):
                 continue
-            if service not in line:
+            name = instance_name(line, service)
+            if not name:
                 continue
-            name = line.split()[-1]
             if name_contains and name_contains not in name:
                 continue
             if name not in found:
@@ -99,6 +106,56 @@ def browse_instances(service: str, timeout: float, name_contains: str | None = N
     finally:
         dns.close()
     return found
+
+
+def instance_name(line: str, service: str) -> str | None:
+    """dns-sd 把带空格的冲突名（如 `adb-xxx (2)`）放在服务类型后面。不能按空白切最后一段。"""
+    for token in (service + ".", service):
+        start = line.find(token)
+        if start < 0:
+            continue
+        name = line[start + len(token):].strip()
+        if name:
+            return name
+    return None
+
+
+def port_accepts(ip: str, port: int, timeout: float = 0.4) -> bool:
+    try:
+        with socket.create_connection((ip, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
+def pick_connect_targets(
+    records: list[tuple[str, str, int]],
+    accepts=port_accepts,
+) -> list[tuple[str, int]]:
+    """同一 IP 只留一个端口：优先能接通的，再优先没有冲突后缀的实例名。"""
+    grouped: dict[str, list[tuple[str, str, int]]] = {}
+    open_ports: dict[tuple[str, int], bool] = {}
+    for instance, ip, port in records:
+        grouped.setdefault(ip, []).append((instance, ip, port))
+        open_ports.setdefault((ip, port), accepts(ip, port))
+    chosen: list[tuple[str, int]] = []
+    for items in grouped.values():
+        def rank(item: tuple[str, str, int]) -> tuple[int, int, int]:
+            instance, ip, port = item
+            return (0 if open_ports[(ip, port)] else 1, 0 if not COLLISION_SUFFIX.search(instance) else 1, port)
+        _, ip, port = min(items, key=rank)
+        chosen.append((ip, port))
+    return chosen
+
+
+def read_pick_records(text: str) -> list[tuple[str, str, int]]:
+    records: list[tuple[str, str, int]] = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or not parts[2].isdigit():
+            continue
+        records.append((parts[0], parts[1], int(parts[2])))
+    return records
 
 
 def lookup(instance: str, service: str, timeout: float = 6) -> tuple[str, int] | None:
@@ -375,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("has-device")
     sub.add_parser("collapse")
     sub.add_parser("serial")
+    sub.add_parser("pick-connect")
     sub.add_parser("self-check")
     return parser
 
@@ -394,6 +452,29 @@ def main(argv: list[str]) -> int:
         assert chosen == "192.168.0.103"
         assert skipped == ["172.19.0.1"]
         assert choose_ip(["172.19.0.1"])[0] is None
+        spaced = "12:00:00.000  Add        2  14 local.               _adb-tls-connect._tcp.  adb-phone (2)"
+        plain = "12:00:00.000  Add        2  14 local.               _adb-tls-connect._tcp.  adb-phone"
+        assert instance_name(spaced, CONNECT) == "adb-phone (2)"
+        assert instance_name(plain, CONNECT) == "adb-phone"
+        assert instance_name("no service here", CONNECT) is None
+        records = [
+            ("adb-phone (2)", "192.168.0.101", 37547),
+            ("adb-phone", "192.168.0.101", 42051),
+            ("other", "10.0.0.8", 40000),
+        ]
+        assert pick_connect_targets(records, accepts=lambda ip, port: port == 42051) == [
+            ("192.168.0.101", 42051),
+            ("10.0.0.8", 40000),
+        ]
+        assert pick_connect_targets(records[:2], accepts=lambda ip, port: port == 37547) == [
+            ("192.168.0.101", 37547),
+        ]
+        assert pick_connect_targets(records[:2], accepts=lambda ip, port: False) == [
+            ("192.168.0.101", 42051),
+        ]
+        assert read_pick_records("adb-phone (2)\t192.168.0.101\t37547\n") == [
+            ("adb-phone (2)", "192.168.0.101", 37547),
+        ]
         print("self-check ok")
         return 0
     if args.cmd == "has-device":
@@ -402,6 +483,13 @@ def main(argv: list[str]) -> int:
         return collapse(args.adb)
     if args.cmd == "serial":
         return unique_serial(args.adb)
+    if args.cmd == "pick-connect":
+        chosen = pick_connect_targets(read_pick_records(sys.stdin.read()))
+        if not chosen:
+            return 1
+        for ip, port in chosen:
+            print(f"{ip}:{port}")
+        return 0
     if args.cmd == "list":
         return emit(discover(service_type(args.kind), args.timeout))
     if args.cmd == "wait":

@@ -17,6 +17,10 @@ enum StationRunner {
             "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"
         ]
         values["PATH"] = (extra + [values["PATH"] ?? ""]).joined(separator: ":")
+        // Read when this process starts adb. An empty value does not disable auto-connect.
+        if (values["ADB_MDNS_AUTO_CONNECT"] ?? "").isEmpty {
+            values["ADB_MDNS_AUTO_CONNECT"] = "0"
+        }
         return values
     }
 

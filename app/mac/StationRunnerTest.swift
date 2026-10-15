@@ -32,6 +32,10 @@ import Darwin
         }
         precondition(kill(child, 0) != 0, "TERM-resistant descendant survived timeout")
         precondition(unrelated.isRunning, "timeout touched an unrelated process")
+        if (ProcessInfo.processInfo.environment["ADB_MDNS_AUTO_CONNECT"] ?? "").isEmpty {
+            precondition(StationRunner.environment["ADB_MDNS_AUTO_CONNECT"] == "0",
+                         "adb started by the app must not auto-connect beside connect.sh")
+        }
         print("StationRunnerTest ok")
     }
 }

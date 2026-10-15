@@ -5,6 +5,12 @@
 # 可用的无线地址是 mDNS 解析到、并且路由不走 utun 的局域网地址。
 PHONE_STATION_LIB_DIR=${${(%):-%x}:A:h}
 
+# adb 服务启动时才读这个变量。默认自动连接会和 connect.sh 叠成两条 TLS，
+# 后一条挤掉前一条，手机就会反复弹出「无线调试已连接」。
+if [[ -z "${ADB_MDNS_AUTO_CONNECT:-}" ]]; then
+  export ADB_MDNS_AUTO_CONNECT=0
+fi
+
 adb_bin() {
   local found sdk
   found=$(command -v adb 2>/dev/null || true)

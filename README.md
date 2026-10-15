@@ -357,7 +357,7 @@ USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出�
 
 PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，仍能通过 mDNS 找到真实 Wi-Fi 地址并连接。如果 `status.sh` 能发现局域网地址、`route -n get <IP>` 显示走 Wi-Fi 接口、`nc -vz -G 3 <IP> <端口>` 成功，但 adb 报 `No route to host`，先运行 `adb kill-server`、`adb start-server`，再运行 `./scripts/connect.sh`。本次这种情况重启电脑上的 adb 后恢复，无需重新配对；重启会中断这台电脑的其他 adb 会话。
 
-已经有一台在线设备时，再手动 `adb connect` 一次，列表里会变成两台，后面的脚本会拒绝继续。
+已经有一台在线设备时，再手动 `adb connect` 一次，会另开一条 TLS 并挤掉原来的无线会话，手机反复弹出「无线调试已连接」，列表里也会变成两台，后面的脚本会拒绝继续。
 
 ### 断开
 
