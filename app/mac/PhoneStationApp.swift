@@ -243,12 +243,16 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
 
 extension PhoneStationApp: NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
+        station.panelVisible = true
+        if station.link.needsWirelessPairing { station.page = .connection }
         station.remoteControls.monitoring = true
         station.remoteControls.refresh()
         installDismissMonitors()
     }
 
     func popoverDidClose(_ notification: Notification) {
+        station.pairing.stop()
+        station.panelVisible = false
         station.dialog = nil
         station.remoteControls.monitoring = false
         removeDismissMonitors()

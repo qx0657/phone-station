@@ -119,6 +119,10 @@ python3 "$ROOT/lib/test_remote_ops.py"
   "$ROOT/app/mac/StationLocalization.swift" "$ROOT/app/mac/StationLocalizationTest.swift" \
   -o "$ROOT/build/.phone-station/localization-test"
 (cd "$ROOT" && "$ROOT/build/.phone-station/localization-test")
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/PairingPrompt.swift" "$ROOT/app/mac/PairingPromptTest.swift" \
+  -o "$ROOT/build/.phone-station/pairing-prompt-test"
+"$ROOT/build/.phone-station/pairing-prompt-test"
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"
@@ -138,7 +142,7 @@ for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh
 done
 cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"
 cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/lib/torch_beat.py" "$RESOURCES/lib/"
-cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/remote_terminal.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
+cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/remote_terminal.py" "$ROOT/lib/pair_qr.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
 cp "$ROOT/build/.phone-station/phone-relay-gateway" "$RESOURCES/lib/phone-relay-gateway"
 cp "$ROOT/build/.phone-station/phone-relay-keychain" "$RESOURCES/lib/phone-relay-keychain"
 chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain"

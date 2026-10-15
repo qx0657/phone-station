@@ -22,6 +22,9 @@ struct ConnectionPage: View {
                                     Text(StationL10n.text(station.link.deviceDetail)).font(.subheadline).foregroundStyle(StationPalette.caution)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
+                                if station.link.needsWirelessPairing {
+                                    pairingPrompt
+                                }
                                 if station.link.serial == nil {
                                     Button(station.link.isReconnecting ? StationL10n.text("正在连接…") : StationL10n.text("连接本地手机")) { station.link.connect() }
                                         .buttonStyle(.borderedProminent)
@@ -34,7 +37,7 @@ struct ConnectionPage: View {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(StationL10n.text("已配对的无线调试或 USB 可直接连接。无线断开成功后，本次运行暂停自动重连；再次连接即可恢复。"))
                                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                                        Text(StationL10n.text("首次配对：手机打开「无线调试 → 使用配对码配对」，将 6 位码填在下方。地址会自动查找。"))
+                                        Text(StationL10n.text("也可以用配对码。手机打开「无线调试 → 使用配对码配对」，停在该页面后填入 6 位码。地址会自动查找。"))
                                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                                         TextField(StationL10n.text("6 位配对码"), text: Binding(get: { station.setup.pairCode }, set: { station.setup.pairCode = $0 }))
                                             .textFieldStyle(.roundedBorder).accessibilityLabel(StationL10n.text("6 位配对码"))
@@ -70,6 +73,49 @@ struct ConnectionPage: View {
                     }.font(.subheadline)
                 }.padding(.horizontal, 16).padding(.bottom, 16)
             }
+        }
+        .onAppear { refreshPairing() }
+        .onDisappear { station.pairing.stop() }
+        .onChange(of: station.panelVisible, perform: { _ in refreshPairing() })
+        .onChange(of: station.link.needsWirelessPairing, perform: { _ in refreshPairing() })
+    }
+
+    private func refreshPairing() {
+        guard station.panelVisible, station.link.needsWirelessPairing else {
+            if !station.link.needsWirelessPairing, case .waiting = station.pairing.phase {
+                station.pairing.stop()
+            }
+            return
+        }
+        station.pairing.startIfIdle()
+    }
+
+    private var pairingPrompt: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(StationL10n.text("扫描二维码配对"))
+                .font(.subheadline.weight(.medium))
+            Text(StationL10n.text("手机打开「开发者选项 → 无线调试 → 使用二维码配对设备」，扫描下面的二维码。页面上的地址不用填写。"))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let image = station.pairing.image {
+                Image(nsImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 168, height: 168)
+                    .padding(8)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityLabel(StationL10n.text("无线调试配对二维码"))
+            }
+            if case .failed(let message) = station.pairing.phase {
+                Text(StationL10n.text(message))
+                    .font(.caption).foregroundStyle(StationPalette.caution).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(StationL10n.text("正在等待手机扫描…"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button(StationL10n.text("重新生成二维码")) { station.pairing.start() }
+                .buttonStyle(.bordered)
+                .disabled(station.feedback.activity != nil)
         }
     }
 }

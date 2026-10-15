@@ -35,11 +35,14 @@ final class LinkSession: ObservableObject {
     @Published private(set) var remoteChecking = false
     @Published private var link: Link = .checking
     @Published private var willReconnect = false
+    /// 无线调试已经出现，但这台电脑还没配对。此时出示二维码，并暂停自动重连。
+    @Published private(set) var needsWirelessPairing = false
 
     var onMenuIcon: (@MainActor (Bool) -> Void)?
     var allow: () -> Bool = { false }
     var onRefreshTorch: () -> Void = {}
     var onSerial: (String?) -> Void = { _ in }
+    var onPairingNeeded: () -> Void = {}
 
     private let feedback: StationFeedback
     private let reader: @Sendable (String?) -> LinkReading
@@ -108,6 +111,9 @@ final class LinkSession: ObservableObject {
         case .connected, .unverified:
             return transport + (remoteConnected ? " · 远程连接" : "")
         case .offline:
+            if needsWirelessPairing {
+                return "这台电脑尚未配对。用手机扫描二维码即可连接。"
+            }
             if decision.holdOffline {
                 return "已断开无线。再点「连接手机」，之后才会自动重连。"
             }
@@ -133,6 +139,7 @@ final class LinkSession: ObservableObject {
         if isReconnecting || connectIsManual { return "重新连接中" }
         if link == .checking { return "检查中" }
         if link == .unverified { return "未验证" }
+        if needsWirelessPairing { return "未配对" }
         return decision.holdOffline ? "已断开" : "未连接"
     }
 
@@ -363,6 +370,7 @@ final class LinkSession: ObservableObject {
         if newLink == .connected, let newSerial {
             trustedSerial = newSerial
             pairedDeviceName = name == "PGT-AN20" ? "荣耀 PGT-AN20" : name
+            if needsWirelessPairing { needsWirelessPairing = false }
         } else {
             trustedSerial = nil
         }
@@ -424,7 +432,17 @@ final class LinkSession: ObservableObject {
         }
     }
 
+    func noteWirelessPaired() {
+        needsWirelessPairing = false
+        feedback.notice = "已配对，并尝试连接。"
+        Task { await probe(readingControls: true) }
+    }
+
     private func considerReconnect(reconnectable: Bool) {
+        if needsWirelessPairing {
+            if willReconnect { willReconnect = false }
+            return
+        }
         let reading: ReconnectDecision.Reading
         switch link {
         case .connected, .unverified:
@@ -472,11 +490,19 @@ final class LinkSession: ObservableObject {
             return
         }
         if result.succeeded {
+            needsWirelessPairing = false
             feedback.notice = nil
-        } else if manual {
-            feedback.notice = result.timedOut
-                ? "连接超时。请检查手机的无线调试和 Wi-Fi。"
-                : StationText.reason(result.output, fallback: "连接失败。请检查无线调试或 USB 授权。")
+        } else if !result.timedOut && WirelessConnectFailure.needsQrPairing(result.output) {
+            needsWirelessPairing = true
+            if manual { feedback.notice = nil }
+            onPairingNeeded()
+        } else {
+            if !result.timedOut { needsWirelessPairing = false }
+            if manual {
+                feedback.notice = result.timedOut
+                    ? "连接超时。请检查手机的无线调试和 Wi-Fi。"
+                    : StationText.reason(result.output, fallback: "连接失败。请检查无线调试或 USB 授权。")
+            }
         }
         Task { await self.probe(readingControls: result.succeeded || manual) }
     }

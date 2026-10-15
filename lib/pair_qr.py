@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import shutil
 import string
@@ -45,18 +46,16 @@ def generate(payload: str) -> None:
         raise SystemExit("生成二维码失败")
 
 
-def main() -> int:
-    alphabet = string.ascii_lowercase + string.digits
-    name = "studio-" + "".join(secrets.choice(alphabet) for _ in range(10))
-    password = "".join(secrets.choice(alphabet) for _ in range(12))
-    payload = f"WIFI:T:ADB;S:{name};P:{password};;"
-    generate(payload)
+def connect_script() -> Path:
+    return DIR.parent / "scripts" / "connect.sh"
 
+
+def tokens_ok(name: str, password: str) -> bool:
+    return re.fullmatch(r"studio-[a-z0-9]{10}", name) is not None and re.fullmatch(r"[a-z0-9]{12}", password) is not None
+
+
+def wait_and_pair(name: str, password: str) -> int:
     browse = adb_mdns.Dns(["-B", adb_mdns.PAIRING, "local"])
-    time.sleep(0.4)
-    subprocess.run(["open", str(HTML)], check=False)
-    log("二维码已打开。手机：无线调试 → 使用二维码配对设备。")
-
     hit = False
     deadline = time.time() + TIMEOUT
     try:
@@ -73,7 +72,7 @@ def main() -> int:
         browse.close()
 
     if not hit:
-        log("没有扫到。二维码还开着的话，用手机的无线调试扫描；关掉页面后需要重新运行 pair-qr.sh。")
+        log("没有扫到。")
         return 1
 
     located = adb_mdns.lookup(name, adb_mdns.PAIRING)
@@ -106,14 +105,41 @@ def main() -> int:
     if text:
         log(text)
     if paired.returncode != 0 or "Successfully paired" not in text:
-        log("配对失败。重新运行 pair-qr.sh，会生成新的二维码。")
+        log("配对失败。")
         return 1
 
-    connect = subprocess.run([str(DIR.parent / "connect.sh")], check=False)
+    connect = subprocess.run([str(connect_script())], check=False)
     if connect.returncode == 0:
-        log("配对完成。浏览器里的二维码页面可以关掉。")
+        log("配对完成。")
     return connect.returncode
 
 
+def listen(name: str) -> int:
+    password = sys.stdin.read().strip()
+    if not tokens_ok(name, password):
+        log("配对参数无效。")
+        return 1
+    return wait_and_pair(name, password)
+
+
+def main() -> int:
+    alphabet = string.ascii_lowercase + string.digits
+    name = "studio-" + "".join(secrets.choice(alphabet) for _ in range(10))
+    password = "".join(secrets.choice(alphabet) for _ in range(12))
+    payload = f"WIFI:T:ADB;S:{name};P:{password};;"
+    generate(payload)
+    time.sleep(0.4)
+    subprocess.run(["open", str(HTML)], check=False)
+    log("二维码已打开。手机：无线调试 → 使用二维码配对设备。")
+    code = wait_and_pair(name, password)
+    if code == 0:
+        log("浏览器里的二维码页面可以关掉。")
+    else:
+        log("重新运行 pair-qr.sh 会生成新的二维码。")
+    return code
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "listen":
+        sys.exit(listen(sys.argv[2]))
     sys.exit(main())

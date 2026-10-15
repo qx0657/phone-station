@@ -20,7 +20,9 @@ final class Station: ObservableObject {
     let remoteEvents = RemoteEventSession()
     let health: DeviceHealthSession
     let remoteControls: RemoteControlsSession
+    let pairing = WirelessPairingSession()
     private var navigation = StationNavigation()
+    @Published var panelVisible = false
     @Published var dialog: StationDialogKind?
     @Published var page: StationPage = .main {
         didSet {
@@ -69,6 +71,7 @@ final class Station: ObservableObject {
         watch(feedback)
         watch(appearance)
         watch(link)
+        watch(pairing)
         watch(screen)
         watch(torch)
         watch(files)
@@ -217,6 +220,18 @@ final class Station: ObservableObject {
         commands.openPage = { [weak self] page in self?.page = page }
         screen.onFinishedCapture = { [weak self] in self?.files.refresh() }
         link.onRefreshTorch = { [weak self] in self?.torch.refreshStatus() }
+        pairing.onPaired = { [weak self] in self?.link.noteWirelessPaired() }
+        link.onPairingNeeded = { [weak self] in
+            guard let self else { return }
+            if !self.panelVisible || self.page == .main {
+                self.page = .connection
+            }
+            if self.panelVisible && self.page == .connection {
+                self.pairing.startIfIdle()
+            } else if self.panelVisible {
+                self.feedback.notice = "这台电脑尚未配对。打开连接设置，用手机扫描二维码。"
+            }
+        }
         link.onSerial = { [weak self] serial in
             self?.torch.noteSerial(serial)
             self?.commands.noteSerial(serial)

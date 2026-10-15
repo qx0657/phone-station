@@ -31,6 +31,7 @@ MAC_TESTS = {
     "InstallTask": ["InstallTask"],
     "StationRunner": ["StationRunner"],
     "AdbDeviceStream": ["AdbDeviceStream"],
+    "PairingPrompt": ["PairingPrompt"],
 }
 
 
