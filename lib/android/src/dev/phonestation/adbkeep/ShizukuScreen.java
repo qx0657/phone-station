@@ -30,6 +30,7 @@ final class ShizukuScreen {
                     .tag("station-screen").processNameSuffix("screen").daemon(false).version(63);
             connection = new Connection();
             try {
+                UsageCounters.shared.helperStart("screen");
                 Shizuku.bindUserService(serviceArgs, connection);
                 if (!connection.ready.await(5, TimeUnit.SECONDS) || connection.binder == null) {
                     close(); throw new FileFailure("远程投屏服务没有连上");
@@ -56,6 +57,7 @@ final class ShizukuScreen {
     }
     static synchronized void close() {
         if (connection != null && serviceArgs != null) {
+            UsageCounters.shared.helperStop("screen");
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
         connection = null; serviceArgs = null;

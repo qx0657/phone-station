@@ -33,6 +33,7 @@ final class ShizukuTorch {
                     .tag("station-torch").processNameSuffix("torch").daemon(false).version(58);
             connection = new Connection();
             try {
+                UsageCounters.shared.helperStart("torch");
                 Shizuku.bindUserService(serviceArgs, connection);
                 if (!connection.ready.await(5, TimeUnit.SECONDS) || connection.binder == null) {
                     close(); throw new FileFailure("手电筒服务未连接，请检查手机上的 Shizuku");
@@ -58,6 +59,7 @@ final class ShizukuTorch {
 
     static synchronized void close() {
         if (connection != null && serviceArgs != null) {
+            UsageCounters.shared.helperStop("torch");
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
         connection = null; serviceArgs = null;

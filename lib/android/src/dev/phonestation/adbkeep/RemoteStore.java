@@ -201,8 +201,8 @@ final class RemoteStore {
 
     private static void publishState(Context context) {
         try {
-            Settings.Global.putInt(context.getContentResolver(), "phonestation_remote",
-                    enabled(context) && configured(context) ? 1 : 0);
+            UsageCounters.noteWrite(Settings.Global.putInt(context.getContentResolver(), "phonestation_remote",
+                    enabled(context) && configured(context) ? 1 : 0));
         } catch (RuntimeException ignored) {
             // The UI reads app preferences directly; this bit only confirms adb pairing.
         }

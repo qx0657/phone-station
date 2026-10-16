@@ -18,8 +18,8 @@ final class StayAwakeController {
         StayAwake.Settings settings = new StayAwake.Settings() {
             public String timeout() { return Settings.System.getString(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT); }
             public String plugged() { return Settings.Global.getString(context.getContentResolver(), Settings.Global.STAY_ON_WHILE_PLUGGED_IN); }
-            public boolean timeout(String value) { return Settings.System.putString(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, value); }
-            public boolean plugged(String value) { return Settings.Global.putString(context.getContentResolver(), Settings.Global.STAY_ON_WHILE_PLUGGED_IN, value); }
+            public boolean timeout(String value) { return UsageCounters.noteWrite(Settings.System.putString(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, value)); }
+            public boolean plugged(String value) { return UsageCounters.noteWrite(Settings.Global.putString(context.getContentResolver(), Settings.Global.STAY_ON_WHILE_PLUGGED_IN, value)); }
         };
         StayAwake.Store store = new StayAwake.Store() {
             public StayAwake.Snapshot load() {

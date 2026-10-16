@@ -24,6 +24,7 @@ func (g *gateway) readControlHealth(ctx context.Context, value config) (controlH
 	}
 	key := value.remoteProfileKey()
 	if g.statusProfile != key || g.statusClient == nil {
+		g.usage.process("keychain")
 		token, err := loadRemoteToken(value)
 		if err != nil {
 			return controlHealth{}, err
@@ -40,6 +41,7 @@ func (g *gateway) readControlHealth(ctx context.Context, value config) (controlH
 		return controlHealth{}, err
 	}
 	request.Header.Set("Authorization", "Bearer "+g.statusToken)
+	g.usage.request("remoteStatus")
 	response, err := g.statusClient.Do(request)
 	if err != nil {
 		return controlHealth{}, err

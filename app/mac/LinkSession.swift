@@ -216,6 +216,7 @@ final class LinkSession: ObservableObject {
         if devices.filter({ $0.state == "device" }).count > 1, !tidying {
             tidying = true
             Task.detached(priority: .utility) {
+                UsageCounters.noteReconnect("link")
                 _ = StationRunner.scriptResult("connect.sh", timeout: 15)
                 await MainActor.run { self.tidying = false }
             }
@@ -469,6 +470,7 @@ final class LinkSession: ObservableObject {
     }
 
     private func launchConnect() {
+        UsageCounters.noteReconnect("link")
         Task.detached(priority: .userInitiated) {
             let result = StationRunner.scriptResult("connect.sh", timeout: 30)
             await MainActor.run { self.finishConnect(result) }

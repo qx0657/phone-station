@@ -66,6 +66,7 @@ final class ShizukuShell {
             try {
                 // 仅在真正执行时启动特权进程；每次结束删除，避免留下旧 APK 的执行服务。
                 binding = true;
+                UsageCounters.shared.helperStart("shell");
                 Shizuku.bindUserService(args, connection);
                 if (!connection.ready.await(5_000, TimeUnit.MILLISECONDS) || connection.binder == null) {
                     throw new FileFailure("Shizuku 执行服务没有连上，请检查手机上的 Shizuku 状态");
@@ -102,6 +103,7 @@ final class ShizukuShell {
             } finally {
                 if (binding) {
                     try {
+                        UsageCounters.shared.helperStop("shell");
                         Shizuku.unbindUserService(args, connection, true);
                     } catch (RuntimeException ignored) {}
                 }

@@ -86,6 +86,7 @@ enum StationRunner {
             try? FileManager.default.removeItem(at: log)
             return CommandResult(code: -1, output: error.localizedDescription, timedOut: false)
         }
+        UsageCounters.noteProcess(executable: executable, arguments: arguments)
         // macOS Foundation gives a launched Process its own group. Verify this
         // before sending a group signal; never signal the app's own group.
         let pid = process.processIdentifier
@@ -150,6 +151,8 @@ enum StationRunner {
         process.terminationHandler = onExit
         do {
             try process.run()
+            UsageCounters.noteProcess(executable: process.executableURL ?? URL(fileURLWithPath: "/bin/zsh"),
+                                      arguments: process.arguments ?? [])
             try? writer.close()
             return process
         } catch {

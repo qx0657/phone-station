@@ -30,6 +30,7 @@ final class ShizukuTerminal {
                     .tag("station-terminal").processNameSuffix("terminal").daemon(false).version(61);
             connection = new Connection();
             try {
+                UsageCounters.shared.helperStart("terminal");
                 Shizuku.bindUserService(serviceArgs, connection);
                 if (!connection.ready.await(5, TimeUnit.SECONDS) || connection.binder == null) {
                     close(); throw new FileFailure("远程终端服务没有连上");
@@ -54,6 +55,7 @@ final class ShizukuTerminal {
     }
     static synchronized void close() {
         if (connection != null && serviceArgs != null) {
+            UsageCounters.shared.helperStop("terminal");
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
         connection = null; serviceArgs = null;

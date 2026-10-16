@@ -15,6 +15,7 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.net.ConnectivityManager;
+import android.net.Uri;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
@@ -519,6 +520,18 @@ final class StationNotifications {
             return;
         }
         settingObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange, Uri uri) {
+                // 心跳由电脑经 adb 写入，应用自己的设置写入在各自的 put 处计数。
+                if (uri != null) {
+                    String key = uri.getLastPathSegment();
+                    if (HostLink.SETTING.equals(key) || HostLink.TRANSPORT_SETTING.equals(key)) {
+                        UsageCounters.shared.settingsWrite();
+                    }
+                }
+                onChange(selfChange);
+            }
+
             @Override
             public void onChange(boolean selfChange) {
                 connectionChanged();

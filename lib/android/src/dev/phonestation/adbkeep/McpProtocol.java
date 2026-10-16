@@ -84,6 +84,11 @@ final class McpProtocol {
         if (params != null && !params.isObject()) { return rpcError(safeID, -32602, "params 需要对象"); }
         if (!message.has("id")) { return new Reply(202, ""); }
         String method = methodValue.string();
+        String toolName = "";
+        if ("tools/call".equals(method) && params != null && params.get("name") != null && params.get("name").isString()) {
+            toolName = params.get("name").string();
+        }
+        UsageCounters.shared.rpc(method, toolName);
         try {
             if ("initialize".equals(method)) {
                 return rpc(id, initialize(version));

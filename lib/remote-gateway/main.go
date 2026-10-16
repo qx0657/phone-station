@@ -71,6 +71,7 @@ type health struct {
 type gateway struct {
 	statusToken string
 	state       health
+	usage       usageCounters
 	remoteMu    remoteGate
 	// Overrides let transport tests use isolated servers without real credentials.
 	localURL                   string
@@ -238,9 +239,22 @@ func main() {
 		var state statusReply
 		state, err = getStatus()
 		if err == nil {
-			state.Token = ""
 			state.Endpoint = publicAddress
-			err = json.NewEncoder(os.Stdout).Encode(state)
+			var gatewayUsage *usageSnapshot
+			if snap, usageErr := getUsage(); usageErr == nil {
+				gatewayUsage = &snap
+			}
+			var recorded *appUsage
+			if path, pathErr := appUsagePath(); pathErr == nil {
+				if loaded, loadErr := loadAppUsage(path); loadErr == nil {
+					recorded = loaded
+				}
+			}
+			var body []byte
+			body, err = encodeStatusSafe(state, gatewayUsage, recorded)
+			if err == nil {
+				_, err = os.Stdout.Write(body)
+			}
 		}
 	case "watch-status":
 		err = watchJSONStatus()
@@ -718,13 +732,15 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.screen(w, r, value)
 		return
 	}
-	if (r.URL.Path == "/__status" || r.URL.Path == "/__events") && r.Method == http.MethodGet {
+	if (r.URL.Path == "/__status" || r.URL.Path == "/__events" || r.URL.Path == "/__usage") && r.Method == http.MethodGet {
 		if !authorized(r, value.GatewayToken) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if r.URL.Path == "/__events" {
 			g.streamStatus(w, r, value)
+		} else if r.URL.Path == "/__usage" {
+			writeJSON(w, http.StatusOK, g.usage.snapshot())
 		} else {
 			writeJSON(w, http.StatusOK, g.snapshot(value))
 		}
@@ -938,7 +954,9 @@ func (g *gateway) checkLocal(token string, sample bool) {
 
 func (g *gateway) noteLocalLocked(result probeResult, sample bool) {
 	state := &g.state
+	wasOnline := state.localOnline
 	state.localOnline, state.localRTT = result.ok, result.rtt
+	g.usage.noteLink("local", wasOnline, result.ok)
 	if !result.ok {
 		state.localRevision++
 		state.localSlowSamples, state.localGoodSamples = 0, 0
@@ -959,7 +977,9 @@ func (g *gateway) noteRemote(value config, result probeResult) {
 	if g.state.remoteProfile != value.remoteProfileKey() {
 		return
 	}
+	wasOnline := g.state.remoteOnline
 	g.state.remoteOnline, g.state.remoteRTT = result.ok, result.rtt
+	g.usage.noteLink("remote", wasOnline, result.ok)
 	g.state.remoteCheckedAt = time.Now()
 	g.state.selectMode(false)
 }
@@ -1028,6 +1048,7 @@ func (g *gateway) probeLocal(token string) probeResult {
 	if address == "" {
 		address = localAddress
 	}
+	g.usage.request("localProbe")
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"local-probe","method":"ping"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
@@ -1084,7 +1105,7 @@ func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 			}
 		}
 	}
-	response, err := g.remoteCall(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`))
+	response, err := g.invokeRemote(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`), "remoteProbe")
 	if err != nil || response.Status != http.StatusOK || !validMCPReply(response.Body) {
 		return probeResult{}, true
 	}
@@ -1130,6 +1151,7 @@ func (g *gateway) proxyLocal(parent context.Context, w http.ResponseWriter, body
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	g.usage.request("local")
 	response, err := (&http.Client{Timeout: 4 * time.Minute, CheckRedirect: rejectRelayRedirect}).Do(request)
 	if err != nil {
 		g.localRequestFailed(parent, w, body, value, revision)
@@ -1241,9 +1263,17 @@ func (g *gateway) proxyRemote(parent context.Context, w http.ResponseWriter, bod
 }
 
 func (g *gateway) remoteCall(ctx context.Context, value config, payload []byte) (relayResponse, error) {
+	return g.invokeRemote(ctx, value, payload, "remote")
+}
+
+// kind is the logical call, not each handshake inside it. A real submission
+// also starts the keychain helper; test doubles do not.
+func (g *gateway) invokeRemote(ctx context.Context, value config, payload []byte, kind string) (relayResponse, error) {
+	g.usage.request(kind)
 	if g.callRemote != nil {
 		return g.callRemote(ctx, value, payload)
 	}
+	g.usage.process("keychain")
 	return remoteCall(ctx, value, payload)
 }
 
@@ -1537,6 +1567,28 @@ func getStatus() (statusReply, error) {
 		return statusReply{}, errors.New("gateway not ready")
 	}
 	return status, nil
+}
+
+func getUsage() (usageSnapshot, error) {
+	value, err := loadConfig()
+	if err != nil {
+		return usageSnapshot{}, err
+	}
+	request, _ := http.NewRequest(http.MethodGet, "http://"+listenAddress+"/__usage", nil)
+	request.Header.Set("Authorization", "Bearer "+value.GatewayToken)
+	response, err := (&http.Client{Timeout: time.Second, CheckRedirect: rejectRelayRedirect}).Do(request)
+	if err != nil {
+		return usageSnapshot{}, err
+	}
+	defer response.Body.Close()
+	var usage usageSnapshot
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8192)).Decode(&usage); err != nil {
+		return usageSnapshot{}, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return usageSnapshot{}, errors.New("usage unavailable")
+	}
+	return usage, nil
 }
 
 func printStatus() error {

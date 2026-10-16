@@ -43,7 +43,7 @@ final class KeeperEngine {
             }
             public boolean writeWireless(boolean value) {
                 try {
-                    return Settings.Global.putInt(app.getContentResolver(), WIFI_ADB, value ? 1 : 0);
+                    return UsageCounters.noteWrite(Settings.Global.putInt(app.getContentResolver(), WIFI_ADB, value ? 1 : 0));
                 } catch (RuntimeException error) {
                     Log.w(TAG, "manual wireless write failed", error);
                     return false;
@@ -75,7 +75,7 @@ final class KeeperEngine {
     static boolean probeWrite(Context context) {
         int current = Settings.Global.getInt(context.getContentResolver(), WIFI_ADB, 0);
         try {
-            Settings.Global.putInt(context.getContentResolver(), WIFI_ADB, current);
+            UsageCounters.noteWrite(Settings.Global.putInt(context.getContentResolver(), WIFI_ADB, current));
             Log.i(TAG, "write-ok");
             return true;
         } catch (SecurityException error) {
@@ -137,7 +137,7 @@ final class KeeperEngine {
         KeeperStore.setFailures(app, failures + 1);
         KeeperStore.setLastAttemptMs(app, now);
         try {
-            Settings.Global.putInt(app.getContentResolver(), WIFI_ADB, 1);
+            UsageCounters.noteWrite(Settings.Global.putInt(app.getContentResolver(), WIFI_ADB, 1));
             Log.i(TAG, "write-ok");
         } catch (SecurityException error) {
             Log.e(TAG, "write-denied", error);

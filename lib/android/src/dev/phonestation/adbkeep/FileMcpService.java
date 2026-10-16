@@ -203,7 +203,7 @@ public final class FileMcpService extends Service {
 
     private void publishListening(boolean on) {
         try {
-            Settings.Global.putInt(getContentResolver(), LISTEN_SETTING, on ? 1 : 0);
+            UsageCounters.noteWrite(Settings.Global.putInt(getContentResolver(), LISTEN_SETTING, on ? 1 : 0));
         } catch (RuntimeException error) {
             Log.w(TAG, "mcp flag", error);
         }

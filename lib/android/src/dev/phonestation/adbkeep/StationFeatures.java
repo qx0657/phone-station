@@ -97,9 +97,9 @@ final class StationFeatures {
     }
     static void publish(Context context) {
         try {
-            Settings.Global.putInt(context.getContentResolver(), MASTER_SETTING, master(context) ? 1 : 0);
+            UsageCounters.noteWrite(Settings.Global.putInt(context.getContentResolver(), MASTER_SETTING, master(context) ? 1 : 0));
             for (String key : FeaturePolicy.KEYS) {
-                Settings.Global.putInt(context.getContentResolver(), "phonestation_feature_" + key.replace('.', '_'), selected(context, key) ? 1 : 0);
+                UsageCounters.noteWrite(Settings.Global.putInt(context.getContentResolver(), "phonestation_feature_" + key.replace('.', '_'), selected(context, key) ? 1 : 0));
             }
         } catch (RuntimeException ignored) { /* UI and MCP use preferences; adb projection is best effort. */ }
     }

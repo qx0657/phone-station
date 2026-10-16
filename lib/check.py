@@ -20,8 +20,8 @@ MAC_TESTS = {
     "ScreenVideoProtocol": ["ScreenVideoProtocol"],
     "ReconnectPolicy": ["Reconnect"],
     "AdbCommandLine": ["AdbCommandLine"],
-    "CommandSession": ["StationState", "StationRunner", "ClipboardProtocol", "AdbCommandLine", "CommandSession"],
-    "RemoteRelayProfile": ["RemoteRelayProfile", "StationRunner"],
+    "CommandSession": ["StationState", "StationRunner", "UsageCounters", "ClipboardProtocol", "AdbCommandLine", "CommandSession"],
+    "RemoteRelayProfile": ["RemoteRelayProfile", "StationRunner", "UsageCounters"],
     "ClipboardSyncPolicy": ["ClipboardProtocol"],
     "ClipboardSession": ["ClipboardProtocol", "ClipboardSession"],
     "ClipboardTransport": ["ClipboardProtocol", "ClipboardSession"],
@@ -29,9 +29,10 @@ MAC_TESTS = {
     "NotificationSession": ["ClipboardProtocol", "NotificationProtocol", "NotificationDelivery", "NotificationSession", "NotificationBanner"],
     "NotificationBanner": ["NotificationProtocol", "NotificationBanner"],
     "InstallTask": ["InstallTask"],
-    "StationRunner": ["StationRunner"],
+    "StationRunner": ["StationRunner", "UsageCounters"],
     "AdbDeviceStream": ["AdbDeviceStream"],
     "PairingPrompt": ["PairingPrompt"],
+    "UsageCounters": ["UsageCounters"],
 }
 
 

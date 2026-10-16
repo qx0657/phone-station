@@ -56,6 +56,7 @@ RELAY_TEST="$ROOT/build/.phone-station/remote-relay-profile-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" \
   -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/RemoteRelayProfile.swift" "$ROOT/app/mac/StationRunner.swift" \
+  "$ROOT/app/mac/UsageCounters.swift" \
   "$ROOT/app/mac/RemoteRelayProfileTest.swift" -o "$RELAY_TEST"
 "$RELAY_TEST"
 EVENT_TEST="$ROOT/build/.phone-station/remote-event-session-test"
@@ -64,7 +65,8 @@ EVENT_TEST="$ROOT/build/.phone-station/remote-event-session-test"
 "$EVENT_TEST"
 RUNNER_TEST="$ROOT/build/.phone-station/station-runner-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
-  "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/StationRunnerTest.swift" -o "$RUNNER_TEST"
+  "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/UsageCounters.swift" \
+  "$ROOT/app/mac/StationRunnerTest.swift" -o "$RUNNER_TEST"
 "$RUNNER_TEST"
 STREAM_TEST="$ROOT/build/.phone-station/adb-device-stream-test"
 "$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
@@ -110,7 +112,7 @@ python3 "$ROOT/lib/test_remote_ops.py"
   -o "$ROOT/build/.phone-station/install-task-test"
 "$ROOT/build/.phone-station/install-task-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
-  "$ROOT/app/mac/StationState.swift" "$ROOT/app/mac/StationRunner.swift" \
+  "$ROOT/app/mac/StationState.swift" "$ROOT/app/mac/StationRunner.swift" "$ROOT/app/mac/UsageCounters.swift" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/AdbCommandLine.swift" \
   "$ROOT/app/mac/CommandSession.swift" "$ROOT/app/mac/CommandSessionTest.swift" \
   -o "$ROOT/build/.phone-station/command-session-test"
@@ -123,6 +125,10 @@ python3 "$ROOT/lib/test_remote_ops.py"
   "$ROOT/app/mac/PairingPrompt.swift" "$ROOT/app/mac/PairingPromptTest.swift" \
   -o "$ROOT/build/.phone-station/pairing-prompt-test"
 "$ROOT/build/.phone-station/pairing-prompt-test"
+"$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
+  "$ROOT/app/mac/UsageCounters.swift" "$ROOT/app/mac/UsageCountersTest.swift" \
+  -o "$ROOT/build/.phone-station/usage-counters-test"
+"$ROOT/build/.phone-station/usage-counters-test"
 "$ROOT/lib/android/build.sh"
 APP="$ROOT/build/.phone-station/手机工位.app"
 STAGING="$ROOT/build/.phone-station/.build-$$.app"

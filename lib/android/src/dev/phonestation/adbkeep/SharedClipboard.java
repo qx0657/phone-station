@@ -155,6 +155,7 @@ final class SharedClipboard {
             Connection next = new Connection();
             connection = next;
             try {
+                UsageCounters.shared.helperStart("clipboard");
                 Shizuku.bindUserService(serviceArgs, next);
                 if (!next.ready.await(5, TimeUnit.SECONDS) || next.binder == null) {
                     close(); throw new FileFailure("剪贴板后台服务未连接，请检查 Shizuku");
@@ -180,6 +181,7 @@ final class SharedClipboard {
     }
     static synchronized void close() {
         if (connection != null && serviceArgs != null) {
+            UsageCounters.shared.helperStop("clipboard");
             try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
         }
         connection = null; serviceArgs = null; watchedBinder = null; leaseAt = -1; STATE.clear();

@@ -27,7 +27,15 @@ public final class ConnectionActivity extends StationActivity {
     private TextView mcpState;
     private TextView remoteState;
     private TextView writeState;
+    private StationChrome.Link usageLink;
+    private LinearLayout usageRows;
+    private TextView requestCount;
+    private TextView settingsCount;
+    private TextView helperStartCount;
+    private TextView helperStopCount;
+    private TextView reconnectCount;
     private boolean checksExpanded;
+    private boolean usageExpanded;
     private String manualMessage = "";
     private boolean wirelessBusy;
     private int wirelessChange;
@@ -48,6 +56,7 @@ public final class ConnectionActivity extends StationActivity {
             return;
         }
         checksExpanded = saved != null && saved.getBoolean("checks_expanded", false);
+        usageExpanded = saved != null && saved.getBoolean("usage_expanded", false);
         ui = new StationChrome(this);
         ui.back("连接设置");
         LinearLayout link = ui.card();
@@ -114,11 +123,30 @@ public final class ConnectionActivity extends StationActivity {
         ui.statusLinkRow(checksRows, R.drawable.ic_status_permission, "权限与检查",
                 view -> startActivity(new Intent(this, PermissionActivity.class)));
         paintChecksExpanded();
+
+        LinearLayout usage = ui.card();
+        usageLink = ui.statusLinkRow(usage, R.drawable.ic_status_about, "运行计数",
+                "本次进程内的请求、设置写入、助手与重连", view -> {
+                    usageExpanded = !usageExpanded;
+                    paintUsageExpanded();
+                    render();
+                });
+        usageRows = new LinearLayout(this);
+        usageRows.setOrientation(LinearLayout.VERTICAL);
+        usage.addView(usageRows, matchWrap());
+        ui.hairline(usageRows, 16);
+        requestCount = checkRow(usageRows, "各类请求");
+        settingsCount = checkRow(usageRows, "系统设置写入");
+        helperStartCount = checkRow(usageRows, "助手启动");
+        helperStopCount = checkRow(usageRows, "助手停止");
+        reconnectCount = checkRow(usageRows, "重连次数");
+        paintUsageExpanded();
         render();
     }
 
     @Override protected void onSaveInstanceState(Bundle saved) {
         saved.putBoolean("checks_expanded", checksExpanded);
+        saved.putBoolean("usage_expanded", usageExpanded);
         super.onSaveInstanceState(saved);
     }
 
@@ -186,9 +214,12 @@ public final class ConnectionActivity extends StationActivity {
         paintCheck(usbSetting, "开".equals(copy.usb) ? "已开启" : "已关闭", "开".equals(copy.usb));
         paintRemote();
         if (checksExpanded) { paintChecks(copy); }
+        if (usageExpanded) { paintUsage(); }
     }
+    private TextView checkRow(String label) { return checkRow(checksRows, label); }
+
     /** 只读诊断项；窄屏和大字号改为上下排列，完整保留名称与状态。 */
-    private TextView checkRow(String label) {
+    private TextView checkRow(LinearLayout parent, String label) {
         boolean stacked = getResources().getConfiguration().fontScale > 1.3f
                 || getResources().getConfiguration().screenWidthDp < 340;
         LinearLayout row = new LinearLayout(this);
@@ -215,7 +246,7 @@ public final class ConnectionActivity extends StationActivity {
             params.setMarginStart(dp(12));
             row.addView(value, params);
         }
-        checksRows.addView(row, matchWrap());
+        parent.addView(row, matchWrap());
         return value;
     }
     private void paintChecksExpanded() {
@@ -227,6 +258,24 @@ public final class ConnectionActivity extends StationActivity {
         if (Build.VERSION.SDK_INT >= 30) {
             checksLink.row.setStateDescription(StationText.translate(checksExpanded ? "已展开" : "已折叠"));
         }
+    }
+    private void paintUsageExpanded() {
+        usageRows.setVisibility(usageExpanded ? View.VISIBLE : View.GONE);
+        usageLink.chevron.setRotation(usageExpanded ? 270 : 90);
+        usageLink.row.setContentDescription(StationText.translate("运行计数，本次进程内的请求、设置写入、助手与重连，"
+                + (usageExpanded ? "收起" : "展开")));
+        usageLink.row.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        if (Build.VERSION.SDK_INT >= 30) {
+            usageLink.row.setStateDescription(StationText.translate(usageExpanded ? "已展开" : "已折叠"));
+        }
+    }
+    private void paintUsage() {
+        UsageCounters.Line[] lines = UsageCounters.shared.lines();
+        paintCheck(requestCount, lines[0].value, false);
+        paintCheck(settingsCount, lines[1].value, false);
+        paintCheck(helperStartCount, lines[2].value, false);
+        paintCheck(helperStopCount, lines[3].value, false);
+        paintCheck(reconnectCount, lines[4].value, false);
     }
     private void paintChecks(KeeperCopy copy) {
         HostProbe host = HostProbe.current(this);

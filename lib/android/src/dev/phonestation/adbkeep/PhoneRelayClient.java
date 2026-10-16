@@ -34,6 +34,8 @@ final class PhoneRelayClient implements Runnable {
     private final String permissionRevision;
     private final java.util.Set<String> terminalIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final AtomicBoolean stopped = new AtomicBoolean(false);
+    /** 曾经连上过。之后的失败或控制连接结束才算重连，第一次连接不算。 */
+    private final AtomicBoolean connectedOnce = new AtomicBoolean(false);
     private final String internalToken = newToken();
     private final Thread thread;
     private final RelayRetry retry = new RelayRetry();
@@ -144,12 +146,17 @@ final class PhoneRelayClient implements Runnable {
     @Override
     public void run() {
         long backoff = 1_000L;
+        boolean reconnect = false;
         while (!stopped.get()) {
             long revision = retry.revision();
             long attemptStarted = SystemClock.elapsedRealtime();
+            if (reconnect && connectedOnce.get()) { UsageCounters.shared.reconnect(); }
+            reconnect = false;
             try {
                 if (SystemClock.elapsedRealtime() >= legacyUntil && supportsControl()) {
                     runControl(revision);
+                    // 控制连接结束且循环还要再打开一条，才是重连。正常的长轮询不算。
+                    if (!stopped.get()) { reconnect = true; }
                     continue;
                 }
                 // A short negotiated idle reply also bounds handover when the
@@ -170,6 +177,7 @@ final class PhoneRelayClient implements Runnable {
                         || ((RelayHttpFailure) error).status == 403)
                         ? "认证失败 · 请检查令牌" : "连接失败 · 重试中");
                 if (!stopped.get()) {
+                    reconnect = true;
                     Log.w(TAG, "relay connection failed: " + error.getClass().getSimpleName());
                     if (SystemClock.elapsedRealtime() - attemptStarted >= 20_000L) { backoff = 1_000L; }
                     retry.pause(backoff, revision);
@@ -279,6 +287,7 @@ final class PhoneRelayClient implements Runnable {
     }
 
     private void setConnected(boolean value) {
+        if (value && !stopped.get()) { connectedOnce.set(true); }
         if (!value || stopped.get()) { setWaiting("连接失败 · 重试中"); return; }
         long now = SystemClock.elapsedRealtime();
         String previous = state.label(now);
