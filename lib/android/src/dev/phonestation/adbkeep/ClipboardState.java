@@ -123,6 +123,9 @@ final class ClipboardState {
         }
         Json result = snapshot(now).put("appliedMac", applied).put("savedImage", savedImage);
         if (imageError != null) { result.put("imageError", imageError); }
+        // Wall-clock metadata lets the Mac estimate copy-to-Mac latency without logging content.
+        if (phone != null && phone.sourceVersion > 0) { result.put("phoneCopiedAt", phone.sourceVersion); }
+        result.put("phoneClock", System.currentTimeMillis());
         return result;
     }
 

@@ -7,6 +7,7 @@ enum UsageCounters {
     private static let lock = NSLock()
     private static var processes = ["adb": 0, "script": 0, "other": 0]
     private static var reconnects = ["link": 0]
+    private static var clipboardLatency: [String: Int]?
     static var directoryOverride: URL?
     static var persistOverride: Bool?
 
@@ -31,10 +32,25 @@ enum UsageCounters {
         update { reconnects[kind, default: 0] += 1 }
     }
 
+    /// Phone copy to Mac pasteboard write, from `ClipboardLatency.estimate`. No content is kept.
+    static func noteClipboardLatency(ms: Int, uncertainty: Int) {
+        let ms = max(0, ms)
+        let uncertainty = max(0, uncertainty)
+        update {
+            var value = clipboardLatency ?? ["samples": 0, "lastMs": 0, "uncertaintyMs": 0, "maxMs": 0]
+            value["samples", default: 0] += 1
+            value["lastMs"] = ms
+            value["uncertaintyMs"] = uncertainty
+            value["maxMs"] = max(value["maxMs"] ?? 0, ms)
+            clipboardLatency = value
+        }
+    }
+
     static func resetForTest(directory: URL) {
         lock.lock()
         processes = ["adb": 0, "script": 0, "other": 0]
         reconnects = ["link": 0]
+        clipboardLatency = nil
         directoryOverride = directory
         persistOverride = true
         lock.unlock()
@@ -68,11 +84,12 @@ enum UsageCounters {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "processes": processes,
             "reconnects": ["link": reconnects["link"] ?? 0],
             "updatedAt": formatter.string(from: Date())
         ]
+        if let clipboardLatency { body["clipboardLatency"] = clipboardLatency }
         return (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()
     }
 

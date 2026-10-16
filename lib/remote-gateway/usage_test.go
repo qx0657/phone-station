@@ -78,7 +78,16 @@ func TestLoadAppUsageRejectsGarbage(t *testing.T) {
 	if err != nil || loaded.Processes.Adb != 2 || loaded.Processes.Script != 1 || loaded.Reconnects.Link != 3 {
 		t.Fatalf("err=%v loaded=%+v", err, loaded)
 	}
+	latency := []byte(`{"processes":{"adb":0,"script":0,"other":0},"reconnects":{"link":0},"clipboardLatency":{"samples":2,"lastMs":310,"uncertaintyMs":12,"maxMs":540},"updatedAt":"2026-10-16T00:00:00Z"}`)
+	if err := os.WriteFile(path, latency, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = loadAppUsage(path)
+	if err != nil || loaded.ClipboardLatency == nil || loaded.ClipboardLatency.LastMs != 310 || loaded.ClipboardLatency.Samples != 2 {
+		t.Fatalf("err=%v loaded=%+v", err, loaded)
+	}
 	for _, bad := range []string{
+		`{"processes":{"adb":0,"script":0,"other":0},"reconnects":{"link":0},"clipboardLatency":{"samples":1,"lastMs":-5,"uncertaintyMs":0,"maxMs":0},"updatedAt":"2026-10-16T00:00:00Z"}`,
 		`{"processes":{"adb":-1,"script":0,"other":0},"reconnects":{"link":0},"updatedAt":"2026-10-16T00:00:00Z"}`,
 		`{"processes":{"adb":0,"script":0,"other":0},"reconnects":{"link":0},"updatedAt":""}`,
 		`{"processes":{"adb":0,"script":0,"other":0},"reconnects":{"link":0},"updatedAt":"2026-10-16T00:00:00Z","token":"x"}`,

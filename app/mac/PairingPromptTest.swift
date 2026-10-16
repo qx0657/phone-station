@@ -19,6 +19,10 @@ enum PairingPromptTest {
         precondition(WirelessConnectFailure.needsQrPairing("跳过 172.19.0.1（路由走 utun0）\nfailed to connect to 192.168.0.101:1\n没连上。"))
         precondition(!WirelessConnectFailure.needsQrPairing("failed to connect to '192.168.0.101:37547': No route to host\n没连上。"))
         precondition(!WirelessConnectFailure.needsQrPairing("connected to 192.168.0.101:37547"))
+        precondition(WirelessConnectFailure.pausesAutomaticReconnect(unpaired, alreadyPaired: false))
+        precondition(!WirelessConnectFailure.pausesAutomaticReconnect(unpaired, alreadyPaired: true))
+        precondition(!WirelessConnectFailure.pausesAutomaticReconnect(
+            "failed to connect to '192.168.0.101:37547': No route to host\n没连上。", alreadyPaired: false))
         print("pairing prompt ok")
     }
 }

@@ -26,4 +26,9 @@ enum WirelessConnectFailure {
             line.contains("failed to connect") && !transport.contains { line.contains($0) }
         }
     }
+
+    /// 这次打开后已经连上过手机时，同样的失败只说明这条端口暂时连不上，自动重连继续。
+    static func pausesAutomaticReconnect(_ output: String, alreadyPaired: Bool) -> Bool {
+        !alreadyPaired && needsQrPairing(output)
+    }
 }

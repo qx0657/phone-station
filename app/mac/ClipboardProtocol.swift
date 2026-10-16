@@ -139,6 +139,22 @@ struct ClipboardSnapshot: Decodable {
     var imagesSupported: Bool? = nil
     var savedImage: Bool? = nil
     var imageError: String? = nil
+    var phoneCopiedAt: Int64? = nil
+    var phoneClock: Int64? = nil
+}
+
+/// 手机复制到写入 Mac 剪贴板的毫秒数。两端都是墙钟；时钟差按这次请求的往返中点估计，误差不超过往返的一半。
+enum ClipboardLatency {
+    static func estimate(copiedAt: Int64, phoneClock: Int64, sentAt: Double, receivedAt: Double,
+                         writtenAt: Double) -> (ms: Int, uncertainty: Int)? {
+        guard copiedAt > 0, phoneClock > 0, receivedAt >= sentAt, writtenAt >= receivedAt else { return nil }
+        let half = (receivedAt - sentAt) / 2
+        let offset = Double(phoneClock) - (sentAt + half)
+        let latency = writtenAt - (Double(copiedAt) - offset)
+        // 超出误差的负值说明时钟或时间戳不可信；一小时以上是离线后补送的旧复制。
+        guard latency >= -half, latency < 3_600_000 else { return nil }
+        return (Int(max(0, latency).rounded()), Int(half.rounded()))
+    }
 }
 
 struct ClipboardAvailability: Decodable {

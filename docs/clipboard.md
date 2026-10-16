@@ -62,6 +62,8 @@ Android 49 与 Mac 0.1.0 (9) 把连接通道与功能可用性分开显示。Shi
 
 共享关闭时状态的两端预览为 null。共享开启但 Shizuku 不可用时返回明确的 `error`；Mac 不用错误响应执行任何自动写入，手机页提供权限入口。`station_clipboard_get` 的 `kind` 与交换结果的 `phone.kind` 可以是 text、empty、unsupported、sensitive、oversize、locked；`mac.kind` 另支持 image，仅返回类型，不返回字节。状态返回 `images` 与 `imagesSupported`，成功存图返回 `savedImage: true`；Mac 对旧手机继续发送 unsupported，不传图片。
 
+交换结果另有 `phoneCopiedAt` 和 `phoneClock`，单位都是毫秒。前者是手机剪贴板时间戳，没有时省略；后者是应答时的手机墙钟。Mac 把这次请求的往返中点当作时钟差，在把手机文字写入本机剪贴板时估计延迟，记入 `usage.app` 的 `clipboardLatency`（`samples`、`lastMs`、`uncertaintyMs`、`maxMs`）。误差按往返的一半计。超出这个误差的负值，或超过一小时的旧复制，不记。计数里没有剪贴板内容。旧手机没有这两个字段时，同步照常，只是没有这一笔延迟。
+
 
 
 ## 历史验证

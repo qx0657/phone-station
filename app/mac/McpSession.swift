@@ -25,6 +25,7 @@ final class McpSession: ObservableObject {
     var onLocalOnline: (Bool) -> Void = { _ in }
     var onRoute: () -> Void = {}
     var allowRemotePair: () -> Bool = { false }
+    var wantsLocal: () -> Bool = { true }
 
     private let feedback: StationFeedback
     private var generation = 0
@@ -36,6 +37,8 @@ final class McpSession: ObservableObject {
     private var routeDirty = false
     private var lastRouteRefresh = Date.distantPast
     private var lastSerial: String?
+    private var routeRetry: Task<Void, Never>?
+    private var routeRetryStep = 0
     private var copyFeedback: Task<Void, Never>?
 
     init(feedback: StationFeedback) {
@@ -89,8 +92,33 @@ final class McpSession: ObservableObject {
     func noteSerial(_ serial: String?) {
         let changed = serial != lastSerial
         lastSerial = serial
-        if changed { refreshRoute() }
+        if changed {
+            routeRetry?.cancel()
+            routeRetryStep = 0
+            refreshRoute()
+        }
         refreshStatus()
+    }
+
+    /// 刷新转发后本地仍不在线时的下一次间隔。手机刚恢复时读令牌可能超过 2 秒上限。
+    nonisolated static func routeRetrySeconds(step: Int) -> Double {
+        let delays: [Double] = [5, 10, 20, 30]
+        return delays[min(max(step, 0), delays.count - 1)]
+    }
+
+    /// adb 仍连着同一台手机、本机 MCP 开着、本地却不在线时，退避后再刷新一次转发。已有等待不重置。
+    private func scheduleRouteRetry() {
+        guard routeRetry == nil else { return }
+        guard let serial = lastSerial, !localOnline, wantsLocal() else { return }
+        let delay = Self.routeRetrySeconds(step: routeRetryStep)
+        routeRetryStep += 1
+        routeRetry = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.routeRetry = nil
+            guard self.lastSerial == serial, !self.localOnline, self.wantsLocal() else { return }
+            self.refreshRoute()
+        }
     }
 
     /// 序列号变化，或网关/手机返回 401 时，才刷新 adb 转发和手机令牌。
@@ -112,6 +140,8 @@ final class McpSession: ObservableObject {
                     self.routeDirty = false
                     self.lastRouteRefresh = .distantPast
                     self.refreshRoute()
+                } else {
+                    self.scheduleRouteRetry()
                 }
             }
         }
@@ -285,6 +315,13 @@ final class McpSession: ObservableObject {
         let local = status.localOnline ?? (status.channel == "local")
         if localOnline != local {
             localOnline = local
+            if local {
+                routeRetry?.cancel()
+                routeRetry = nil
+                routeRetryStep = 0
+            } else {
+                scheduleRouteRetry()
+            }
             onLocalOnline(local)
         }
         if remoteOnline != status.remoteConnected { remoteOnline = status.remoteConnected }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import fcntl
 import os
 import pty
@@ -133,21 +134,44 @@ def port_accepts(ip: str, port: int, timeout: float = 0.4) -> bool:
         return False
 
 
-def pick_connect_targets(
+def _connect_groups(
     records: list[tuple[str, str, int]],
-    accepts=port_accepts,
-) -> list[tuple[str, int]]:
-    """同一 IP 只留一个端口：优先能接通的，再优先没有冲突后缀的实例名。"""
+    accepts,
+) -> tuple[dict[str, list[tuple[str, str, int]]], Callable[[tuple[str, str, int]], tuple[int, int, int]]]:
     grouped: dict[str, list[tuple[str, str, int]]] = {}
     open_ports: dict[tuple[str, int], bool] = {}
     for instance, ip, port in records:
         grouped.setdefault(ip, []).append((instance, ip, port))
         open_ports.setdefault((ip, port), accepts(ip, port))
+
+    def rank(item: tuple[str, str, int]) -> tuple[int, int, int]:
+        instance, ip, port = item
+        return (0 if open_ports[(ip, port)] else 1, 0 if not COLLISION_SUFFIX.search(instance) else 1, port)
+
+    return grouped, rank
+
+
+def ordered_connect_targets(
+    records: list[tuple[str, str, int]],
+    accepts=port_accepts,
+) -> list[tuple[str, int]]:
+    """同一 IP 的全部端口：先 TCP 能接通的，再没有冲突后缀的。调用方连上一条就停。"""
+    grouped, rank = _connect_groups(records, accepts)
     chosen: list[tuple[str, int]] = []
     for items in grouped.values():
-        def rank(item: tuple[str, str, int]) -> tuple[int, int, int]:
-            instance, ip, port = item
-            return (0 if open_ports[(ip, port)] else 1, 0 if not COLLISION_SUFFIX.search(instance) else 1, port)
+        for _, ip, port in sorted(items, key=rank):
+            chosen.append((ip, port))
+    return chosen
+
+
+def pick_connect_targets(
+    records: list[tuple[str, str, int]],
+    accepts=port_accepts,
+) -> list[tuple[str, int]]:
+    """同一 IP 只留排序后的第一个端口。"""
+    grouped, rank = _connect_groups(records, accepts)
+    chosen: list[tuple[str, int]] = []
+    for items in grouped.values():
         _, ip, port = min(items, key=rank)
         chosen.append((ip, port))
     return chosen
@@ -438,6 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("collapse")
     sub.add_parser("serial")
     sub.add_parser("pick-connect")
+    sub.add_parser("order-connect")
     sub.add_parser("self-check")
     return parser
 
@@ -477,6 +502,19 @@ def main(argv: list[str]) -> int:
         assert pick_connect_targets(records[:2], accepts=lambda ip, port: False) == [
             ("192.168.0.101", 42051),
         ]
+        assert ordered_connect_targets(records, accepts=lambda ip, port: port == 42051) == [
+            ("192.168.0.101", 42051),
+            ("192.168.0.101", 37547),
+            ("10.0.0.8", 40000),
+        ]
+        assert ordered_connect_targets(records[:2], accepts=lambda ip, port: port == 37547) == [
+            ("192.168.0.101", 37547),
+            ("192.168.0.101", 42051),
+        ]
+        assert ordered_connect_targets(records[:2], accepts=lambda ip, port: False) == [
+            ("192.168.0.101", 42051),
+            ("192.168.0.101", 37547),
+        ]
         assert read_pick_records("adb-phone (2)\t192.168.0.101\t37547\n") == [
             ("adb-phone (2)", "192.168.0.101", 37547),
         ]
@@ -492,8 +530,9 @@ def main(argv: list[str]) -> int:
         return collapse(args.adb)
     if args.cmd == "serial":
         return unique_serial(args.adb)
-    if args.cmd == "pick-connect":
-        chosen = pick_connect_targets(read_pick_records(sys.stdin.read()))
+    if args.cmd in ("pick-connect", "order-connect"):
+        records = read_pick_records(sys.stdin.read())
+        chosen = pick_connect_targets(records) if args.cmd == "pick-connect" else ordered_connect_targets(records)
         if not chosen:
             return 1
         for ip, port in chosen:

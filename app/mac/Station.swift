@@ -302,6 +302,11 @@ final class Station: ObservableObject {
             }
         }
         mcp.allowRemotePair = { [weak self] in self?.canOperate ?? false }
+        mcp.wantsLocal = { [weak self] in
+            guard let self else { return false }
+            let local = (self.mcp.requestAvailable ? self.controlPreferences?.localMcp : nil) ?? self.link.connectionPreferences?.localMcp
+            return local != false
+        }
         mcp.onRemoteChecking = { [weak self] checking in
             self?.link.noteRemoteChecking(checking)
         }

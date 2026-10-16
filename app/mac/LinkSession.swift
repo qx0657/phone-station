@@ -532,7 +532,8 @@ final class LinkSession: ObservableObject {
         if result.succeeded {
             needsWirelessPairing = false
             feedback.notice = nil
-        } else if !result.timedOut && WirelessConnectFailure.needsQrPairing(result.output) {
+        } else if !result.timedOut && WirelessConnectFailure.pausesAutomaticReconnect(
+            result.output, alreadyPaired: !pairedDeviceName.isEmpty) {
             needsWirelessPairing = true
             if manual { feedback.notice = nil }
             onPairingNeeded()

@@ -27,6 +27,8 @@ final class ClipboardStateTest {
         Access access = new Access();
         Json first = state.exchange(access, args("1", "old-mac", null), true, 100);
         expect(access.writes == 0, "first contact must not overwrite");
+        expect(first.get("phoneCopiedAt") == null, "a clipboard without a timestamp omits the copy time");
+        expect(Math.abs(System.currentTimeMillis() - first.get("phoneClock").longValue()) < 5_000L, "exchange reports the phone wall clock");
         String baseline = first.get("phoneVersion").string();
         Json applied = state.exchange(access, args("2", "new-mac", baseline), true, 200);
         expect(applied.get("appliedMac").boolValue() && access.writes == 1, "new Mac text should sync");
@@ -58,6 +60,7 @@ final class ClipboardStateTest {
         state.clear();
         access.clip = new ClipboardState.Clip("text", "same-phone-text", 100);
         Json beforeRecopy = state.exchange(access, args("9", "different-mac-text", null), true, 11_500);
+        expect(beforeRecopy.get("phoneCopiedAt").longValue() == 100L, "copy time is the clipboard timestamp");
         access.clip = new ClipboardState.Clip("text", "same-phone-text", 101);
         Json recopy = state.exchange(access, args("9", "different-mac-text", beforeRecopy.get("phoneVersion").string()), true, 11_600);
         expect(!recopy.get("phoneVersion").string().equals(beforeRecopy.get("phoneVersion").string()), "recopying identical text must create a phone revision");

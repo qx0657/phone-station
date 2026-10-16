@@ -154,6 +154,8 @@ struct ConnectionStatusTest {
     }
 
     @MainActor static func livenessTest() async {
+        precondition([0, 1, 2, 3, 9].map { McpSession.routeRetrySeconds(step: $0) } == [5, 10, 20, 30, 30])
+        precondition(McpSession.routeRetrySeconds(step: -1) == 5)
         let query = LinkSession.featureQuery()
         precondition(query.contains("settings get global phonestation_enabled"))
         precondition(query.contains("phonestation_feature_files_read"))

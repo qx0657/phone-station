@@ -37,10 +37,19 @@ type appReconnects struct {
 	Link int `json:"link"`
 }
 
+// appClipboardLatency is the menu-bar estimate from a phone copy to the Mac pasteboard write.
+type appClipboardLatency struct {
+	Samples       int `json:"samples"`
+	LastMs        int `json:"lastMs"`
+	UncertaintyMs int `json:"uncertaintyMs"`
+	MaxMs         int `json:"maxMs"`
+}
+
 type appUsage struct {
-	Processes  appProcesses  `json:"processes"`
-	Reconnects appReconnects `json:"reconnects"`
-	UpdatedAt  string        `json:"updatedAt"`
+	Processes        appProcesses         `json:"processes"`
+	Reconnects       appReconnects        `json:"reconnects"`
+	ClipboardLatency *appClipboardLatency `json:"clipboardLatency,omitempty"`
+	UpdatedAt        string               `json:"updatedAt"`
 }
 
 type statusUsage struct {
@@ -133,6 +142,9 @@ func loadAppUsage(path string) (*appUsage, error) {
 		return nil, errors.New("app usage snapshot has trailing data")
 	}
 	if usage.Processes.Adb < 0 || usage.Processes.Script < 0 || usage.Processes.Other < 0 || usage.Reconnects.Link < 0 {
+		return nil, errors.New("app usage snapshot has a negative count")
+	}
+	if l := usage.ClipboardLatency; l != nil && (l.Samples < 0 || l.LastMs < 0 || l.UncertaintyMs < 0 || l.MaxMs < 0) {
 		return nil, errors.New("app usage snapshot has a negative count")
 	}
 	if usage.UpdatedAt == "" || len(usage.UpdatedAt) > 40 || !utf8.ValidString(usage.UpdatedAt) {

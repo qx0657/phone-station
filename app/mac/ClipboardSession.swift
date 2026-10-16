@@ -214,7 +214,9 @@ final class ClipboardSession: ObservableObject {
                 sentCount = current.count
                 lastSentCount = sentCount
                 recovery.sent(count: sentCount)
+                let sentAt = Date().timeIntervalSince1970 * 1000
                 let data = try await call(endpoint, token, "station_clipboard_exchange", args)
+                let receivedAt = Date().timeIntervalSince1970 * 1000
                 guard let currentRoute = route(), currentRoute.0 == endpoint, currentRoute.1 == token else {
                     interrupted(nil); return
                 }
@@ -231,6 +233,11 @@ final class ClipboardSession: ObservableObject {
                     let written = readLocal()
                     mac = written.clip
                     acknowledgedCount = written.count
+                    if let copiedAt = snapshot.phoneCopiedAt, let phoneClock = snapshot.phoneClock,
+                       let latency = ClipboardLatency.estimate(copiedAt: copiedAt, phoneClock: phoneClock, sentAt: sentAt,
+                                                               receivedAt: receivedAt, writtenAt: Date().timeIntervalSince1970 * 1000) {
+                        UsageCounters.noteClipboardLatency(ms: latency.ms, uncertainty: latency.uncertainty)
+                    }
                     noteSync("手机 → Mac")
                 } else if snapshot.savedImage == true { noteSync("Mac → 手机相册") }
                 else if snapshot.appliedMac == true { noteSync("Mac → 手机") }

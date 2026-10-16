@@ -2,6 +2,7 @@
 # 说明见仓库根目录 README.md
 # 无线重连。USB 或无线已经有一条在线设备时，只整理重复连接。
 # 发现期间 adb 已经连上时，不再对同一地址执行 adb connect。
+# 同一 IP 有多个端口时按顺序试，连上一条就停。
 # 第二条 TLS 会挤掉第一条，手机就会反复弹出「无线调试已连接」。
 # 用法：connect.sh
 #       connect.sh 192.168.0.103:42125
@@ -15,6 +16,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   print -r -- "用法: connect.sh [IP:端口]"
   print -r -- "不带参数时，已有在线设备（USB 或无线）就只整理重复连接；否则用 mDNS 找局域网地址。"
   print -r -- "发现期间已经连上就不再 adb connect，避免第二条 TLS 挤掉现有无线会话。"
+  print -r -- "同一 IP 有多个无线端口时先试更可能接通的，失败再试其余端口，连上就停。"
   print -r -- "不要填手机页面上的 172.19.0.1。"
   exit 0
 fi
@@ -57,7 +59,7 @@ else
   fi
   if (( ${#records} > 1 )); then
     set +e
-    picked_text=$(printf '%s\n' "${records[@]}" | python3 "$PY" pick-connect)
+    picked_text=$(printf '%s\n' "${records[@]}" | python3 "$PY" order-connect)
     picked_status=$?
     set -e
     if [[ "$picked_status" == 0 && -n "$picked_text" ]]; then
@@ -83,6 +85,7 @@ for target in "${targets[@]}"; do
   print -r -- "$result"
   if [[ "$result" == *connected* ]]; then
     connected=1
+    break
   fi
 done
 
