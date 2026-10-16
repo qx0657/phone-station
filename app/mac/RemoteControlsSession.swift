@@ -9,6 +9,8 @@ struct RemoteControlsReading: Decodable {
     let remotePermissions: [String: Bool]?
     let remotePermissionPageVersion: Int?
     let features: PhoneFeatureState?
+    var localMcp: Bool?
+    var remoteEnabled: Bool?
     struct Torch: Decodable { var available: Bool; var on: Bool?; var reason: String }
     var model: String
     var verified: Bool

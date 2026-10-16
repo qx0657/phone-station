@@ -27,6 +27,7 @@ final class ClipboardSession: ObservableObject {
     private var eventsActive = false
     private var eventVersion = 0
     var eventClient: String { remote() && shared && connected && blocker == nil && remoteBlocker == nil ? clientID : "" }
+    var waitClientID: String { clientID }
     func subscribed(_ active: Bool) {
         guard eventsActive != active else { return }
         eventsActive = active; invalidate()
@@ -163,7 +164,7 @@ final class ClipboardSession: ObservableObject {
                 inFlight = false
                 checking = false
                 requestStarted = nil
-                nextPoll = eventVersion == observedEvent ? clock() + (remote() ? (eventsActive ? 30 : 2) : 0) : 0
+                nextPoll = clock() + (eventVersion == observedEvent ? (eventsActive ? 30 : (remote() ? 2 : 0)) : 0)
                 if !permissionBlocked(), !busy, eventVersion != observedEvent || (shared && sample().count != sentCount) { refresh() }
             }
             do {

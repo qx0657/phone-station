@@ -48,6 +48,7 @@ final class PhoneRelayClient implements Runnable {
     private volatile RemoteEvents events;
 
     static void event(String topic) {
+        LocalEventWait.note(topic);
         PhoneRelayClient client = activeClient;
         RemoteEvents events = client == null ? null : client.events;
         if (events != null) { events.changed(topic); }

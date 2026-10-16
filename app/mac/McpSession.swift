@@ -87,24 +87,32 @@ final class McpSession: ObservableObject {
     func noteSerial(_ serial: String?) {
         let changed = serial != lastSerial
         lastSerial = serial
-        if routeInFlight && changed { routeDirty = true }
-        if !routeInFlight && (changed || Date().timeIntervalSince(lastRouteRefresh) >= 5) {
-            routeInFlight = true
-            lastRouteRefresh = Date()
-            Task.detached(priority: .utility) {
-                _ = StationRunner.scriptResult("mcp.sh", ["status"], timeout: 15)
-                await MainActor.run {
-                    self.routeInFlight = false
-                    if self.routeDirty {
-                        self.routeDirty = false
-                        self.lastRouteRefresh = .distantPast
-                        self.noteSerial(self.lastSerial)
-                    }
-                    self.refreshStatus()
+        if changed { refreshRoute() }
+        refreshStatus()
+    }
+
+    /// 序列号变化，或网关/手机返回 401 时，才刷新 adb 转发和手机令牌。
+    func noteUnauthorized() {
+        guard Date().timeIntervalSince(lastRouteRefresh) >= 5 else { return }
+        refreshRoute()
+    }
+
+    private func refreshRoute() {
+        if routeInFlight { routeDirty = true; return }
+        routeInFlight = true
+        lastRouteRefresh = Date()
+        Task.detached(priority: .utility) {
+            _ = StationRunner.scriptResult("mcp.sh", ["status"], timeout: 15)
+            await MainActor.run {
+                self.routeInFlight = false
+                self.refreshStatus()
+                if self.routeDirty {
+                    self.routeDirty = false
+                    self.lastRouteRefresh = .distantPast
+                    self.refreshRoute()
                 }
             }
         }
-        refreshStatus()
     }
 
     func start() {

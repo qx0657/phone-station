@@ -32,6 +32,9 @@ final class UsageCounters {
         if (tool == null) {
             return "other";
         }
+        if ("station_event_wait".equals(tool)) {
+            return "protocol";
+        }
         if (tool.startsWith("station_file_")) {
             return "file";
         }

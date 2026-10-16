@@ -26,6 +26,10 @@ interface StationHost {
 
     Json clipboardExchange(Json args);
 
+    default Json eventWait(String client, long clipboard, long notifications) {
+        return Json.obj().put("clipboard", clipboard).put("notifications", notifications);
+    }
+
     Json notificationStatus();
 
     Json notificationConfigure(Json args);

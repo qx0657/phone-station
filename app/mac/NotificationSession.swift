@@ -171,7 +171,7 @@ final class NotificationSession: ObservableObject {
         Task {
             defer {
                 inFlight = false
-                nextPoll = eventVersion == observedEvent ? Date().addingTimeInterval(remote() ? (eventsActive ? 15 : 2) : 0) : .distantPast
+                nextPoll = Date().addingTimeInterval(eventVersion == observedEvent ? (eventsActive ? (remote() ? 15 : 30) : (remote() ? 2 : 0)) : 0)
                 if eventVersion != observedEvent { refresh(background: true) }
             }
             if Date().timeIntervalSince(permissionTime) >= 10 {

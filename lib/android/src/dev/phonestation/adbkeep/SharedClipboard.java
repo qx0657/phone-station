@@ -106,6 +106,7 @@ final class SharedClipboard {
         StationFeatures.publish(context);
         Json result = status(context);
         publishUi(result.get("availability"));
+        PhoneRelayClient.event("clipboard");
         return result;
     }
     static synchronized Json status(Context context) {

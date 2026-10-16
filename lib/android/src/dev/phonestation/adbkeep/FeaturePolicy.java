@@ -24,7 +24,7 @@ final class FeaturePolicy {
         }
     }
     private static final Set<String> STATUS = Set.of("station_device_status", "station_controls_status", "station_shell_status",
-            "station_notification_status", "station_clipboard_state");
+            "station_notification_status", "station_clipboard_state", "station_event_wait");
     static String feature(String tool) {
         if (tool.startsWith("station_clipboard_")) { return "clipboard"; }
         if (tool.startsWith("station_notification_")) { return "notifications"; }

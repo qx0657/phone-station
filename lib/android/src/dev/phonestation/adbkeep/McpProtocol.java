@@ -328,6 +328,9 @@ final class McpProtocol {
         if ("station_clipboard_state".equals(name)) { return host(host).clipboardState(args); }
         if ("station_clipboard_configure".equals(name)) { return host(host).clipboardConfigure(args); }
         if ("station_clipboard_exchange".equals(name)) { return host(host).clipboardExchange(args); }
+        if ("station_event_wait".equals(name)) {
+            return host(host).eventWait(optional(args, "clientId"), optionalLong(args, "clipboard", 0), optionalLong(args, "notifications", 0));
+        }
         if ("station_file_open".equals(name)) {
             return host(host).open(required(args, "path"));
         }

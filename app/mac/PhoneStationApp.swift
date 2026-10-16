@@ -53,6 +53,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         station.link.stopWatch()
         station.mcp.stopWatch()
+        station.stopLocalEvents()
     }
 
     private func installStatusItem() {
@@ -89,6 +90,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         }
         station.link.startWatch()
         station.mcp.startWatch()
+        station.startLocalEvents()
     }
 
     private func applyMenuBar(connected: Bool) {

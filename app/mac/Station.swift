@@ -18,6 +18,7 @@ final class Station: ObservableObject {
     let clipboard: ClipboardSession
     let notifications: NotificationSession
     let remoteEvents = RemoteEventSession()
+    let localEvents = LocalEventSession()
     let health: DeviceHealthSession
     let remoteControls: RemoteControlsSession
     let pairing = WirelessPairingSession()
@@ -51,6 +52,7 @@ final class Station: ObservableObject {
     }
 
     private var subscriptions = Set<AnyCancellable>()
+    private var pageWatch = Set<AnyCancellable>()
 
     init() {
         let feedback = StationFeedback()
@@ -68,27 +70,52 @@ final class Station: ObservableObject {
         health = DeviceHealthSession()
         remoteControls = RemoteControlsSession(feedback: feedback)
         wire()
-        watch(feedback)
-        watch(appearance)
-        watch(link)
-        watch(pairing)
-        watch(screen)
-        watch(torch)
-        watch(files)
-        watch(commands)
-        watch(login)
-        watch(mcp)
-        watch(setup)
-        watch(clipboard)
-        watch(notifications)
-        watch(health)
-        watch(remoteControls)
+        $panelVisible.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
+        $page.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
+        bindPage()
     }
 
-    private func watch<Object: ObservableObject>(_ object: Object) {
+    func startLocalEvents() { localEvents.start() }
+    func stopLocalEvents() { localEvents.stop() }
+
+    /// 面板关闭时不转发子会话；打开时只转发当前页会读到的会话。
+    private func bindPage() {
+        pageWatch.removeAll()
+        guard panelVisible else { return }
+        observe(feedback)
+        observe(appearance)
+        observe(link)
+        observe(mcp)
+        switch page {
+        case .main:
+            observe(health); observe(clipboard); observe(notifications); observe(torch); observe(screen); observe(remoteControls)
+        case .connection:
+            observe(pairing)
+        case .commands, .editCommand:
+            observe(commands); observe(remoteControls)
+        case .more:
+            observe(login); observe(health); observe(remoteControls); observe(setup)
+        case .files:
+            observe(files); observe(remoteControls); observe(setup)
+        case .about:
+            observe(login)
+        case .mcp, .remoteRelay:
+            observe(remoteControls)
+        case .remotePermissions:
+            observe(remoteControls)
+        case .features:
+            observe(remoteControls); observe(setup)
+        case .clipboard:
+            observe(clipboard); observe(remoteControls)
+        case .notifications:
+            observe(notifications); observe(remoteControls)
+        }
+    }
+
+    private func observe<Object: ObservableObject>(_ object: Object) {
         object.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
-        }.store(in: &subscriptions)
+        }.store(in: &pageWatch)
     }
 
     var phoneFeatures: PhoneFeatureState? {
@@ -100,8 +127,12 @@ final class Station: ObservableObject {
         return local
     }
     func featureAllows(_ key: String) -> Bool { phoneFeatures?.allows(key) ?? true }
+    private var controlPreferences: PhoneConnectionPreferences? {
+        guard let reading = remoteControls.reading, reading.localMcp != nil || reading.remoteEnabled != nil else { return nil }
+        return PhoneConnectionPreferences(localMcp: reading.localMcp, remote: reading.remoteEnabled)
+    }
     var mcpPresentation: McpServicePresentation {
-        let preferences = link.connectionPreferences
+        let preferences = link.connectionPreferences ?? controlPreferences
         let local = mcp.localOnline && preferences?.localMcp != false
         let remote = mcp.remoteOnline && preferences?.remote != false
         return McpServicePresentation(paused: phoneFeatures?.master == false, gatewayReady: mcp.gatewayReady,
@@ -168,6 +199,20 @@ final class Station: ObservableObject {
             if topic == "clipboard" { self?.clipboard.invalidate() }
             if topic == "notifications" { self?.notifications.invalidate() }
         }
+        localEvents.route = { [weak self] in
+            guard let self, self.mcp.channel != "remote", self.mcp.requestAvailable else { return nil }
+            return (self.mcp.endpoint, self.mcp.token)
+        }
+        localEvents.remote = { [weak self] in self?.mcp.channel == "remote" }
+        localEvents.clientID = { [weak self] in self?.clipboard.waitClientID ?? "" }
+        localEvents.onClipboard = { [weak self] in self?.clipboard.invalidate() }
+        localEvents.onNotifications = { [weak self] in self?.notifications.invalidate() }
+        localEvents.onActive = { [weak self] active in
+            guard let self, self.mcp.channel != "remote" else { return }
+            self.clipboard.subscribed(active)
+            self.notifications.subscribed(active)
+        }
+        ClipboardRPC.onUnauthorized = { [weak self] in self?.mcp.noteUnauthorized() }
         remoteControls.accessMonitoring = { [weak self] in
             guard let self else { return false }
             return self.mcp.requestAvailable

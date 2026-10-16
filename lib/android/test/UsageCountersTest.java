@@ -17,6 +17,7 @@ final class UsageCountersTest {
         expect("shell".equals(UsageCounters.category("station_terminal_open")), "terminal tools share the shell bucket");
         expect("control".equals(UsageCounters.category("station_controls_status")), "other station tools are controls");
         expect("control".equals(UsageCounters.category("station_device_status")), "device status is a control request");
+        expect("protocol".equals(UsageCounters.category("station_event_wait")), "local wait is a transport request");
         expect("other".equals(UsageCounters.category("ping")), "non-station names stay other");
         expect("other".equals(UsageCounters.category(null)), "missing tool");
 

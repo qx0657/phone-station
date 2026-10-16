@@ -286,6 +286,12 @@ private final class StationHTTPDelegate: NSObject, URLSessionTaskDelegate {
 enum ClipboardRPC {
     private static let queue = StationRPCQueue()
     private static let logger = Logger(subsystem: "com.qx0657.phonestation", category: "rpc")
+    /// 网关或手机令牌被拒时刷新本地转发。挂起等待不占这条单请求队列。
+    static var onUnauthorized: (@MainActor () -> Void)?
+    static func noteUnauthorized() {
+        let notify = onUnauthorized
+        Task { @MainActor in notify?() }
+    }
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
@@ -325,6 +331,10 @@ enum ClipboardRPC {
             }
         }
     }
+    /// 长等待单独发出，避免挡住剪贴板、通知和控件请求。
+    static func callDetached(endpoint: String, token: String, name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> Data {
+        try await send(endpoint: endpoint, token: token, name: name, arguments: arguments, timeout: timeout)
+    }
     private static func send(endpoint: String, token: String, name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> Data {
         guard let url = URL(string: endpoint), url.scheme == "http", url.host == "127.0.0.1", url.path == "/mcp",
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, !token.isEmpty else {
@@ -341,6 +351,10 @@ enum ClipboardRPC {
             "params": ["name": name, "arguments": arguments]
         ])
         let (data, response) = try await session.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            noteUnauthorized()
+            throw Failure(message: "网关需要重新核对本地通道")
+        }
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = rpc["result"] as? [String: Any],

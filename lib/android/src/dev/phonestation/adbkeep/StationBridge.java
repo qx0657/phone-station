@@ -178,7 +178,18 @@ final class StationBridge implements StationHost {
                 .put("stayAwakeReason", !StationFeatures.active(context, "awake") ? FeaturePolicy.denied(StationFeatures.master(context), "awake") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")
                 .put("screenshotAvailable", StationFeatures.active(context, "capture") && controlsAllowed && verified && storage && shell.get("available").boolValue())
                 .put("screenshotReason", !StationFeatures.active(context, "capture") ? FeaturePolicy.denied(StationFeatures.master(context), "capture") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : !storage ? "请在手机权限页允许所有文件访问" : shell.get("reason").string())
-                .put("torch", lamp);
+                .put("torch", lamp)
+                .put("localMcp", KeeperStore.mcpEnabled(context))
+                .put("remoteEnabled", RemoteStore.enabled(context));
+    }
+
+    @Override public Json eventWait(String client, long clipboard, long notifications) {
+        LocalEventSignals.install(context);
+        if (client != null && !client.isEmpty()) {
+            try { SharedClipboard.lease(context, client); }
+            catch (RuntimeException ignored) { }
+        }
+        return LocalEventWait.await(clipboard, notifications, LocalEventWait.TIMEOUT_MS);
     }
 
     @Override public Json screenCapture(String requestId) {

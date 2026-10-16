@@ -41,11 +41,13 @@ final class PhoneNotifications {
         if (on) { packages.add(pkg); } else { packages.remove(pkg); }
         prefs(context).edit().putStringSet("packages", packages).apply();
         state(context);
+        PhoneRelayClient.event("notifications");
     }
     static synchronized Json configure(Context context, Json args) {
         Json on = args.get("enabled");
         if (on != null && !on.isNull()) { prefs(context).edit().putBoolean("enabled", on.boolValue()).apply(); }
         StationFeatures.publish(context);
+        PhoneRelayClient.event("notifications");
         return status(context);
     }
     // Content expiry is independent of lease renewals: an idle subscription must

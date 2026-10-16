@@ -50,6 +50,7 @@ final class LinkSession: ObservableObject {
     /// 已经确认是 PGT-AN20 的序列号。菜单栏复查时序列号没变就不再读型号。
     private var trustedSerial: String?
     private var linkWatch: Task<Void, Never>?
+    private var heartbeatWatch: Task<Void, Never>?
     private static let linkWatchInterval: UInt64 = 1_000_000_000
     private var deviceStream: AdbDeviceStream?
     private var probeInFlight = false
@@ -156,9 +157,10 @@ final class LinkSession: ObservableObject {
         onMenuIcon?(isConnected)
     }
 
-    /// adb 列表事件立即触发复查，另每秒验证实际应答，避免僵死 TCP 会话仍显示在线。
+    /// 设备增减来自 track-devices。不再每秒执行 adb devices 或 settings get。
+    /// 非 TCP 的 adb 服务连不上这条订阅，仍按原来的间隔复查设备列表。
     func startWatch() {
-        guard linkWatch == nil else { return }
+        guard heartbeatWatch == nil else { return }
         if StationRunner.executable("adb") != nil,
            let endpoint = AdbDeviceStream.Endpoint.configured(StationRunner.environment) {
             let stream = AdbDeviceStream(endpoint: endpoint)
@@ -166,12 +168,20 @@ final class LinkSession: ObservableObject {
             stream.onDisconnect = { [weak self] in self?.devicesChanged("") }
             deviceStream = stream
             stream.start()
+        } else if linkWatch == nil, StationRunner.executable("adb") != nil {
+            linkWatch = Task { @MainActor in
+                while !Task.isCancelled {
+                    await self.probe(readingControls: false)
+                    if Task.isCancelled { break }
+                    try? await Task.sleep(nanoseconds: Self.linkWatchInterval)
+                }
+            }
         }
-        linkWatch = Task { @MainActor in
+        Task { await probe(readingControls: false) }
+        heartbeatWatch = Task { @MainActor in
             while !Task.isCancelled {
-                await self.probe(readingControls: false)
-                if Task.isCancelled { break }
-                try? await Task.sleep(nanoseconds: Self.linkWatchInterval)
+                if self.serial != nil { self.markHeartbeat() }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }
@@ -202,12 +212,14 @@ final class LinkSession: ObservableObject {
 
     func stopWatch() {
         linkWatch?.cancel(); linkWatch = nil
+        heartbeatWatch?.cancel(); heartbeatWatch = nil
         deviceStream?.stop(); deviceStream = nil
     }
 
     func devicesChanged(_ listing: String) {
         let devices = AdbDevice.parse(listing)
         statusRevision += 1
+        let revision = statusRevision
         // Drop the capability immediately. A pending shell result belongs to the old list.
         if let serial, !devices.contains(where: { $0.serial == serial && $0.state == "device" }) {
             accept(statusRevision, name: "手机未连接", detail: "正在检查连接…", link: .offline,
@@ -221,7 +233,18 @@ final class LinkSession: ObservableObject {
                 await MainActor.run { self.tidying = false }
             }
         }
-        Task { await self.probe(readingControls: false) }
+        let trusted = trustedSerial
+        Task {
+            let reading = await Task.detached(priority: .utility) {
+                Self.describe(devices, trustedSerial: trusted, adb: StationRunner.executable("adb"))
+            }.value
+            guard revision == self.statusRevision else { return }
+            self.accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
+                        link: reading.link, serial: reading.serial, readingControls: false,
+                        reconnectable: reading.reconnectable)
+            self.phoneFeatures = nil
+            self.connectionPreferences = nil
+        }
     }
 
     func connect() {
@@ -297,7 +320,13 @@ final class LinkSession: ObservableObject {
             let detail = devices.timedOut ? "adb 检查超时，请重试。" : StationText.reason(devices.output, fallback: "无法读取 adb 设备列表。")
             return LinkReading(name: "设备检查失败", detail: detail, link: .offline)
         }
-        let listed = AdbDevice.parse(devices.output)
+        return describe(AdbDevice.parse(devices.output), trustedSerial: trustedSerial, adb: adb)
+    }
+
+    private nonisolated static func describe(_ listed: [AdbDevice], trustedSerial: String?, adb: URL?) -> LinkReading {
+        guard let adb else {
+            return LinkReading(name: "未找到 adb", detail: "请安装 Android platform-tools。", link: .offline)
+        }
         var online = listed.filter { $0.state == "device" }.map(\.serial)
         if online.count > 1 {
             let identities = online.map { serial -> String in
@@ -320,17 +349,8 @@ final class LinkSession: ObservableObject {
             return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline,
                                reconnectable: !unauthorized)
         }
-        let switches = "settings get global phonestation_enabled; " + PhoneFeatureState.keys.map {
-            "settings get global phonestation_feature_" + $0.replacingOccurrences(of: ".", with: "_")
-        }.joined(separator: "; ") + "; settings get global phonestation_mcp; settings get global phonestation_remote"
         if let trustedSerial, only == trustedSerial {
-            let alive = StationRunner.capture(adb, ["-s", only, "shell", switches], timeout: 2)
-            if !alive.succeeded {
-                return LinkReading(name: "手机未连接", detail: "调试连接已中断。", link: .offline,
-                                   reconnectable: true)
-            }
-            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only,
-                features: PhoneFeatureState.adb(alive.output), preferences: PhoneConnectionPreferences.adb(alive.output))
+            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
         }
         let model = StationRunner.capture(adb, ["-s", only, "shell", "getprop", "ro.product.model"], timeout: 2)
         let rawName = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -338,10 +358,7 @@ final class LinkSession: ObservableObject {
             return LinkReading(name: "无法识别手机型号", detail: "请检查连接，然后重新打开面板。", link: .offline)
         }
         if rawName == "PGT-AN20" {
-            let state = StationRunner.capture(adb, ["-s", only, "shell", switches], timeout: 2)
-            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only,
-                features: state.succeeded ? PhoneFeatureState.adb(state.output) : nil,
-                preferences: state.succeeded ? PhoneConnectionPreferences.adb(state.output) : nil)
+            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only)
         }
         return LinkReading(name: rawName, detail: "该型号尚未验证。请先查看项目说明中的设备支持范围。",
                            transport: transportLabel(only), link: .unverified)

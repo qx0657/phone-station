@@ -26,6 +26,7 @@ public final class FeaturePolicyTest {
         check(!FeaturePolicy.allows(true, selections, "station_new_unknown_tool"), "unknown tool denies by default");
         check(FeaturePolicy.allows(false, selections, "station_screen_close"), "cleanup is always possible");
         check(FeaturePolicy.allows(false, selections, "station_controls_status"), "metadata is safe");
+        check(FeaturePolicy.allows(false, selections, "station_event_wait"), "local wait stays available");
         RemotePolicy remote = new RemotePolicy(Set.of());
         check(!remote.allows("station_notify"), "feature on must not grant remote access");
         check(FeaturePolicy.allows(true, selections, "station_notify"), "remote permission and intent remain independent");
