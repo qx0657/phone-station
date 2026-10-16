@@ -308,6 +308,9 @@ final class Station: ObservableObject {
         mcp.onLocalOnline = { [weak self] online in
             self?.link.noteGatewayLocal(online)
         }
+        mcp.onRoute = { [weak self] in
+            self?.localEvents.consider()
+        }
         torch.onQuit = {
             NSApplication.shared.terminate(nil)
         }

@@ -420,7 +420,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 ## 实施前要核实
 
 1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥：不能。2026-10-16 本机自检，没有钥匙串访问组 entitlement 的临时签名程序，以及 `codesign --sign -` 的临时 App，创建 Secure Enclave P-256 都返回 -34018。两者改用登录钥匙串中的软件 P-256，签名和校验成功，名称以 `phone-station-selftest-` 开头的测试密钥已删除。没有系统授权弹窗。`scripts/build-mac-app.sh` 同样是临时签名，仓库没有 entitlement。正在使用的 App 没有替换，也没有拿它做这次自检。P2 接入通道前走这条软件密钥回退。
-2. PGT-AN20 上 Keystore P-256 是否走 StrongBox，以及签名耗时。诊断行已在受 DUMP 权限保护的服务 dump 里，形如 `deviceKey strongBox=true signMs=0`，不包含密钥或签名。别名 `phone-station-device-p256` 不存在时，第一次 dump 会创建它。API 31 以下无法从 KeyInfo 区分 StrongBox，已有密钥会记成 false。第二批没有在手机上读。审阅发现现在的 `PhoneDeviceKey` 把生成推迟到第一次签名：生成时间算进了 `signMs`；StrongBox 生成失败的异常在签名时才抛出，不会回退到普通 Keystore，没有 StrongBox 的手机会一直报 `deviceKey unavailable`，也建不出密钥。在手机上读之前先改成打开时生成、失败才回退，并加一条覆盖这条路径的用例。
+2. PGT-AN20 上 Keystore P-256 是否走 StrongBox，以及签名耗时。诊断行已在受 DUMP 权限保护的服务 dump 里，形如 `deviceKey strongBox=true signMs=0`，不包含密钥或签名。别名 `phone-station-device-p256` 不存在时，打开密钥时会创建它，生成时间不算进 `signMs`。StrongBox 生成失败回退普通 Keystore，本机有这条路径的用例。API 31 以下无法从 KeyInfo 区分 StrongBox，已有密钥会记成 false。还没有在这台手机上读。
 3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。
 4. 手机上 Java-WebSocket 服务端模式的线程与内存，与现有 `McpHttp` 对比。
 5. 个人部署的反向代理能否透传 `/v2/link` 的 WebSocket 升级和 256 KiB 的二进制帧，以及中继看到的来源地址是不是代理自己。是的话，加入限流要配置可信代理，否则所有人共用一个计数。

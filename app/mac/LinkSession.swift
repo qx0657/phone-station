@@ -65,14 +65,16 @@ final class LinkSession: ObservableObject {
     private var statusRevision = 0
     private var controlEpoch = 0
     private var connectionEpoch = 0
-    /// track-devices 仍列着、但 shell true 失败的序列号。列表里消失之前不当作在线。
+    /// track-devices 仍列着、但 shell true 失败的序列号。离开列表、网关重新在线或复查成功之前不当作在线。
     private var unreachableSerial: String?
     private var listedSerial: String?
     private var gatewayLocalOnline: Bool?
     private var localMcp: Bool?
     private var panelOpen = false
     private var livenessInFlight = false
+    private var livenessGeneration = 0
     private var idleTask: Task<Void, Never>?
+    private var recheckTask: Task<Void, Never>?
     var idleLivenessNanoseconds: UInt64 = 15_000_000_000
     private let shellAlive: @Sendable (String) -> Bool
     private let connectCommand: @Sendable () -> CommandResult
@@ -222,6 +224,8 @@ final class LinkSession: ObservableObject {
         watching = false
         linkWatch?.cancel(); linkWatch = nil
         deviceStream?.stop(); deviceStream = nil
+        idleTask?.cancel(); idleTask = nil
+        stopUnreachableRecheck()
     }
 
     func devicesChanged(_ listing: String) {
@@ -247,8 +251,11 @@ final class LinkSession: ObservableObject {
                 Self.describe(devices, trustedSerial: trusted, adb: StationRunner.executable("adb"))
             }.value
             guard revision == self.statusRevision else { return }
-            if reading.serial == nil || (self.unreachableSerial != nil && reading.serial != self.unreachableSerial) {
+            let listedGone = reading.serial == nil || (self.unreachableSerial != nil && reading.serial != self.unreachableSerial)
+            if listedGone, self.unreachableSerial != nil {
+                self.livenessGeneration += 1
                 self.unreachableSerial = nil
+                self.stopUnreachableRecheck()
             }
             self.accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
                         link: reading.link, serial: reading.serial, readingControls: false,
@@ -557,9 +564,16 @@ final class LinkSession: ObservableObject {
     }
 
     /// 网关本地通道从在线变为离线，而 adb 仍列着这台设备时，做一次存活探测。
+    /// 探测失败后，网关重新在线就解除不可达标记并重新读设备列表。
     func noteGatewayLocal(_ online: Bool) {
         let previous = gatewayLocalOnline
         gatewayLocalOnline = online
+        if online, previous != true, unreachableSerial != nil {
+            livenessGeneration += 1
+            unreachableSerial = nil
+            stopUnreachableRecheck()
+            Task { await self.probe(readingControls: false) }
+        }
         guard previous == true, !online, let serial = listedSerial ?? self.serial else { return }
         Task { await confirmAlive(serial) }
     }
@@ -608,6 +622,7 @@ final class LinkSession: ObservableObject {
     }
 
     /// 本机 MCP 关闭时没有网关探测。面板打开期间每 15 秒查一次，关闭不查。
+    /// 不可达标记另有复查，不看面板和 MCP 开关。
     private func restartIdleLiveness() {
         idleTask?.cancel()
         idleTask = nil
@@ -622,12 +637,36 @@ final class LinkSession: ObservableObject {
         }
     }
 
+    /// 标记期间每 15 秒复查一次 shell true。序列号离开列表或复原后停止。
+    private func startUnreachableRecheck() {
+        guard recheckTask == nil, unreachableSerial != nil else { return }
+        recheckTask = Task { @MainActor in
+            let mine = self.recheckTask
+            defer { if self.recheckTask == mine { self.recheckTask = nil } }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: self.idleLivenessNanoseconds)
+                if Task.isCancelled { return }
+                guard let serial = self.unreachableSerial else { return }
+                await self.confirmAlive(serial)
+                if self.unreachableSerial == nil || Task.isCancelled { return }
+            }
+        }
+    }
+
+    private func stopUnreachableRecheck() {
+        let running = recheckTask
+        recheckTask = nil
+        running?.cancel()
+    }
+
     private func confirmAlive(_ serial: String) async {
         if livenessInFlight { return }
         livenessInFlight = true
+        let generation = livenessGeneration
         let check = shellAlive
         let alive = await Task.detached { check(serial) }.value
         livenessInFlight = false
+        guard generation == livenessGeneration else { return }
         guard listedSerial == serial || self.serial == serial else { return }
         if alive {
             let recover = unreachableSerial == serial
@@ -635,11 +674,15 @@ final class LinkSession: ObservableObject {
             if recover { await self.probe(readingControls: false) }
             return
         }
+        let alreadyMarked = unreachableSerial == serial
         unreachableSerial = serial
         listedSerial = serial
-        statusRevision += 1
-        accept(statusRevision, name: "手机未连接", detail: "正在重新连接…", link: .offline,
-               readingControls: false, reconnectable: true)
+        if !alreadyMarked {
+            startUnreachableRecheck()
+            statusRevision += 1
+            accept(statusRevision, name: "手机未连接", detail: "正在重新连接…", link: .offline,
+                   readingControls: false, reconnectable: true)
+        }
     }
 }
 

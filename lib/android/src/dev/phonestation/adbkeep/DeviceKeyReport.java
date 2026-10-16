@@ -10,8 +10,9 @@ final class DeviceKeyReport {
         byte[] sign(byte[] message) throws Exception;
     }
 
-    interface Slot {
-        Signer open() throws Exception;
+    /** 打开时生成或取出密钥。StrongBox 失败就抛异常，由诊断行改试普通 Keystore。 */
+    interface Generator {
+        Signer open(boolean strongBox) throws Exception;
     }
 
     interface Clock {
@@ -20,16 +21,16 @@ final class DeviceKeyReport {
 
     private DeviceKeyReport() {}
 
-    static String line(Slot strongBox, Slot keystore, Clock clock) {
+    static String line(Generator generator, Clock clock) {
         boolean backed;
         Signer signer;
         try {
-            signer = strongBox.open();
+            signer = generator.open(true);
             backed = true;
         } catch (Exception unavailable) {
             backed = false;
             try {
-                signer = keystore.open();
+                signer = generator.open(false);
             } catch (Exception failed) {
                 return "deviceKey unavailable";
             }

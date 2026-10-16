@@ -219,6 +219,41 @@ struct ConnectionStatusTest {
         try? await Task.sleep(nanoseconds: 120_000_000)
         precondition(idle.shells.count == seen, "closing the panel stops the probe")
 
+        let gatewayLog = Log()
+        let byGateway = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
+                                     shellAlive: { gatewayLog.shell($0) }, connectCommand: { gatewayLog.connect() })
+        await byGateway.probe(readingControls: false)
+        byGateway.notePanel(false)
+        byGateway.noteLocalMcp(true)
+        byGateway.noteGatewayLocal(true)
+        byGateway.noteGatewayLocal(false)
+        for _ in 0..<40 where byGateway.serial != nil { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(byGateway.serial == nil && gatewayLog.shells == ["dead-phone"])
+        let shellsAtFailure = gatewayLog.shells.count
+        byGateway.noteGatewayLocal(true)
+        for _ in 0..<40 where byGateway.serial != "dead-phone" { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(byGateway.serial == "dead-phone" && gatewayLog.shells.count == shellsAtFailure && gatewayLog.connects == 1,
+                     "失败后由网关在线复原")
+
+        let recheckLog = Log()
+        let byRecheck = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
+                                     shellAlive: { recheckLog.shell($0) }, connectCommand: { recheckLog.connect() })
+        byRecheck.idleLivenessNanoseconds = 40_000_000
+        await byRecheck.probe(readingControls: false)
+        byRecheck.notePanel(false)
+        byRecheck.noteLocalMcp(true)
+        byRecheck.noteGatewayLocal(true)
+        byRecheck.noteGatewayLocal(false)
+        for _ in 0..<40 where byRecheck.serial != nil { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(byRecheck.serial == nil)
+        recheckLog.alive = true
+        for _ in 0..<50 where byRecheck.serial != "dead-phone" { try? await Task.sleep(nanoseconds: 20_000_000) }
+        precondition(byRecheck.serial == "dead-phone" && recheckLog.shells.count > 1 && recheckLog.connects == 1,
+                     "失败后由复查复原")
+        let rechecked = recheckLog.shells.count
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        precondition(recheckLog.shells.count == rechecked, "复查复原后停止")
+
         let projection = (["1"] + Array(repeating: "0", count: PhoneFeatureState.keys.count) + ["0", "1"]).joined(separator: "\n")
         let features = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
                                     featureShell: { _ in projection })

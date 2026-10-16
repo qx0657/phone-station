@@ -13,7 +13,7 @@ import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.spec.ECGenParameterSpec;
 
-/** Keystore 里的 P-256 设备密钥。优先 StrongBox。只给受 DUMP 保护的诊断读取，不接入现有工具。 */
+/** Keystore 里的 P-256 设备密钥。打开时生成，优先 StrongBox，生成失败再试普通 Keystore。只给受 DUMP 保护的诊断读取，不接入现有工具。 */
 final class PhoneDeviceKey {
     static final String ALIAS = "phone-station-device-p256";
     private static final String KEYSTORE = "AndroidKeyStore";
@@ -24,30 +24,23 @@ final class PhoneDeviceKey {
     static String diagnostic() {
         synchronized (LOCK) {
             try {
-                return DeviceKeyReport.line(PhoneDeviceKey::openStrongBox, PhoneDeviceKey::openKeystore, System::nanoTime);
+                return DeviceKeyReport.line(PhoneDeviceKey::open, System::nanoTime);
             } catch (RuntimeException error) {
                 return "deviceKey unavailable";
             }
         }
     }
 
-    private static DeviceKeyReport.Signer openStrongBox() throws Exception {
+    private static DeviceKeyReport.Signer open(boolean strongBox) throws Exception {
         PrivateKey existing = load();
         if (existing != null) {
-            if (!strongBox(existing)) {
+            if (strongBox && !backedByStrongBox(existing)) {
                 throw new GeneralSecurityException("strongbox");
             }
             return message -> sign(existing, message);
         }
-        return message -> sign(generate(true), message);
-    }
-
-    private static DeviceKeyReport.Signer openKeystore() throws Exception {
-        PrivateKey existing = load();
-        if (existing != null) {
-            return message -> sign(existing, message);
-        }
-        return message -> sign(generate(false), message);
+        PrivateKey created = generate(strongBox);
+        return message -> sign(created, message);
     }
 
     private static PrivateKey load() throws Exception {
@@ -71,7 +64,7 @@ final class PhoneDeviceKey {
         return generator.generateKeyPair().getPrivate();
     }
 
-    private static boolean strongBox(PrivateKey key) {
+    private static boolean backedByStrongBox(PrivateKey key) {
         if (Build.VERSION.SDK_INT < 31) {
             return false;
         }

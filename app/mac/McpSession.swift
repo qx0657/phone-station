@@ -23,6 +23,7 @@ final class McpSession: ObservableObject {
     var onRemoteConnection: (Bool) -> Void = { _ in }
     var onRemoteChecking: (Bool) -> Void = { _ in }
     var onLocalOnline: (Bool) -> Void = { _ in }
+    var onRoute: () -> Void = {}
     var allowRemotePair: () -> Bool = { false }
 
     private let feedback: StationFeedback
@@ -294,5 +295,6 @@ final class McpSession: ObservableObject {
             onRemoteConnection(status.remoteConnected)
             onRemoteChecking(status.remoteChecking)
         }
+        onRoute()
     }
 }
