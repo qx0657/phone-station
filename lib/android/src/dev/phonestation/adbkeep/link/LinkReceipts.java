@@ -1,34 +1,76 @@
 package dev.phonestation.adbkeep.link;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /** Link v2 回执与三个执行队列。现有工具不调用。 */
 public final class LinkReceipts implements AutoCloseable {
     public static final int BODY_LIMIT = 64 * 1024;
+    public static final int BODY_BUDGET = 8 * 1024 * 1024;
     public static final int IN_FLIGHT = 8;
-    public static final int MAX_RECEIPTS = 256;
+    public static final int MAX_RECEIPTS = 4096;
     public static final long KEEP_MS = 24L * 60 * 60 * 1000;
     public static final long BODY_MS = 10L * 60 * 1000;
     public static final long EVICT_MS = 60L * 60 * 1000;
     public static final long PRIVILEGED_QUEUE_MS = 10_000;
+
+    /** 方法在产生任何副作用之前失败。回执记为 failed 且 applied 为 false。 */
+    public static final class NotApplied extends Exception {
+        public NotApplied() {}
+    }
+
+    /** 原子改名之后同步目录。电脑测试注入替身；手机上走 android.system.Os。 */
+    public interface DirectorySync {
+        void sync(Path directory) throws IOException;
+
+        static DirectorySync platform() {
+            try {
+                Class.forName("android.system.Os");
+            } catch (ClassNotFoundException missing) {
+                return directory -> { };
+            }
+            try {
+                Class<?> os = Class.forName("android.system.Os");
+                Class<?> constants = Class.forName("android.system.OsConstants");
+                int flags = constants.getField("O_RDONLY").getInt(null);
+                Method open = os.getMethod("open", String.class, int.class, int.class);
+                Method fsync = os.getMethod("fsync", FileDescriptor.class);
+                Method close = os.getMethod("close", FileDescriptor.class);
+                return directory -> syncAndroid(open, fsync, close, directory, flags);
+            } catch (ReflectiveOperationException error) {
+                return directory -> { throw new IOException("directory sync", error); };
+            }
+        }
+    }
+
+    /** 测试用来让某次状态写入失败。 */
+    public interface WriteGate {
+        void beforeWrite(String state) throws IOException;
+    }
 
     public interface Clock {
         long elapsedMillis();
@@ -41,16 +83,18 @@ public final class LinkReceipts implements AutoCloseable {
         public final String method;
         public final String digest;
         public final byte[] body;
+        public final boolean resultKept;
         public final String epoch;
         public final String macId;
         public final String op;
 
-        Receipt(String state, boolean applied, String method, String digest, byte[] body, String epoch, String macId, String op) {
+        Receipt(String state, boolean applied, String method, String digest, byte[] body, boolean resultKept, String epoch, String macId, String op) {
             this.state = state;
             this.applied = applied;
             this.method = method;
             this.digest = digest;
             this.body = body;
+            this.resultKept = resultKept;
             this.epoch = epoch;
             this.macId = macId;
             this.op = op;
@@ -60,7 +104,11 @@ public final class LinkReceipts implements AutoCloseable {
     private final Path root;
     private final Clock clock;
     private final int maxReceipts;
+    private final int bodyBudget;
+    private final DirectorySync directories;
+    private final WriteGate gate;
     private final Object lock = new Object();
+    private final Map<String, Record> index = new HashMap<String, Record>();
     private final Map<String, Integer> inFlight = new HashMap<String, Integer>();
     private final Set<String> cancelRequested = new HashSet<String>();
     private final Semaphore interactive = new Semaphore(4);
@@ -71,21 +119,33 @@ public final class LinkReceipts implements AutoCloseable {
         thread.setDaemon(true);
         return thread;
     });
+    private final ScheduledExecutorService sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "link-receipt-sweep");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final String epoch;
     private int privilegedQueued;
     private boolean closed;
 
     public LinkReceipts(Path root, Clock clock) throws IOException {
-        this(root, clock, MAX_RECEIPTS);
+        this(root, clock, MAX_RECEIPTS, BODY_BUDGET, null, null);
     }
 
     public LinkReceipts(Path root, Clock clock, int maxReceipts) throws IOException {
-        if (clock == null || clock.bootId() == null || !clock.bootId().matches("[A-Za-z0-9._-]{1,64}") || maxReceipts < 1) {
+        this(root, clock, maxReceipts, BODY_BUDGET, null, null);
+    }
+
+    public LinkReceipts(Path root, Clock clock, int maxReceipts, int bodyBudget, DirectorySync directories, WriteGate gate) throws IOException {
+        if (clock == null || clock.bootId() == null || !clock.bootId().matches("[A-Za-z0-9._-]{1,64}") || maxReceipts < 1 || bodyBudget < 0) {
             throw new IllegalArgumentException("clock");
         }
         this.root = root;
         this.clock = clock;
         this.maxReceipts = maxReceipts;
+        this.bodyBudget = bodyBudget;
+        this.directories = directories == null ? DirectorySync.platform() : directories;
+        this.gate = gate;
         if (Files.isSymbolicLink(root)) {
             throw new IOException("receipt directory");
         }
@@ -93,6 +153,7 @@ public final class LinkReceipts implements AutoCloseable {
         Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
         this.epoch = loadEpoch();
         recover();
+        sweeper.scheduleWithFixedDelay(this::sweepQuiet, 200, 200, TimeUnit.MILLISECONDS);
     }
 
     public String epoch() {
@@ -123,31 +184,36 @@ public final class LinkReceipts implements AutoCloseable {
         }
         byte[] body = params == null ? new byte[0] : params;
         String digest = sha256(body);
-        synchronized (lock) {
-            if (closed) {
-                throw new IllegalStateException("closed");
-            }
-        }
         if (!durable(method)) {
-            return new Receipt("complete", false, method, digest, work.call(), epoch, macId, op);
+            return submitReadOnly(macId, op, method, digest, work);
         }
         synchronized (lock) {
             if (closed) {
                 throw new IllegalStateException("closed");
             }
-            maintain();
-            Record existing = read(macId, op);
+            expireDueLocked();
+            Record existing = index.get(key(macId, op));
             if (existing != null) {
                 if (!digest.equals(existing.digest)) {
-                    return new Receipt("conflict", existing.applied, existing.method, existing.digest, existing.body, epoch, macId, op);
+                    return conflict(existing);
                 }
                 return view(existing);
             }
             if (count(macId) >= IN_FLIGHT || ("privileged".equals(lane(method)) && privilegedQueued >= 4) || !room()) {
-                return new Receipt("busy", false, method, digest, null, epoch, macId, op);
+                return busy(method, digest, macId, op);
             }
             Record created = new Record(macId, op, method, digest, "queued", false, clock.bootId(), clock.elapsedMillis(), null);
-            write(created);
+            try {
+                write(created);
+            } catch (IOException error) {
+                try {
+                    Files.deleteIfExists(path(macId, op));
+                    directories.sync(root);
+                } catch (IOException ignored) {
+                }
+                return busy(method, digest, macId, op);
+            }
+            index.put(key(macId, op), created);
             inFlight.put(macId, count(macId) + 1);
             if ("privileged".equals(lane(method))) {
                 privilegedQueued++;
@@ -155,8 +221,8 @@ public final class LinkReceipts implements AutoCloseable {
         }
         workers.execute(() -> run(macId, op, work));
         synchronized (lock) {
-            Record stored = read(macId, op);
-            return stored == null ? new Receipt("not_found", false, method, digest, null, epoch, macId, op) : view(stored);
+            Record stored = index.get(key(macId, op));
+            return stored == null ? missing(macId, op) : view(stored);
         }
     }
 
@@ -164,16 +230,9 @@ public final class LinkReceipts implements AutoCloseable {
         validate(macId);
         validate(op);
         synchronized (lock) {
-            maintain();
-            Record stored = read(macId, op);
-            if (stored == null) {
-                return new Receipt("not_found", false, "", "", null, epoch, macId, op);
-            }
-            if (terminal(stored.state) && stored.body != null && age(stored) >= BODY_MS) {
-                stored.body = null;
-                write(stored);
-            }
-            return view(stored);
+            expireDueLocked();
+            Record stored = index.get(key(macId, op));
+            return stored == null ? missing(macId, op) : view(stored);
         }
     }
 
@@ -181,12 +240,18 @@ public final class LinkReceipts implements AutoCloseable {
         validate(macId);
         validate(op);
         synchronized (lock) {
-            Record stored = read(macId, op);
+            Record stored = index.get(key(macId, op));
             if (stored == null) {
-                return new Receipt("not_found", false, "", "", null, epoch, macId, op);
+                return missing(macId, op);
             }
+            byte[] previous = stored.body;
             stored.body = null;
-            write(stored);
+            try {
+                write(stored);
+            } catch (IOException error) {
+                stored.body = previous;
+                throw error;
+            }
             return view(stored);
         }
     }
@@ -195,22 +260,25 @@ public final class LinkReceipts implements AutoCloseable {
         validate(macId);
         validate(op);
         synchronized (lock) {
-            Record stored = read(macId, op);
+            Record stored = index.get(key(macId, op));
             if (stored == null) {
-                return new Receipt("not_found", false, "", "", null, epoch, macId, op);
+                return missing(macId, op);
             }
             if ("queued".equals(stored.state)) {
-                if ("privileged".equals(lane(stored.method))) {
-                    privilegedQueued--;
-                }
                 stored.state = "canceled";
                 stored.applied = false;
-                write(stored);
+                try {
+                    write(stored);
+                } catch (IOException ignored) {
+                }
+                if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
+                    privilegedQueued--;
+                }
                 releaseQuiet(stored.macId);
                 return view(stored);
             }
             if ("running".equals(stored.state)) {
-                cancelRequested.add(stored.macId + "." + stored.op);
+                cancelRequested.add(key(stored.macId, stored.op));
             }
             return view(stored);
         }
@@ -220,7 +288,7 @@ public final class LinkReceipts implements AutoCloseable {
         validate(macId);
         validate(op);
         synchronized (lock) {
-            return cancelRequested.contains(macId + "." + op);
+            return cancelRequested.contains(key(macId, op));
         }
     }
 
@@ -228,6 +296,7 @@ public final class LinkReceipts implements AutoCloseable {
         synchronized (lock) {
             closed = true;
         }
+        sweeper.shutdownNow();
         workers.shutdownNow();
         try {
             workers.awaitTermination(2, TimeUnit.SECONDS);
@@ -236,47 +305,94 @@ public final class LinkReceipts implements AutoCloseable {
         }
     }
 
-    private void run(String macId, String op, Callable<byte[]> work) {
-        Record stored;
+    private Receipt submitReadOnly(String macId, String op, String method, String digest, Callable<byte[]> work) throws Exception {
         synchronized (lock) {
-            stored = quietRead(macId, op);
+            if (closed) {
+                throw new IllegalStateException("closed");
+            }
+            expireDueLocked();
+            if (count(macId) >= IN_FLIGHT) {
+                return busy(method, digest, macId, op);
+            }
+            inFlight.put(macId, count(macId) + 1);
         }
-        if (stored == null) {
-            return;
+        Semaphore lane = semaphore(lane(method));
+        boolean acquired = false;
+        try {
+            lane.acquire();
+            acquired = true;
+            byte[] result = work.call();
+            if (result == null) {
+                result = new byte[0];
+            }
+            return receipt("complete", false, method, digest, result, true, macId, op);
+        } finally {
+            if (acquired) {
+                lane.release();
+            }
+            synchronized (lock) {
+                releaseQuiet(macId);
+            }
         }
-        Semaphore lane = semaphore(lane(stored.method));
+    }
+
+    private void run(String macId, String op, Callable<byte[]> work) {
+        synchronized (lock) {
+            if (index.get(key(macId, op)) == null) {
+                releaseQuiet(macId);
+                return;
+            }
+        }
+        Semaphore lane = semaphore(indexLane(macId, op));
         try {
             lane.acquire();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            synchronized (lock) {
+                releaseQuiet(macId);
+            }
             return;
         }
         boolean started = false;
         try {
             synchronized (lock) {
-                stored = quietRead(macId, op);
+                Record stored = index.get(key(macId, op));
                 if (stored == null || !"queued".equals(stored.state) || closed) {
                     return;
                 }
                 if ("privileged".equals(lane(stored.method)) && age(stored) > PRIVILEGED_QUEUE_MS) {
-                    stored.state = "expired";
-                    stored.applied = false;
-                    write(stored);
-                    privilegedQueued--;
-                    releaseQuiet(stored.macId);
+                    expireQueued(stored);
                     return;
                 }
                 stored.state = "running";
-                write(stored);
-                if ("privileged".equals(lane(stored.method))) {
+                try {
+                    write(stored);
+                } catch (IOException error) {
+                    stored.state = "expired";
+                    stored.applied = false;
+                    try {
+                        write(stored);
+                    } catch (IOException ignored) {
+                    }
+                    if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
+                        privilegedQueued--;
+                    }
+                    releaseQuiet(macId);
+                    return;
+                }
+                if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
                     privilegedQueued--;
                 }
                 started = true;
             }
             byte[] body = null;
             Exception failure = null;
+            boolean applied = true;
             try {
                 body = work.call();
+            } catch (NotApplied notApplied) {
+                failure = notApplied;
+                applied = false;
             } catch (Exception error) {
                 failure = error;
             }
@@ -284,31 +400,150 @@ public final class LinkReceipts implements AutoCloseable {
                 if (closed) {
                     return;
                 }
-                stored = quietRead(macId, op);
+                Record stored = index.get(key(macId, op));
                 if (stored == null) {
                     return;
                 }
-                stored.applied = true;
-                if (failure != null || (body != null && body.length > BODY_LIMIT)) {
+                if (failure != null) {
                     stored.state = "failed";
+                    stored.applied = applied;
+                    stored.body = null;
+                } else if (body != null && body.length > BODY_LIMIT) {
+                    stored.state = "complete";
+                    stored.applied = true;
                     stored.body = null;
                 } else {
                     stored.state = "complete";
-                    stored.body = body;
+                    stored.applied = true;
+                    stored.body = body == null ? new byte[0] : body;
                 }
-                write(stored);
-                cancelRequested.remove(stored.macId + "." + stored.op);
-                releaseQuiet(stored.macId);
-            }
-        } catch (IOException error) {
-            synchronized (lock) {
-                if (started) {
-                    releaseQuiet(macId);
+                try {
+                    if (stored.body != null) {
+                        trimBodies();
+                    }
+                    write(stored);
+                } catch (IOException ignored) {
                 }
+                cancelRequested.remove(key(macId, op));
+                releaseQuiet(macId);
+                started = false;
             }
         } finally {
             lane.release();
+            if (started) {
+                synchronized (lock) {
+                    releaseQuiet(macId);
+                }
+            }
         }
+    }
+
+    private String indexLane(String macId, String op) {
+        synchronized (lock) {
+            Record stored = index.get(key(macId, op));
+            return stored == null ? "interactive" : lane(stored.method);
+        }
+    }
+
+    private void expireQueued(Record stored) {
+        stored.state = "expired";
+        stored.applied = false;
+        try {
+            write(stored);
+        } catch (IOException ignored) {
+        }
+        if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
+            privilegedQueued--;
+        }
+        releaseQuiet(stored.macId);
+    }
+
+    private void sweepQuiet() {
+        try {
+            synchronized (lock) {
+                if (!closed) {
+                    expireDueLocked();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void expireDueLocked() throws IOException {
+        List<Record> due = new ArrayList<Record>();
+        for (Record stored : index.values()) {
+            if ("queued".equals(stored.state) && "privileged".equals(lane(stored.method)) && age(stored) > PRIVILEGED_QUEUE_MS) {
+                due.add(stored);
+            }
+        }
+        for (Record stored : due) {
+            expireQueued(stored);
+        }
+        List<Record> dropBody = new ArrayList<Record>();
+        List<Record> dropAll = new ArrayList<Record>();
+        for (Record stored : index.values()) {
+            if (!terminal(stored.state)) {
+                continue;
+            }
+            if (age(stored) >= KEEP_MS) {
+                dropAll.add(stored);
+            } else if (stored.body != null && age(stored) >= BODY_MS) {
+                dropBody.add(stored);
+            }
+        }
+        for (Record stored : dropBody) {
+            byte[] previous = stored.body;
+            stored.body = null;
+            try {
+                write(stored);
+            } catch (IOException error) {
+                stored.body = previous;
+                throw error;
+            }
+        }
+        for (Record stored : dropAll) {
+            Files.deleteIfExists(path(stored.macId, stored.op));
+            index.remove(key(stored.macId, stored.op));
+        }
+        if (!dropAll.isEmpty()) {
+            directories.sync(root);
+        }
+        trimBodies();
+    }
+
+    private void trimBodies() throws IOException {
+        while (bodyBytes() > bodyBudget) {
+            Record oldest = null;
+            for (Record stored : index.values()) {
+                if (stored.body == null || stored.body.length == 0) {
+                    continue;
+                }
+                if (oldest == null || age(stored) > age(oldest)) {
+                    oldest = stored;
+                }
+            }
+            if (oldest == null) {
+                return;
+            }
+            byte[] previous = oldest.body;
+            oldest.body = null;
+            try {
+                write(oldest);
+            } catch (IOException error) {
+                oldest.body = previous;
+                throw error;
+            }
+        }
+    }
+
+    private long bodyBytes() {
+        long total = 0;
+        for (Record stored : index.values()) {
+            if (stored.body != null) {
+                total += stored.body.length;
+            }
+        }
+        return total;
     }
 
     private void releaseQuiet(String macId) {
@@ -346,44 +581,29 @@ public final class LinkReceipts implements AutoCloseable {
                     stored.applied = true;
                     write(stored);
                 }
-            }
-        }
-    }
-
-    private void maintain() throws IOException {
-        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, "*.rec")) {
-            for (Path file : entries) {
-                Record stored = readFile(file);
-                if (stored == null || !terminal(stored.state)) {
-                    continue;
-                }
-                if (age(stored) >= KEEP_MS) {
-                    Files.deleteIfExists(file);
-                }
+                index.put(key(stored.macId, stored.op), stored);
             }
         }
     }
 
     private boolean room() throws IOException {
-        int count = 0;
-        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, "*.rec")) {
-            for (Path file : entries) {
-                count++;
-            }
-        }
-        if (count < maxReceipts) {
+        if (index.size() < maxReceipts) {
             return true;
         }
-        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, "*.rec")) {
-            for (Path file : entries) {
-                Record stored = readFile(file);
-                if (stored != null && terminal(stored.state) && age(stored) >= EVICT_MS) {
-                    Files.deleteIfExists(file);
-                    count--;
-                }
+        List<Record> old = new ArrayList<Record>();
+        for (Record stored : index.values()) {
+            if (terminal(stored.state) && age(stored) >= EVICT_MS) {
+                old.add(stored);
             }
         }
-        return count < maxReceipts;
+        for (Record stored : old) {
+            Files.deleteIfExists(path(stored.macId, stored.op));
+            index.remove(key(stored.macId, stored.op));
+        }
+        if (!old.isEmpty()) {
+            directories.sync(root);
+        }
+        return index.size() < maxReceipts;
     }
 
     private String loadEpoch() throws IOException {
@@ -402,6 +622,10 @@ public final class LinkReceipts implements AutoCloseable {
             String created = hex(raw);
             Files.write(file, created.getBytes(StandardCharsets.US_ASCII));
             Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+                channel.force(true);
+            }
+            directories.sync(root);
             return created;
         }
         String text = Files.readString(file).trim();
@@ -411,23 +635,11 @@ public final class LinkReceipts implements AutoCloseable {
         return text;
     }
 
-    private Record read(String macId, String op) throws IOException {
-        return readFile(path(macId, op));
-    }
-
-    private Record quietRead(String macId, String op) {
-        try {
-            return read(macId, op);
-        } catch (IOException error) {
-            return null;
-        }
-    }
-
     private Record readFile(Path file) throws IOException {
         if (!Files.exists(file)) {
             return null;
         }
-        if (Files.isSymbolicLink(file) || !Files.isRegularFile(file) || Files.size(file) > BODY_LIMIT + 1024) {
+        if (Files.isSymbolicLink(file) || !Files.isRegularFile(file) || Files.size(file) > BODY_LIMIT * 2L + 1024) {
             throw new IOException("receipt");
         }
         String[] parts = Files.readString(file).split("\t", -1);
@@ -450,18 +662,42 @@ public final class LinkReceipts implements AutoCloseable {
     }
 
     private void write(Record stored) throws IOException {
+        if (gate != null) {
+            gate.beforeWrite(stored.state);
+        }
         Path temp = Files.createTempFile(root, ".pending-", ".tmp");
         try {
             Files.setPosixFilePermissions(temp, PosixFilePermissions.fromString("rw-------"));
             String body = stored.body == null ? "-" : Base64.getEncoder().encodeToString(stored.body);
             String line = String.join("\t", "v1", stored.macId, stored.op, stored.method, stored.digest, stored.state, stored.applied ? "1" : "0", stored.boot, Long.toString(stored.elapsed), body);
             Files.write(temp, line.getBytes(StandardCharsets.US_ASCII));
-            try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(temp, java.nio.file.StandardOpenOption.WRITE)) {
+            try (FileChannel channel = FileChannel.open(temp, StandardOpenOption.WRITE)) {
                 channel.force(true);
             }
             Files.move(temp, path(stored.macId, stored.op), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            directories.sync(root);
         } finally {
             Files.deleteIfExists(temp);
+        }
+    }
+
+    private static void syncAndroid(Method open, Method fsync, Method close, Path directory, int flags) throws IOException {
+        Object fd;
+        try {
+            fd = open.invoke(null, directory.toString(), flags, 0);
+        } catch (ReflectiveOperationException error) {
+            throw new IOException("directory sync", error);
+        }
+        try {
+            fsync.invoke(null, fd);
+        } catch (ReflectiveOperationException error) {
+            throw new IOException("directory sync", error);
+        } finally {
+            try {
+                close.invoke(null, fd);
+            } catch (ReflectiveOperationException error) {
+                throw new IOException("directory sync", error);
+            }
         }
     }
 
@@ -482,11 +718,31 @@ public final class LinkReceipts implements AutoCloseable {
     }
 
     private Receipt view(Record stored) {
-        return new Receipt(stored.state, stored.applied, stored.method, stored.digest, stored.body, epoch, stored.macId, stored.op);
+        return receipt(stored.state, stored.applied, stored.method, stored.digest, stored.body, stored.body != null, stored.macId, stored.op);
+    }
+
+    private Receipt conflict(Record existing) {
+        return receipt("conflict", existing.applied, existing.method, existing.digest, existing.body, existing.body != null, existing.macId, existing.op);
+    }
+
+    private Receipt busy(String method, String digest, String macId, String op) {
+        return receipt("busy", false, method, digest, null, false, macId, op);
+    }
+
+    private Receipt missing(String macId, String op) {
+        return receipt("not_found", false, "", "", null, false, macId, op);
+    }
+
+    private Receipt receipt(String state, boolean applied, String method, String digest, byte[] body, boolean resultKept, String macId, String op) {
+        return new Receipt(state, applied, method, digest, body, resultKept, epoch, macId, op);
     }
 
     private static boolean terminal(String state) {
         return "complete".equals(state) || "failed".equals(state) || "expired".equals(state) || "canceled".equals(state) || "unknown".equals(state);
+    }
+
+    private static String key(String macId, String op) {
+        return macId + "." + op;
     }
 
     private static void validate(String id) {

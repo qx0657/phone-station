@@ -1,12 +1,14 @@
 package dev.phonestation.adbkeep;
 
 import dev.phonestation.adbkeep.link.LinkReceipts;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 回执先落盘，重启转换，冲突和同编号只执行一次。 */
 final class LinkReceiptTest {
@@ -32,10 +34,17 @@ final class LinkReceiptTest {
             }
             Manual later = new Manual();
             try (LinkReceipts store = new LinkReceipts(root.resolve("later"), later)) {
-                bodyExpires(store, later);
+                bodyExpires(store, later, root.resolve("later"));
                 cancelQueued(store);
                 privilegedCap(store);
             }
+            oversized(root.resolve("oversize"));
+            notApplied(root.resolve("not-applied"));
+            directorySync(root.resolve("sync"));
+            writeFailure(root.resolve("write-fail"));
+            capAndIndex(root.resolve("cap"));
+            readOnlyOccupiesSlot(root.resolve("readonly-slot"));
+            privilegedExpiresWithoutWaiting(root.resolve("sweep"));
         } finally {
             delete(root);
         }
@@ -222,15 +231,375 @@ final class LinkReceiptTest {
         }
     }
 
-    private static void bodyExpires(LinkReceipts store, Manual clock) throws Exception {
+    private static void bodyExpires(LinkReceipts store, Manual clock, Path root) throws Exception {
         String mac = id(18);
         String op = id(19);
         store.submit(mac, op, "clipboard.set", "keep".getBytes(), () -> "body".getBytes());
         awaitState(store, mac, op, "complete");
         clock.now = LinkReceipts.BODY_MS;
-        if (store.query(mac, op).body != null || !"complete".equals(store.query(mac, op).state)) {
+        String text = waitFile(root.resolve(mac + "." + op + ".rec"), value -> value.endsWith("\t-"));
+        LinkReceipts.Receipt expired = store.query(mac, op);
+        if (!text.endsWith("\t-") || expired.body != null || expired.resultKept || !"complete".equals(expired.state)) {
             throw new AssertionError("body age");
         }
+    }
+
+    private static void oversized(Path root) throws Exception {
+        try (LinkReceipts store = new LinkReceipts(root, new Manual())) {
+            String mac = id(60);
+            String op = id(61);
+            store.submit(mac, op, "clipboard.set", "over".getBytes(), () -> new byte[LinkReceipts.BODY_LIMIT + 1]);
+            LinkReceipts.Receipt receipt = awaitState(store, mac, op, "complete");
+            if (receipt.body != null || receipt.resultKept || !receipt.applied) {
+                throw new AssertionError("oversized");
+            }
+        }
+    }
+
+    private static void notApplied(Path root) throws Exception {
+        try (LinkReceipts store = new LinkReceipts(root, new Manual())) {
+            store.submit(id(62), id(63), "clipboard.set", "skip".getBytes(), () -> {
+                throw new LinkReceipts.NotApplied();
+            });
+            LinkReceipts.Receipt skipped = awaitState(store, id(62), id(63), "failed");
+            if (skipped.applied || skipped.resultKept) {
+                throw new AssertionError("not applied");
+            }
+            store.submit(id(64), id(65), "clipboard.set", "started".getBytes(), () -> {
+                throw new IllegalStateException("started");
+            });
+            LinkReceipts.Receipt started = awaitState(store, id(64), id(65), "failed");
+            if (!started.applied || started.resultKept) {
+                throw new AssertionError("started");
+            }
+        }
+    }
+
+    private static void directorySync(Path root) throws Exception {
+        AtomicInteger syncs = new AtomicInteger();
+        try (LinkReceipts store = new LinkReceipts(root, new Manual(), LinkReceipts.MAX_RECEIPTS,
+                LinkReceipts.BODY_BUDGET, ignored -> syncs.incrementAndGet(), null)) {
+            int opened = syncs.get();
+            if (opened < 1) {
+                throw new AssertionError("epoch");
+            }
+            store.submit(id(66), id(67), "clipboard.set", "sync".getBytes(), () -> "ok".getBytes());
+            awaitState(store, id(66), id(67), "complete");
+            if (syncs.get() < opened + 3) {
+                throw new AssertionError(syncs.get());
+            }
+        }
+        AtomicInteger attempts = new AtomicInteger();
+        Path failed = root.resolve("failed");
+        try (LinkReceipts store = new LinkReceipts(failed, new Manual(), LinkReceipts.MAX_RECEIPTS,
+                LinkReceipts.BODY_BUDGET, ignored -> {
+                    if (attempts.incrementAndGet() > 1) {
+                        throw new IOException("directory");
+                    }
+                }, null)) {
+            AtomicInteger runs = new AtomicInteger();
+            LinkReceipts.Receipt receipt = store.submit(id(66), id(68), "clipboard.set", "sync".getBytes(), () -> {
+                runs.incrementAndGet();
+                return "ok".getBytes();
+            });
+            if (!"busy".equals(receipt.state) || runs.get() != 0 || count(failed, ".rec") != 0) {
+                throw new AssertionError("sync orphan " + receipt.state);
+            }
+        }
+    }
+
+    private static void writeFailure(Path root) throws Exception {
+        AtomicReference<String> fail = new AtomicReference<String>("queued");
+        AtomicInteger runs = new AtomicInteger();
+        String mac = id(72);
+        try (LinkReceipts store = new LinkReceipts(root, new Manual(), LinkReceipts.MAX_RECEIPTS,
+                LinkReceipts.BODY_BUDGET, ignored -> { }, state -> {
+                    if (state.equals(fail.get())) {
+                        throw new IOException(state);
+                    }
+                })) {
+            LinkReceipts.Receipt queued = store.submit(id(68), id(69), "clipboard.set", "q".getBytes(), () -> {
+                runs.incrementAndGet();
+                return "q".getBytes();
+            });
+            if (!"busy".equals(queued.state) || runs.get() != 0 || count(root, ".rec") != 0) {
+                throw new AssertionError("queued write " + queued.state);
+            }
+            fail.set("running");
+            store.submit(id(70), id(71), "clipboard.set", "r".getBytes(), () -> {
+                runs.incrementAndGet();
+                return "r".getBytes();
+            });
+            LinkReceipts.Receipt running = awaitState(store, id(70), id(71), "expired");
+            if (running.applied || runs.get() != 0) {
+                throw new AssertionError("running write");
+            }
+            fail.set("complete");
+            store.submit(mac, id(73), "clipboard.set", "c".getBytes(), () -> "kept".getBytes());
+            LinkReceipts.Receipt kept = awaitState(store, mac, id(73), "complete");
+            if (!kept.applied || !kept.resultKept || !"kept".equals(new String(kept.body))) {
+                throw new AssertionError("memory");
+            }
+            String[] parts = Files.readString(root.resolve(mac + "." + id(73) + ".rec")).split("\t", -1);
+            if (!"running".equals(parts[5])) {
+                throw new AssertionError(parts[5]);
+            }
+            CountDownLatch submitted = new CountDownLatch(LinkReceipts.IN_FLIGHT);
+            CountDownLatch hold = new CountDownLatch(1);
+            AtomicInteger accepted = new AtomicInteger();
+            AtomicReference<Throwable> error = new AtomicReference<Throwable>();
+            for (int index = 0; index < LinkReceipts.IN_FLIGHT; index++) {
+                int number = index;
+                Thread thread = new Thread(() -> {
+                    try {
+                        LinkReceipts.Receipt receipt = store.submit(mac, id(80 + number), "clipboard.set", ("d" + number).getBytes(), () -> {
+                            hold.await();
+                            return "x".getBytes();
+                        });
+                        if ("queued".equals(receipt.state) || "running".equals(receipt.state)) {
+                            accepted.incrementAndGet();
+                        }
+                    } catch (Throwable failure) {
+                        error.set(failure);
+                    } finally {
+                        submitted.countDown();
+                    }
+                });
+                thread.start();
+            }
+            if (!submitted.await(5, TimeUnit.SECONDS) || accepted.get() != LinkReceipts.IN_FLIGHT || error.get() != null) {
+                hold.countDown();
+                throw new AssertionError("slot " + accepted.get());
+            }
+            hold.countDown();
+            for (int index = 0; index < LinkReceipts.IN_FLIGHT; index++) {
+                awaitState(store, mac, id(80 + index), "complete");
+            }
+        }
+        try (LinkReceipts restarted = new LinkReceipts(root, new Manual())) {
+            LinkReceipts.Receipt unknown = restarted.query(mac, id(73));
+            if (!"unknown".equals(unknown.state) || !unknown.applied) {
+                throw new AssertionError(unknown.state);
+            }
+        }
+    }
+
+    private static void capAndIndex(Path root) throws Exception {
+        if (LinkReceipts.MAX_RECEIPTS != 4096) {
+            throw new AssertionError(LinkReceipts.MAX_RECEIPTS);
+        }
+        Manual clock = new Manual();
+        String mac = id(90);
+        try (LinkReceipts store = new LinkReceipts(root.resolve("count"), clock, 2)) {
+            CountDownLatch entered = new CountDownLatch(2);
+            CountDownLatch release = new CountDownLatch(1);
+            for (int index = 0; index < 2; index++) {
+                String op = id(91 + index);
+                store.submit(mac, op, "clipboard.set", op.getBytes(), () -> {
+                    entered.countDown();
+                    release.await();
+                    return "held".getBytes();
+                });
+            }
+            if (!entered.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("cap hold");
+            }
+            clock.now = LinkReceipts.EVICT_MS;
+            if (!"busy".equals(store.submit(mac, id(93), "clipboard.set", "more".getBytes(), () -> "no".getBytes()).state)) {
+                throw new AssertionError("young cap");
+            }
+            release.countDown();
+            awaitState(store, mac, id(91), "complete");
+            awaitState(store, mac, id(92), "complete");
+            store.submit(mac, id(94), "clipboard.set", "next".getBytes(), () -> "next".getBytes());
+            LinkReceipts.Receipt kept = awaitState(store, mac, id(94), "complete");
+            if (!"not_found".equals(store.query(mac, id(91)).state) || !"not_found".equals(store.query(mac, id(92)).state) || kept.body == null) {
+                throw new AssertionError("evict");
+            }
+            Files.delete(root.resolve("count").resolve(mac + "." + id(94) + ".rec"));
+            LinkReceipts.Receipt indexed = store.query(mac, id(94));
+            if (indexed.body == null || !"next".equals(new String(indexed.body))) {
+                throw new AssertionError("index");
+            }
+        }
+        Manual ages = new Manual();
+        try (LinkReceipts store = new LinkReceipts(root.resolve("budget"), ages, LinkReceipts.MAX_RECEIPTS, 10, ignored -> { }, null)) {
+            store.submit(id(95), id(96), "clipboard.set", "old".getBytes(), () -> "12345".getBytes());
+            awaitState(store, id(95), id(96), "complete");
+            ages.now = 5;
+            store.submit(id(97), id(98), "clipboard.set", "new".getBytes(), () -> "12345678".getBytes());
+            awaitState(store, id(97), id(98), "complete");
+            LinkReceipts.Receipt older = store.query(id(95), id(96));
+            LinkReceipts.Receipt newer = store.query(id(97), id(98));
+            if (older.body != null || older.resultKept || newer.body == null || newer.body.length != 8) {
+                throw new AssertionError("budget");
+            }
+        }
+    }
+
+    private static void readOnlyOccupiesSlot(Path root) throws Exception {
+        try (LinkReceipts store = new LinkReceipts(root, new Manual())) {
+            String mac = id(100);
+            AtomicInteger inside = new AtomicInteger();
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicReference<Throwable> error = new AtomicReference<Throwable>();
+            Thread[] threads = new Thread[LinkReceipts.IN_FLIGHT];
+            for (int index = 0; index < threads.length; index++) {
+                int number = index;
+                threads[index] = new Thread(() -> {
+                    try {
+                        store.submit(mac, id(110 + number), "device.status", "s".getBytes(), () -> {
+                            inside.incrementAndGet();
+                            release.await();
+                            return "ok".getBytes();
+                        });
+                    } catch (Throwable failure) {
+                        error.set(failure);
+                    }
+                });
+                threads[index].start();
+            }
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (inside.get() < 4 && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            if (inside.get() != 4) {
+                release.countDown();
+                throw new AssertionError("lane " + inside.get());
+            }
+            Thread.sleep(200);
+            AtomicReference<LinkReceipts.Receipt> ninth = new AtomicReference<LinkReceipts.Receipt>();
+            Thread extra = new Thread(() -> {
+                try {
+                    ninth.set(store.submit(mac, id(130), "device.status", "n".getBytes(), () -> {
+                        inside.incrementAndGet();
+                        release.await();
+                        return "no".getBytes();
+                    }));
+                } catch (Throwable failure) {
+                    error.set(failure);
+                }
+            });
+            extra.start();
+            long busyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (ninth.get() == null && error.get() == null && System.nanoTime() < busyDeadline) {
+                Thread.sleep(10);
+            }
+            if (count(root, ".rec") != 0 || ninth.get() == null || !"busy".equals(ninth.get().state) || inside.get() != 4
+                    || !"not_found".equals(store.query(mac, id(131)).state) || !"not_found".equals(store.cancel(mac, id(132)).state)) {
+                release.countDown();
+                throw new AssertionError("readonly slot");
+            }
+            release.countDown();
+            extra.join(5000);
+            for (Thread thread : threads) {
+                thread.join(5000);
+            }
+            if (error.get() != null) {
+                throw new AssertionError(error.get());
+            }
+            String fileMac = id(140);
+            AtomicInteger fileInside = new AtomicInteger();
+            CountDownLatch fileRelease = new CountDownLatch(1);
+            CountDownLatch fileEntered = new CountDownLatch(2);
+            for (int index = 0; index < 2; index++) {
+                int number = index;
+                new Thread(() -> {
+                    try {
+                        store.submit(fileMac, id(141 + number), "file.stat", "p".getBytes(), () -> {
+                            fileInside.incrementAndGet();
+                            fileEntered.countDown();
+                            fileRelease.await();
+                            return "stat".getBytes();
+                        });
+                    } catch (Throwable failure) {
+                        error.set(failure);
+                    }
+                }).start();
+            }
+            if (!fileEntered.await(5, TimeUnit.SECONDS)) {
+                fileRelease.countDown();
+                throw new AssertionError("file lane");
+            }
+            AtomicInteger third = new AtomicInteger();
+            Thread waiting = new Thread(() -> {
+                try {
+                    store.submit(fileMac, id(143), "file.stat", "p".getBytes(), () -> {
+                        third.incrementAndGet();
+                        fileRelease.await();
+                        return "stat".getBytes();
+                    });
+                } catch (Throwable failure) {
+                    error.set(failure);
+                }
+            });
+            waiting.start();
+            Thread.sleep(200);
+            if (third.get() != 0 || fileInside.get() != 2) {
+                fileRelease.countDown();
+                throw new AssertionError("file lane entered");
+            }
+            fileRelease.countDown();
+            waiting.join(5000);
+            if (error.get() != null || third.get() != 1) {
+                throw new AssertionError("file lane done");
+            }
+        }
+    }
+
+    private static void privilegedExpiresWithoutWaiting(Path root) throws Exception {
+        Manual clock = new Manual();
+        try (LinkReceipts store = new LinkReceipts(root, clock)) {
+            String mac = id(150);
+            CountDownLatch entered = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicInteger runs = new AtomicInteger();
+            store.submit(mac, id(151), "shell.run", "first".getBytes(), () -> {
+                runs.incrementAndGet();
+                entered.countDown();
+                release.await();
+                return "first".getBytes();
+            });
+            if (!entered.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("holder");
+            }
+            store.submit(mac, id(152), "shell.run", "second".getBytes(), () -> {
+                runs.incrementAndGet();
+                return "second".getBytes();
+            });
+            clock.now = LinkReceipts.PRIVILEGED_QUEUE_MS + 1;
+            String text = waitFile(root.resolve(mac + "." + id(152) + ".rec"), value -> {
+                String[] parts = value.split("\t", -1);
+                return parts.length == 10 && "expired".equals(parts[5]);
+            });
+            if (!text.contains("\texpired\t") || runs.get() != 1) {
+                release.countDown();
+                throw new AssertionError("sweep " + runs.get());
+            }
+            release.countDown();
+            LinkReceipts.Receipt first = awaitState(store, mac, id(151), "complete");
+            LinkReceipts.Receipt second = store.query(mac, id(152));
+            if (!first.applied || second.applied || !"expired".equals(second.state) || runs.get() != 1) {
+                throw new AssertionError("expire without waiting");
+            }
+        }
+    }
+
+    private static String waitFile(Path file, java.util.function.Predicate<String> ready) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        String text = "";
+        while (System.nanoTime() < deadline) {
+            try {
+                text = Files.readString(file);
+            } catch (IOException error) {
+                text = "";
+            }
+            if (ready.test(text)) {
+                return text;
+            }
+            Thread.sleep(20);
+        }
+        return text;
     }
 
     private static void cancelQueued(LinkReceipts store) throws Exception {
