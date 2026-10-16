@@ -156,6 +156,7 @@ func (r *registry) snapshot() fileFormat {
 	return next
 }
 
+// mutate edits a copy. The previous file and the in-memory registry stay in place until the new bytes are fsynced and renamed.
 func (r *registry) mutate(fn func(*fileFormat) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

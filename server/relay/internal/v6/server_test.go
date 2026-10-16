@@ -531,11 +531,27 @@ func TestRelay6RateIdleAndCaps(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		server.note("127.0.0.1")
 	}
+	before := failureCount(server, "127.0.0.1")
 	limited := dial(t, client, wsURL(base))
 	helloParts(t, limited)
-	send(t, limited, message{Type: "auth", DeviceID: "00112233445566778899aabbccddeeff", Purpose: "main", App: "test", Sig: "00112233445566778899aabbccddeeff"})
+	send(t, limited, message{Type: "enroll", Code: "00112233445566778899aabbccddeeff", Name: "办公室", Kind: "mac", Purpose: "main"})
 	if got := readJSON(t, limited); got.Code != "rate_limited" {
-		t.Fatalf("rate %#v", got)
+		t.Fatalf("enroll rate %#v", got)
+	}
+	joined := dial(t, client, wsURL(base))
+	helloParts(t, joined)
+	send(t, joined, message{Type: "join", Name: "手机", Kind: "phone", Purpose: "main"})
+	if got := readJSON(t, joined); got.Code != "rate_limited" {
+		t.Fatalf("join rate %#v", got)
+	}
+	unknown := dial(t, client, wsURL(base))
+	helloParts(t, unknown)
+	send(t, unknown, message{Type: "auth", DeviceID: "00112233445566778899aabbccddeeff", Purpose: "main", App: "test", Sig: "00112233445566778899aabbccddeeff"})
+	if got := readJSON(t, unknown); got.Code != "unknown_device" {
+		t.Fatalf("auth %#v", got)
+	}
+	if failureCount(server, "127.0.0.1") != before {
+		t.Fatal("auth consumed an enroll attempt")
 	}
 
 	idleServer, idleClient, idleBase, _ := startTLS(t)
@@ -674,8 +690,10 @@ func TestRelay6WriteFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn := enrollMac(t, client, base, code, newIdentity(t))
+	mac := newIdentity(t)
+	conn := enrollMac(t, client, base, code, mac)
 	before := mustRead(t, filepath.Join(server.reg.dir, "registry.json"))
+	version := server.reg.snapshot().RegistryVersion
 	server.reg.mu.Lock()
 	server.reg.fault = func(string) error { return errors.New("disk") }
 	server.reg.mu.Unlock()
@@ -686,11 +704,147 @@ func TestRelay6WriteFailure(t *testing.T) {
 	if after := mustRead(t, filepath.Join(server.reg.dir, "registry.json")); !bytes.Equal(before, after) {
 		t.Fatal("registry changed after a failed write")
 	}
-	next := dial(t, client, wsURL(base))
-	helloParts(t, next)
-	send(t, next, message{Type: "auth", DeviceID: "00112233445566778899aabbccddeeff", Purpose: "main", App: "test", Sig: "00112233445566778899aabbccddeeff"})
-	if got := readJSON(t, next); got.Code != "unavailable" {
-		t.Fatalf("auth after fault %#v", got)
+	if server.reg.snapshot().RegistryVersion != version {
+		t.Fatal("memory registry changed after a failed write")
+	}
+	if _, err := server.IssueEnroll(); !errors.Is(err, errPersist) {
+		t.Fatalf("enroll while disk is failing: %v", err)
+	}
+	authed, ready := authAs(t, client, base, mac, "main")
+	if ready.Type != "ready" {
+		t.Fatalf("auth after fault %#v", ready)
+	}
+	server.reg.mu.Lock()
+	server.reg.fault = nil
+	server.reg.mu.Unlock()
+	if _, err := server.IssueEnroll(); err != nil {
+		t.Fatal(err)
+	}
+	send(t, authed, message{Type: "invite", Kind: "phone"})
+	if got := readJSON(t, authed); got.Type != "invite" {
+		t.Fatalf("invite after disk recovered %#v", got)
+	}
+}
+
+func TestRelay6RefundPersistFailure(t *testing.T) {
+	server, client, base, _ := startTLS(t)
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	phone := newIdentity(t)
+	macConn := enrollMac(t, client, base, code, mac)
+	send(t, macConn, message{Type: "invite", Kind: "phone"})
+	invite := readJSON(t, macConn)
+	if invite.Type != "invite" {
+		t.Fatalf("invite %#v", invite)
+	}
+	joined := make(chan error, 1)
+	go func() {
+		conn, err := dialErr(client, wsURL(base))
+		if err != nil {
+			joined <- err
+			return
+		}
+		defer conn.CloseNow()
+		hello, err := readJSONErr(conn)
+		if err != nil {
+			joined <- err
+			return
+		}
+		station, _ := hex.DecodeString(hello.StationID)
+		nonce, _ := hex.DecodeString(hello.Nonce)
+		invitationID, err := hex.DecodeString(invite.InvitationID)
+		if err != nil {
+			joined <- err
+			return
+		}
+		body, err := link.JoinMessage(station, nonce, phone.id[:], invitationID, "main")
+		if err != nil {
+			joined <- err
+			return
+		}
+		sum := sha256.Sum256(body)
+		sig, err := ecdsa.SignASN1(rand.Reader, phone.key, sum[:])
+		if err != nil {
+			joined <- err
+			return
+		}
+		proof, err := link.InvitationProof(bytes.Repeat([]byte{0xAB}, 16), phone.spki, "手机", "phone", "main")
+		if err != nil {
+			joined <- err
+			return
+		}
+		if err := sendErr(conn, message{
+			Type: "join", InvitationID: invite.InvitationID, PublicKey: base64.StdEncoding.EncodeToString(phone.spki),
+			Name: "手机", Kind: "phone", Purpose: "main", Proof: hex.EncodeToString(proof), Sig: hex.EncodeToString(sig),
+		}); err != nil {
+			joined <- err
+			return
+		}
+		got, err := readJSONErr(conn)
+		if err != nil {
+			joined <- err
+			return
+		}
+		if got.Code != "rejected" {
+			joined <- errors.New(got.Type + " " + got.Code)
+			return
+		}
+		joined <- nil
+	}()
+	request := readJSON(t, macConn)
+	if request.Type != "join_request" {
+		t.Fatalf("join_request %#v", request)
+	}
+	writes := 0
+	server.reg.mu.Lock()
+	server.reg.fault = func(stage string) error {
+		if stage != "before-write" {
+			return nil
+		}
+		writes++
+		if writes >= 2 {
+			return errors.New("disk")
+		}
+		return nil
+	}
+	server.reg.mu.Unlock()
+	again := dial(t, client, wsURL(base))
+	hello, station, nonce := helloParts(t, again)
+	_ = hello
+	body, err := link.JoinMessage(station, nonce, phone.id[:], mustHex(t, invite.InvitationID), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	sig, err := ecdsa.SignASN1(rand.Reader, phone.key, sum[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := link.InvitationProof(bytes.Repeat([]byte{0xAB}, 16), phone.spki, "手机", "phone", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, again, message{
+		Type: "join", InvitationID: invite.InvitationID, PublicKey: base64.StdEncoding.EncodeToString(phone.spki),
+		Name: "手机", Kind: "phone", Purpose: "main", Proof: hex.EncodeToString(proof), Sig: hex.EncodeToString(sig),
+	})
+	if got := readJSON(t, again); got.Code != "unavailable" {
+		t.Fatalf("refund fault %#v", got)
+	}
+	if failureCount(server, "127.0.0.1") != 0 {
+		t.Fatal("disk failure counted as a join failure")
+	}
+	snap := server.reg.snapshot()
+	inv := findInvite(&snap, invite.InvitationID)
+	if inv == nil || inv.AttemptsLeft != 3 {
+		t.Fatalf("attempts %#v", inv)
+	}
+	send(t, macConn, message{Type: "reject", InvitationID: invite.InvitationID, DeviceID: request.DeviceID})
+	if err := <-joined; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -771,6 +925,397 @@ func TestControlJSON(t *testing.T) {
 	if err != nil || msg.Type != "ping" {
 		t.Fatal(err, msg)
 	}
+}
+
+func TestRelay6RevokedDoesNotLockNeighbors(t *testing.T) {
+	server, client, base, _ := startTLS(t)
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	phone := newIdentity(t)
+	macConn := enrollMac(t, client, base, code, mac)
+	joinDevice(t, server, client, base, macConn, mac, phone, "phone", "手机")
+	send(t, macConn, message{Type: "revoke", DeviceID: hex.EncodeToString(phone.id[:])})
+	revoked := readUntil(t, macConn, "registry")
+	found := false
+	for _, device := range revoked.Devices {
+		if device.DeviceID == hex.EncodeToString(phone.id[:]) && device.Revoked {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("phone still active")
+	}
+	for i := 0; i < 8; i++ {
+		_, got := authAs(t, client, base, phone, "main")
+		if got.Type != "error" || got.Code != "revoked" {
+			t.Fatalf("revoked auth %d %#v", i, got)
+		}
+	}
+	if failureCount(server, "127.0.0.1") != 0 {
+		t.Fatal("revoked auth counted against the address")
+	}
+	_, other := authAs(t, client, base, mac, "main")
+	if other.Type != "ready" {
+		t.Fatalf("neighbor %#v", other)
+	}
+	fresh := dial(t, client, wsURL(base))
+	helloParts(t, fresh)
+	send(t, fresh, message{Type: "enroll", Code: "00112233445566778899aabbccddeeff", Name: "办公室", Kind: "mac", Purpose: "main", Sig: "00112233445566778899aabbccddeeff"})
+	if got := readJSON(t, fresh); got.Code == "rate_limited" {
+		t.Fatalf("enroll locked %#v", got)
+	}
+}
+
+func TestRelay6SlowReceiverDoesNotBlockSender(t *testing.T) {
+	server, client, base, _ := startTLS(t)
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	slowID := newIdentity(t)
+	fastID := newIdentity(t)
+	macConn := enrollMac(t, client, base, code, mac)
+	slow := joinDevice(t, server, client, base, macConn, mac, slowID, "phone", "手机甲")
+	fast := joinDevice(t, server, client, base, macConn, mac, fastID, "phone", "手机乙")
+	_, mediaReady := authAs(t, client, base, mac, "media")
+	if mediaReady.Type != "ready" {
+		t.Fatalf("media %#v", mediaReady)
+	}
+	server.mu.Lock()
+	mainSess := server.links[hex.EncodeToString(mac.id[:])+"/main"]
+	slowSess := server.links[hex.EncodeToString(slowID.id[:])+"/main"]
+	mediaSess := server.links[hex.EncodeToString(mac.id[:])+"/media"]
+	server.mu.Unlock()
+	if mainSess == nil || mainSess.queueMax != mainQueueBytes || slowSess == nil || slowSess.queueMax != mainQueueBytes {
+		t.Fatalf("main queue %#v %#v", mainSess, slowSess)
+	}
+	if mediaSess == nil || mediaSess.queueMax != mediaQueueBytes {
+		t.Fatalf("media queue %#v", mediaSess)
+	}
+	hold := make(chan struct{})
+	defer close(hold)
+	slowSess.setWriteHold(hold)
+	payload := bytes.Repeat([]byte{0xab}, link.MainPayload)
+	start := time.Now()
+	for i := 0; i < 140; i++ {
+		sendData(t, macConn, slowID.id, payload)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("sender blocked for %s", elapsed)
+	}
+	sendData(t, macConn, fastID.id, []byte("fast"))
+	readPayload(t, fast, "fast", 5*time.Second)
+	expectClosed(t, slow)
+	if got := readUntil(t, macConn, "error"); got.Code != "undeliverable" {
+		t.Fatalf("undeliverable %#v", got)
+	}
+}
+
+func TestRelay6RejectsFormatNames(t *testing.T) {
+	if !validName("办公室") || !validName("n") {
+		t.Fatal("plain")
+	}
+	for _, name := range []string{"", strings.Repeat("a", 65), "a\u0000b", "a\u200bb", "a\u202eb", "a\u00adb"} {
+		if validName(name) {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+	server, client, base, _ := startTLS(t)
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	conn := dial(t, client, wsURL(base))
+	_, station, nonce := helloParts(t, conn)
+	rawCode := mustHex(t, code)
+	transcript, err := link.EnrollMessage(station, nonce, mac.id[:], rawCode, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, message{
+		Type: "enroll", Code: code, PublicKey: base64.StdEncoding.EncodeToString(mac.spki),
+		Name: "办公\u200b室", Kind: "mac", Purpose: "main", Sig: sign(t, mac.key, transcript),
+	})
+	if got := readJSON(t, conn); got.Code != "rejected" {
+		t.Fatalf("format name %#v", got)
+	}
+	if failureCount(server, "127.0.0.1") != 1 {
+		t.Fatal("format name was not an enroll failure")
+	}
+	enrollMac(t, client, base, code, mac)
+}
+
+func TestRelay6UnauthenticatedCap(t *testing.T) {
+	_, client, base, _ := startTLS(t)
+	var wg sync.WaitGroup
+	errCh := make(chan error, maxUnauthPerIP)
+	connCh := make(chan *websocket.Conn, maxUnauthPerIP)
+	for i := 0; i < maxUnauthPerIP; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn, err := dialErr(client, wsURL(base))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if _, err := readJSONErr(conn); err != nil {
+				conn.CloseNow()
+				errCh <- err
+				return
+			}
+			connCh <- conn
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	close(connCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	var held []*websocket.Conn
+	for conn := range connCh {
+		conn := conn
+		held = append(held, conn)
+		t.Cleanup(func() { conn.CloseNow() })
+	}
+	if len(held) != maxUnauthPerIP {
+		t.Fatalf("held %d", len(held))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, wsURL(base), &websocket.DialOptions{HTTPClient: client})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("cap %v %v", resp, err)
+	}
+	held[0].CloseNow()
+	deadline := time.Now().Add(2 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		conn, err := dialErr(client, wsURL(base))
+		if err == nil {
+			defer conn.CloseNow()
+			if _, err := readJSONErr(conn); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		last = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(last)
+}
+
+func TestRelay6TrustedProxyDefaultOff(t *testing.T) {
+	server, client, base, _ := startTLS(t)
+	for i := 0; i < 8; i++ {
+		server.note("203.0.113.50")
+	}
+	ignored := dialHeader(t, client, wsURL(base), http.Header{"X-Forwarded-For": []string{"203.0.113.50"}})
+	helloParts(t, ignored)
+	send(t, ignored, message{Type: "enroll", Name: "办公室", Kind: "mac", Purpose: "main"})
+	if got := readJSON(t, ignored); got.Code == "rate_limited" {
+		t.Fatalf("header counted while proxies are off %#v", got)
+	}
+	server.SetTrustedProxies([]string{"127.0.0.1"})
+	limited := dialHeader(t, client, wsURL(base), http.Header{"X-Forwarded-For": []string{"198.51.100.8, 203.0.113.50"}})
+	helloParts(t, limited)
+	send(t, limited, message{Type: "enroll", Name: "办公室", Kind: "mac", Purpose: "main"})
+	if got := readJSON(t, limited); got.Code != "rate_limited" {
+		t.Fatalf("rightmost client %#v", got)
+	}
+	other := dialHeader(t, client, wsURL(base), http.Header{"X-Forwarded-For": []string{"203.0.113.50, 198.51.100.20"}})
+	helloParts(t, other)
+	send(t, other, message{Type: "enroll", Name: "办公室", Kind: "mac", Purpose: "main"})
+	if got := readJSON(t, other); got.Code == "rate_limited" {
+		t.Fatalf("leftmost was used %#v", got)
+	}
+}
+
+func TestForwardedClient(t *testing.T) {
+	trusted := map[string]struct{}{"127.0.0.1": {}}
+	if got := forwardedClient("198.51.100.8, 203.0.113.50", trusted); got != "203.0.113.50" {
+		t.Fatal(got)
+	}
+	if got := forwardedClient("203.0.113.50, 127.0.0.1", trusted); got != "203.0.113.50" {
+		t.Fatal(got)
+	}
+	if got := forwardedClient("not-an-ip", trusted); got != "" {
+		t.Fatal(got)
+	}
+}
+
+func authAs(t *testing.T, client *http.Client, base string, id identity, purpose string) (*websocket.Conn, message) {
+	t.Helper()
+	conn := dial(t, client, wsURL(base))
+	_, station, nonce := helloParts(t, conn)
+	body, err := link.RelayAuthMessage(station, nonce, id.id[:], purpose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, message{Type: "auth", DeviceID: hex.EncodeToString(id.id[:]), Purpose: purpose, App: "test", Sig: sign(t, id.key, body)})
+	return conn, readJSON(t, conn)
+}
+
+func joinDevice(t *testing.T, server *Server, client *http.Client, base string, macConn *websocket.Conn, mac, peer identity, kind, name string) *websocket.Conn {
+	t.Helper()
+	send(t, macConn, message{Type: "invite", Kind: kind})
+	invite := readJSON(t, macConn)
+	if invite.Type != "invite" {
+		t.Fatalf("invite %#v", invite)
+	}
+	inviteKey := bytes.Repeat([]byte{0xAB}, 16)
+	proof, err := link.InvitationProof(inviteKey, peer.spki, name, kind, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := make(chan *websocket.Conn, 1)
+	joinErr := make(chan error, 1)
+	go func() {
+		conn, err := dialErr(client, wsURL(base))
+		if err != nil {
+			joinErr <- err
+			return
+		}
+		hello, err := readJSONErr(conn)
+		if err != nil {
+			conn.CloseNow()
+			joinErr <- err
+			return
+		}
+		peerStation, _ := hex.DecodeString(hello.StationID)
+		peerNonce, _ := hex.DecodeString(hello.Nonce)
+		invitationID, _ := hex.DecodeString(invite.InvitationID)
+		body, err := link.JoinMessage(peerStation, peerNonce, peer.id[:], invitationID, "main")
+		if err != nil {
+			conn.CloseNow()
+			joinErr <- err
+			return
+		}
+		sum := sha256.Sum256(body)
+		sig, err := ecdsa.SignASN1(rand.Reader, peer.key, sum[:])
+		if err != nil {
+			conn.CloseNow()
+			joinErr <- err
+			return
+		}
+		if err := sendErr(conn, message{
+			Type: "join", InvitationID: invite.InvitationID, PublicKey: base64.StdEncoding.EncodeToString(peer.spki),
+			Name: name, Kind: kind, Purpose: "main", Proof: hex.EncodeToString(proof), Sig: hex.EncodeToString(sig),
+		}); err != nil {
+			conn.CloseNow()
+			joinErr <- err
+			return
+		}
+		ready, err := readJSONErr(conn)
+		if err != nil || ready.Type != "ready" {
+			conn.CloseNow()
+			joinErr <- errors.New("ready")
+			return
+		}
+		registry, err := readJSONErr(conn)
+		if err != nil || registry.Type != "registry" {
+			conn.CloseNow()
+			joinErr <- errors.New("registry")
+			return
+		}
+		joined <- conn
+	}()
+	request := readJSON(t, macConn)
+	if request.Type != "join_request" || request.DeviceID != hex.EncodeToString(peer.id[:]) {
+		t.Fatalf("join_request %#v", request)
+	}
+	approveBody, err := link.ApproveMessage(server.station, mustHex(t, invite.InvitationID), peer.id[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, macConn, message{Type: "approve", InvitationID: invite.InvitationID, DeviceID: request.DeviceID, Sig: sign(t, mac.key, approveBody)})
+	var peerConn *websocket.Conn
+	select {
+	case peerConn = <-joined:
+		t.Cleanup(func() { peerConn.CloseNow() })
+	case err := <-joinErr:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("join hung")
+	}
+	if got := readUntil(t, macConn, "registry"); got.Type != "registry" {
+		t.Fatalf("registry %#v", got)
+	}
+	if got := readUntil(t, macConn, "presence"); got.Type != "presence" {
+		t.Fatalf("presence %#v", got)
+	}
+	return peerConn
+}
+
+func dialHeader(t *testing.T, client *http.Client, raw string, header http.Header) *websocket.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, raw, &websocket.DialOptions{HTTPClient: client, HTTPHeader: header})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+	return conn
+}
+
+func readUntil(t *testing.T, conn *websocket.Conn, kind string) message {
+	t.Helper()
+	for i := 0; i < 6; i++ {
+		msg := readJSON(t, conn)
+		if msg.Type == kind {
+			return msg
+		}
+	}
+	t.Fatalf("missing %s", kind)
+	return message{}
+}
+
+func readPayload(t *testing.T, conn *websocket.Conn, payload string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		frame, err := readFrame(ctx, conn, link.MainPayload)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Kind == link.KindMessage && string(frame.Payload) == payload {
+			return
+		}
+	}
+	t.Fatalf("missing payload %q", payload)
+}
+
+func expectClosed(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		_, err := readFrame(ctx, conn, link.MainPayload)
+		cancel()
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("slow peer stayed open")
+		}
+		return
+	}
+	t.Fatal("slow peer stayed open")
+}
+
+func failureCount(s *Server, ip string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.failures[ip])
 }
 
 func mustHex(t *testing.T, value string) []byte {

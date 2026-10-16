@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,27 +22,46 @@ import (
 
 // Server is the relay 6 link endpoint. cmd/phone-relay does not import it.
 type Server struct {
-	reg           *registry
-	station       []byte
-	stationHex    string
-	log           io.Writer
-	now           func() time.Time
-	idle          time.Duration
-	mu            sync.Mutex
-	links         map[string]*session
-	pending       map[string]*pendingJoin
-	failures      map[string][]time.Time
-	closed        bool
-	persistBroken bool
+	reg        *registry
+	station    []byte
+	stationHex string
+	log        io.Writer
+	now        func() time.Time
+	idle       time.Duration
+	mu         sync.Mutex
+	links      map[string]*session
+	pending    map[string]*pendingJoin
+	failures   map[string][]time.Time
+	unauth     map[string]int
+	trusted    map[string]struct{}
+	closed     bool
 }
 
+const (
+	mainQueueBytes  = 4 << 20
+	mediaQueueBytes = 8 << 20
+	maxUnauthPerIP  = 16
+)
+
+var errQueueFull = errors.New("queue full")
+
 type session struct {
-	id      [16]byte
-	hexID   string
-	purpose string
-	conn    *websocket.Conn
-	writeMu sync.Mutex
-	limit   int
+	id        [16]byte
+	hexID     string
+	purpose   string
+	conn      *websocket.Conn
+	limit     int
+	queueMax  int
+	writeHold <-chan struct{}
+
+	qmu       sync.Mutex
+	pending   [][]byte
+	queued    int
+	dead      bool
+	wake      chan struct{}
+	stop      chan struct{}
+	stopOnce  sync.Once
+	closeOnce sync.Once
 }
 
 type pendingJoin struct {
@@ -72,6 +92,7 @@ func Open(dir string) (*Server, error) {
 		links:      map[string]*session{},
 		pending:    map[string]*pendingJoin{},
 		failures:   map[string][]time.Time{},
+		unauth:     map[string]int{},
 	}, nil
 }
 
@@ -84,21 +105,28 @@ func (s *Server) Close() error {
 	}
 	s.mu.Unlock()
 	for _, sess := range sessions {
-		_ = sess.conn.Close(websocket.StatusGoingAway, "")
+		sess.close()
 	}
 	s.reg.close()
 	return nil
 }
 
+// SetTrustedProxies lists TCP peers whose X-Forwarded-For header supplies the client address.
+// The default is empty: the header is ignored, so everyone behind one proxy shares that proxy's counters.
+func (s *Server) SetTrustedProxies(addrs []string) {
+	next := make(map[string]struct{}, len(addrs))
+	for _, addr := range addrs {
+		if net.ParseIP(addr) != nil {
+			next[addr] = struct{}{}
+		}
+	}
+	s.mu.Lock()
+	s.trusted = next
+	s.mu.Unlock()
+}
+
 func (s *Server) IssueEnroll() (string, error) {
-	if s.broken() {
-		return "", errPersist
-	}
-	code, err := s.reg.issueEnroll(s.clock())
-	if errors.Is(err, errPersist) {
-		s.markBroken()
-	}
-	return code, err
+	return s.reg.issueEnroll(s.clock())
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -122,15 +150,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "closed", http.StatusServiceUnavailable)
 		return
 	}
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
-	if err != nil {
+	remote := s.clientIP(r)
+	if !s.acquireUnauth(remote) {
+		http.Error(w, "limited", http.StatusServiceUnavailable)
 		return
 	}
-	go s.serve(conn, hostOnly(r.RemoteAddr))
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		s.releaseUnauth(remote)
+		return
+	}
+	go s.serve(conn, remote)
 }
 
 func (s *Server) serve(conn *websocket.Conn, remote string) {
 	defer conn.CloseNow()
+	var once sync.Once
+	release := func() { once.Do(func() { s.releaseUnauth(remote) }) }
+	defer release()
 	conn.SetReadLimit(8192)
 	nonce, err := s.writeHello(conn)
 	if err != nil {
@@ -149,11 +186,11 @@ func (s *Server) serve(conn *websocket.Conn, remote string) {
 	}
 	switch msg.Type {
 	case "enroll":
-		s.beginEnroll(conn, remote, nonce, msg)
+		s.beginEnroll(conn, remote, nonce, msg, release)
 	case "join":
-		s.beginJoin(conn, remote, nonce, msg)
+		s.beginJoin(conn, remote, nonce, msg, release)
 	case "auth":
-		s.beginAuth(conn, remote, nonce, msg)
+		s.beginAuth(conn, nonce, msg, release)
 	default:
 		s.fail(conn, "rejected")
 	}
@@ -178,13 +215,9 @@ func (s *Server) writeHello(conn *websocket.Conn) ([]byte, error) {
 	return out, nil
 }
 
-func (s *Server) beginEnroll(conn *websocket.Conn, remote string, nonce []byte, msg message) {
+func (s *Server) beginEnroll(conn *websocket.Conn, remote string, nonce []byte, msg message, release func()) {
 	if !s.allow(remote) {
 		s.fail(conn, "rate_limited")
-		return
-	}
-	if s.broken() {
-		s.fail(conn, "unavailable")
 		return
 	}
 	code, spki, sig, ok := s.enrollMaterial(remote, msg)
@@ -222,6 +255,7 @@ func (s *Server) beginEnroll(conn *websocket.Conn, remote string, nonce []byte, 
 		s.failPersist(conn, remote, err)
 		return
 	}
+	release()
 	sess := s.attachNew(conn, id, msg.Purpose)
 	s.record(prefix(sess.hexID), "enroll")
 	s.ready(sess)
@@ -245,24 +279,14 @@ func (s *Server) enrollMaterial(remote string, msg message) ([]byte, []byte, []b
 	return code, spki, sig, true
 }
 
-func (s *Server) beginAuth(conn *websocket.Conn, remote string, nonce []byte, msg message) {
-	if !s.allow(remote) {
-		s.fail(conn, "rate_limited")
-		return
-	}
-	if s.broken() {
-		s.fail(conn, "unavailable")
-		return
-	}
+func (s *Server) beginAuth(conn *websocket.Conn, nonce []byte, msg message, release func()) {
 	if !purposeOK(msg.Purpose) || !validName(msg.App) {
-		s.note(remote)
 		s.fail(conn, "rejected")
 		return
 	}
 	rawID, err := decodeHex(msg.DeviceID, 16)
 	sig, err2 := decodeSig(msg.Sig)
 	if err != nil || err2 != nil {
-		s.note(remote)
 		s.fail(conn, "rejected")
 		return
 	}
@@ -271,22 +295,20 @@ func (s *Server) beginAuth(conn *websocket.Conn, remote string, nonce []byte, ms
 	snap := s.reg.snapshot()
 	device := findDevice(&snap, msg.DeviceID)
 	if device == nil {
-		s.note(remote)
 		s.fail(conn, "unknown_device")
-		return
-	}
-	if device.Revoked {
-		s.note(remote)
-		s.fail(conn, "revoked")
 		return
 	}
 	spki, err := decodeKey(device.PublicKey)
 	transcript, err2 := link.RelayAuthMessage(s.station, nonce, id[:], msg.Purpose)
 	if err != nil || err2 != nil || link.VerifySignature(spki, transcript, sig) != nil {
-		s.note(remote)
 		s.fail(conn, "bad_signature")
 		return
 	}
+	if device.Revoked {
+		s.fail(conn, "revoked")
+		return
+	}
+	release()
 	sess := s.attachNew(conn, id, msg.Purpose)
 	s.record(prefix(sess.hexID), "auth")
 	s.ready(sess)
@@ -294,13 +316,9 @@ func (s *Server) beginAuth(conn *websocket.Conn, remote string, nonce []byte, ms
 	s.readLoop(sess)
 }
 
-func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, msg message) {
+func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, msg message, release func()) {
 	if !s.allow(remote) {
 		s.fail(conn, "rate_limited")
-		return
-	}
-	if s.broken() {
-		s.fail(conn, "unavailable")
 		return
 	}
 	spki, sig, invitation, ok := s.joinMaterial(msg)
@@ -354,7 +372,10 @@ func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, ms
 	s.mu.Lock()
 	if _, exists := s.pending[msg.InvitationID]; exists {
 		s.mu.Unlock()
-		s.refund(msg.InvitationID)
+		if err := s.refund(msg.InvitationID); err != nil {
+			s.fail(conn, codeOf(err))
+			return
+		}
 		s.note(remote)
 		s.fail(conn, "rejected")
 		return
@@ -367,7 +388,10 @@ func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, ms
 	}
 	if err := s.writeMsg(inviter, request); err != nil {
 		if s.dropPending(msg.InvitationID, pending) {
-			s.refund(msg.InvitationID)
+			if err := s.refund(msg.InvitationID); err != nil {
+				s.fail(conn, codeOf(err))
+				return
+			}
 			s.fail(conn, "undeliverable")
 			return
 		}
@@ -379,6 +403,7 @@ func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, ms
 		s.fail(conn, codeOf(decision))
 		return
 	}
+	release()
 	sess := s.attachNew(conn, id, msg.Purpose)
 	s.ready(sess)
 	s.broadcastRegistry()
@@ -404,6 +429,7 @@ func (s *Server) joinMaterial(msg message) ([]byte, []byte, []byte, bool) {
 
 func (s *Server) readLoop(sess *session) {
 	defer func() {
+		sess.close()
 		s.detach(sess)
 		s.record(prefix(sess.hexID), "disconnect")
 	}()
@@ -445,10 +471,6 @@ func (s *Server) onControl(sess *session, msg message) {
 }
 
 func (s *Server) onInvite(sess *session, msg message) {
-	if s.broken() {
-		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
-		return
-	}
 	if msg.Kind != "mac" && msg.Kind != "phone" {
 		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
 		return
@@ -478,22 +500,13 @@ func (s *Server) onInvite(sess *session, msg message) {
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, errPersist) {
-			s.markBroken()
-			s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
-			return
-		}
-		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		s.writeMsg(sess, message{Type: "error", Code: codeOf(err)})
 		return
 	}
 	s.writeMsg(sess, message{Type: "invite", InvitationID: created.ID, Kind: created.Kind, Expires: created.Expires.Format(time.RFC3339)})
 }
 
 func (s *Server) onApprove(sess *session, msg message) {
-	if s.broken() {
-		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
-		return
-	}
 	invitation, err := decodeHex(msg.InvitationID, 16)
 	device, err2 := decodeHex(msg.DeviceID, 16)
 	sig, err3 := decodeSig(msg.Sig)
@@ -520,9 +533,6 @@ func (s *Server) onApprove(sess *session, msg message) {
 		return
 	}
 	err = s.reg.approve(*pending)
-	if errors.Is(err, errPersist) {
-		s.markBroken()
-	}
 	if err != nil {
 		pending.result <- err
 		s.writeMsg(sess, message{Type: "error", Code: codeOf(err)})
@@ -548,26 +558,17 @@ func (s *Server) onReject(sess *session, msg message) {
 }
 
 func (s *Server) onRevoke(sess *session, msg message) {
-	if s.broken() {
-		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
-		return
-	}
 	if _, err := decodeHex(msg.DeviceID, 16); err != nil || msg.DeviceID == sess.hexID {
 		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
 		return
 	}
 	if err := s.reg.revoke(msg.DeviceID); err != nil {
-		if errors.Is(err, errPersist) {
-			s.markBroken()
-			s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
-			return
-		}
-		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		s.writeMsg(sess, message{Type: "error", Code: codeOf(err)})
 		return
 	}
 	for _, other := range s.sessions() {
 		if other.hexID == msg.DeviceID {
-			_ = other.conn.Close(websocket.StatusPolicyViolation, "")
+			other.close()
 		}
 	}
 	s.broadcastRegistry()
@@ -588,11 +589,13 @@ func (s *Server) forward(from *session, frame link.Frame) {
 	}
 	out := frame
 	out.Peer = from.id
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err := dest.write(ctx, out)
-	cancel()
+	raw, err := link.Encode(out, dest.limit)
 	if err != nil {
-		_ = dest.conn.Close(websocket.StatusGoingAway, "")
+		s.undeliverable(from)
+		return
+	}
+	if err := dest.enqueue(raw); err != nil {
+		dest.close()
 		s.undeliverable(from)
 	}
 }
@@ -648,42 +651,128 @@ func (s *Server) peersExcept(self *session) []peerView {
 func (s *Server) attachNew(conn *websocket.Conn, id [16]byte, purpose string) *session {
 	sess := newSession(conn, id, purpose)
 	if old := s.attach(sess); old != nil {
-		_ = old.conn.Close(websocket.StatusPolicyViolation, "")
+		old.close()
 	}
 	return sess
 }
 
 func newSession(conn *websocket.Conn, id [16]byte, purpose string) *session {
 	limit := link.MainPayload
+	queueMax := mainQueueBytes
 	if purpose == "media" {
 		limit = link.MediaPayload
+		queueMax = mediaQueueBytes
 	}
 	conn.SetReadLimit(int64(link.HeaderSize + limit))
-	return &session{id: id, hexID: hex.EncodeToString(id[:]), purpose: purpose, conn: conn, limit: limit}
-}
-
-func (c *session) write(ctx context.Context, frame link.Frame) error {
-	raw, err := link.Encode(frame, c.limit)
-	if err != nil {
-		return err
+	sess := &session{
+		id: id, hexID: hex.EncodeToString(id[:]), purpose: purpose, conn: conn, limit: limit, queueMax: queueMax,
+		wake: make(chan struct{}, 1), stop: make(chan struct{}),
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return c.conn.Write(ctx, websocket.MessageBinary, raw)
+	go sess.writeLoop()
+	return sess
 }
 
-func (c *session) writeJSON(ctx context.Context, msg message) error {
+func (c *session) setWriteHold(hold <-chan struct{}) {
+	c.qmu.Lock()
+	c.writeHold = hold
+	c.qmu.Unlock()
+}
+
+func (c *session) takeHold() <-chan struct{} {
+	c.qmu.Lock()
+	defer c.qmu.Unlock()
+	return c.writeHold
+}
+
+func (c *session) enqueue(raw []byte) error {
+	c.qmu.Lock()
+	defer c.qmu.Unlock()
+	if c.dead || len(raw) > c.queueMax || c.queued+len(raw) > c.queueMax {
+		c.dead = true
+		return errQueueFull
+	}
+	c.pending = append(c.pending, raw)
+	c.queued += len(raw)
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (c *session) pop() ([]byte, bool) {
+	for {
+		c.qmu.Lock()
+		if len(c.pending) > 0 && !c.dead {
+			raw := c.pending[0]
+			c.pending[0] = nil
+			c.pending = c.pending[1:]
+			c.queued -= len(raw)
+			c.qmu.Unlock()
+			return raw, true
+		}
+		dead := c.dead
+		c.qmu.Unlock()
+		if dead {
+			return nil, false
+		}
+		select {
+		case <-c.wake:
+		case <-c.stop:
+			return nil, false
+		}
+	}
+}
+
+func (c *session) writeLoop() {
+	for {
+		raw, ok := c.pop()
+		if !ok {
+			return
+		}
+		if hold := c.takeHold(); hold != nil {
+			select {
+			case <-hold:
+			case <-c.stop:
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := c.conn.Write(ctx, websocket.MessageBinary, raw)
+		cancel()
+		if err != nil {
+			c.close()
+			return
+		}
+	}
+}
+
+func (c *session) close() {
+	c.qmu.Lock()
+	c.dead = true
+	c.pending = nil
+	c.queued = 0
+	c.qmu.Unlock()
+	c.stopOnce.Do(func() { close(c.stop) })
+	// Close waits for the peer while this connection's read holds the read lock.
+	// CloseNow unblocks that read without the handshake.
+	c.closeOnce.Do(func() { _ = c.conn.CloseNow() })
+}
+
+func (s *Server) writeMsg(sess *session, msg message) error {
 	body, err := marshal(msg)
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, link.Frame{Kind: link.KindLink, Payload: body})
-}
-
-func (s *Server) writeMsg(sess *session, msg message) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return sess.writeJSON(ctx, msg)
+	raw, err := link.Encode(link.Frame{Kind: link.KindLink, Payload: body}, sess.limit)
+	if err != nil {
+		return err
+	}
+	if err := sess.enqueue(raw); err != nil {
+		sess.close()
+		return err
+	}
+	return nil
 }
 
 func (s *Server) attach(sess *session) *session {
@@ -753,10 +842,8 @@ func (s *Server) waitJoin(invitation string, pending *pendingJoin) error {
 	}
 }
 
-func (s *Server) refund(id string) {
-	if err := s.reg.refund(id); errors.Is(err, errPersist) {
-		s.markBroken()
-	}
+func (s *Server) refund(id string) error {
+	return s.reg.refund(id)
 }
 
 func (s *Server) allow(ip string) bool {
@@ -805,16 +892,55 @@ func (s *Server) idleLimit() time.Duration {
 	return 45 * time.Second
 }
 
-func (s *Server) broken() bool {
+func (s *Server) acquireUnauth(ip string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.persistBroken
+	if s.unauth[ip] >= maxUnauthPerIP {
+		return false
+	}
+	s.unauth[ip]++
+	return true
 }
 
-func (s *Server) markBroken() {
+func (s *Server) releaseUnauth(ip string) {
 	s.mu.Lock()
-	s.persistBroken = true
+	defer s.mu.Unlock()
+	n := s.unauth[ip]
+	if n <= 1 {
+		delete(s.unauth, ip)
+		return
+	}
+	s.unauth[ip] = n - 1
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	host := hostOnly(r.RemoteAddr)
+	s.mu.Lock()
+	trusted := s.trusted
+	_, ok := trusted[host]
 	s.mu.Unlock()
+	if !ok {
+		return host
+	}
+	if ip := forwardedClient(r.Header.Get("X-Forwarded-For"), trusted); ip != "" {
+		return ip
+	}
+	return host
+}
+
+func forwardedClient(header string, trusted map[string]struct{}) string {
+	parts := strings.Split(header, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := strings.TrimSpace(parts[i])
+		if net.ParseIP(ip) == nil {
+			continue
+		}
+		if _, skip := trusted[ip]; skip {
+			continue
+		}
+		return ip
+	}
+	return ""
 }
 
 func (s *Server) record(id, reason string) {
@@ -829,7 +955,6 @@ func (s *Server) record(id, reason string) {
 
 func (s *Server) failPersist(conn *websocket.Conn, remote string, err error) {
 	if errors.Is(err, errPersist) {
-		s.markBroken()
 		s.fail(conn, "unavailable")
 		return
 	}
