@@ -1137,6 +1137,20 @@ func TestRelay6TrustedProxyDefaultOff(t *testing.T) {
 	}
 }
 
+func TestParseTrustedProxies(t *testing.T) {
+	got, err := ParseTrustedProxies("  ")
+	if err != nil || got != nil {
+		t.Fatalf("%v %v", got, err)
+	}
+	got, err = ParseTrustedProxies(" 127.0.0.1, ::1, ")
+	if err != nil || len(got) != 2 || got[0] != "127.0.0.1" || got[1] != "::1" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := ParseTrustedProxies("127.0.0.1, nope"); err == nil {
+		t.Fatal("accepted a non-IP")
+	}
+}
+
 func TestForwardedClient(t *testing.T) {
 	trusted := map[string]struct{}{"127.0.0.1": {}}
 	if got := forwardedClient("198.51.100.8, 203.0.113.50", trusted); got != "203.0.113.50" {

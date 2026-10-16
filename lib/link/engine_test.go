@@ -21,9 +21,12 @@ func TestEngineCases(t *testing.T) {
 		Cases []struct {
 			Name       string `json:"name"`
 			FromMac    bool   `json:"fromMac"`
+			Mux        bool   `json:"mux"`
 			Buffer     int    `json:"buffer"`
 			Outbound   int    `json:"outbound"`
 			MaxMessage int    `json:"maxMessage"`
+			Frame      int    `json:"frame"`
+			Inbox      int    `json:"inbox"`
 			Steps      []step `json:"steps"`
 		} `json:"cases"`
 	}
@@ -40,7 +43,7 @@ func TestEngineCases(t *testing.T) {
 			need[item.Name] = true
 		}
 		t.Run(item.Name, func(t *testing.T) {
-			runEngineCase(t, item.FromMac, item.Buffer, item.Outbound, item.MaxMessage, item.Steps)
+			runEngineCase(t, item.FromMac, item.Mux, item.Buffer, item.Outbound, item.MaxMessage, item.Frame, item.Inbox, item.Steps)
 		})
 	}
 	for name, seen := range need {
@@ -106,7 +109,7 @@ func TestServeStopsOnControlSeq(t *testing.T) {
 	inbound <- Frame{Kind: KindMessage, Channel: 0, Seq: 1, Payload: []byte("{}")}
 	select {
 	case err := <-done:
-		if err == nil || err.Error() != "link" {
+		if err == nil || err.Error() != "seq" {
 			t.Fatalf("serve error %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -121,7 +124,9 @@ type step struct {
 	Channel  uint32 `json:"channel"`
 	Seq      uint64 `json:"seq"`
 	Priority int    `json:"priority"`
+	Session  int    `json:"session"`
 	Payload  string `json:"payload"`
+	Peer     string `json:"peer"`
 	Error    string `json:"error"`
 	N        int    `json:"n"`
 	Ms       int64  `json:"ms"`
@@ -130,18 +135,31 @@ type step struct {
 	Items    []step `json:"items"`
 }
 
-func runEngineCase(t *testing.T, fromMac bool, buffer, outbound, maxMessage int, steps []step) {
+func runEngineCase(t *testing.T, fromMac, mux bool, buffer, outbound, maxMessage, frame, inbox int, steps []step) {
 	t.Helper()
 	start := time.Unix(0, 0)
-	endpoint := NewEndpoint(fromMac, buffer, outbound, maxMessage, start)
+	count := 1
+	if mux {
+		count = 2
+	}
+	sessions := make([]*Endpoint, count)
+	for i := range sessions {
+		sessions[i] = NewEndpoint(fromMac, buffer, outbound, maxMessage, start)
+		sessions[i].SetFrameLimit(frame)
+		sessions[i].SetInboxLimit(inbox)
+	}
+	link := NewLink(start, sessions...)
 	for i, item := range steps {
-		if err := runStep(endpoint, start, item); err != nil {
+		if item.Session < 0 || item.Session >= len(sessions) {
+			t.Fatalf("step %d %s: session %d", i, item.Op, item.Session)
+		}
+		if err := runStep(sessions[item.Session], link, start, item); err != nil {
 			t.Fatalf("step %d %s: %v", i, item.Op, err)
 		}
 	}
 }
 
-func runStep(endpoint *Endpoint, start time.Time, item step) error {
+func runStep(endpoint *Endpoint, link *Link, start time.Time, item step) error {
 	switch item.Op {
 	case "open":
 		return matchErr(item.Error, endpoint.Open(item.Channel))
@@ -151,6 +169,29 @@ func runStep(endpoint *Endpoint, start time.Time, item step) error {
 			return err
 		}
 		return matchErr(item.Error, endpoint.Send(item.Priority, frame))
+	case "message":
+		payload, err := hex.DecodeString(item.Payload)
+		if err != nil {
+			return err
+		}
+		return matchErr(item.Error, endpoint.SendMessage(item.Priority, item.Channel, byte(item.Kind), payload))
+	case "peer":
+		raw, err := hex.DecodeString(item.Payload)
+		if err != nil {
+			return err
+		}
+		if len(raw) != 16 {
+			return errString{want: "16", got: "peer"}
+		}
+		var id [16]byte
+		copy(id[:], raw)
+		endpoint.SetPeer(id)
+		return nil
+	case "writable":
+		if got := endpoint.TakeWritable(); got != item.N {
+			return errString{want: "writable", got: "count"}
+		}
+		return nil
 	case "in":
 		frame, err := stepFrame(item)
 		if err != nil {
@@ -160,9 +201,9 @@ func runStep(endpoint *Endpoint, start time.Time, item step) error {
 	case "consume":
 		return matchErr(item.Error, endpoint.Consume(item.Channel, item.N))
 	case "tick":
-		return matchErr(item.Error, endpoint.Advance(start.Add(time.Duration(item.Ms)*time.Millisecond)))
+		return matchErr(item.Error, link.Advance(start.Add(time.Duration(item.Ms)*time.Millisecond)))
 	case "out":
-		return matchOut(endpoint, item.Frames)
+		return matchOut(link.Pull, item.Frames)
 	case "inbox":
 		return matchInbox(endpoint, item.Items)
 	default:
@@ -189,9 +230,9 @@ func matchErr(want string, err error) error {
 	return nil
 }
 
-func matchOut(endpoint *Endpoint, frames []step) error {
+func matchOut(pull func() (Frame, bool), frames []step) error {
 	for _, want := range frames {
-		got, ok := endpoint.Pull()
+		got, ok := pull()
 		if !ok {
 			return errString{want: "frame", got: "empty"}
 		}
@@ -199,11 +240,19 @@ func matchOut(endpoint *Endpoint, frames []step) error {
 		if err != nil {
 			return err
 		}
-		if got.Kind != expect.Kind || got.Flags != expect.Flags || got.Channel != expect.Channel || got.Seq != expect.Seq || !bytes.Equal(got.Payload, expect.Payload) || got.Peer != [16]byte{} {
+		peer := [16]byte{}
+		if want.Peer != "" {
+			raw, err := hex.DecodeString(want.Peer)
+			if err != nil || len(raw) != 16 {
+				return errString{want: "peer", got: "bad"}
+			}
+			copy(peer[:], raw)
+		}
+		if got.Kind != expect.Kind || got.Flags != expect.Flags || got.Channel != expect.Channel || got.Seq != expect.Seq || !bytes.Equal(got.Payload, expect.Payload) || got.Peer != peer {
 			return errString{want: "match", got: "mismatch"}
 		}
 	}
-	if _, ok := endpoint.Pull(); ok {
+	if _, ok := pull(); ok {
 		return errString{want: "empty", got: "extra"}
 	}
 	return nil

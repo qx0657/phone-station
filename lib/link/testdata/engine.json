@@ -8,9 +8,8 @@
       "steps": [
         {"op": "in", "kind": 4, "channel": 1, "seq": 1, "payload": "61", "error": "seq"},
         {"op": "inbox", "items": []},
-        {"op": "out", "frames": [
-          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a22736571227d"}
-        ]}
+        {"op": "out", "frames": []},
+        {"op": "in", "kind": 3, "channel": 0, "seq": 0, "payload": "7b7d", "error": "link"}
       ]
     },
     {
@@ -188,7 +187,7 @@
         {"op": "out", "frames": []},
         {"op": "tick", "ms": 20000},
         {"op": "out", "frames": [
-          {"kind": 1, "seq": 0, "payload": "70696e67"}
+          {"kind": 1, "seq": 0, "payload": "7b2274797065223a2270696e67227d"}
         ]},
         {"op": "tick", "ms": 45000, "error": "dead"}
       ]
@@ -244,8 +243,85 @@
       "buffer": 8,
       "outbound": 32,
       "steps": [
-        {"op": "in", "kind": 3, "channel": 0, "seq": 1, "payload": "7b7d", "error": "link"},
+        {"op": "in", "kind": 3, "channel": 0, "seq": 1, "payload": "7b7d", "error": "seq"},
         {"op": "in", "kind": 3, "channel": 0, "seq": 0, "payload": "7b7d", "error": "link"}
+      ]
+    },
+    {
+      "name": "peer",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 32,
+      "steps": [
+        {"op": "peer", "payload": "0102030405060708090a0b0c0d0e0f10"},
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "flags": 2, "payload": "61"},
+        {"op": "out", "frames": [
+          {"kind": 4, "flags": 2, "channel": 1, "seq": 0, "payload": "61", "peer": "0102030405060708090a0b0c0d0e0f10"}
+        ]}
+      ]
+    },
+    {
+      "name": "message-atomic",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 4,
+      "frame": 2,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "message", "priority": 3, "kind": 4, "channel": 1, "payload": "616263646566", "error": "backpressure"},
+        {"op": "message", "priority": 3, "kind": 4, "channel": 1, "payload": "61626364"},
+        {"op": "out", "frames": [
+          {"kind": 4, "flags": 4, "channel": 1, "seq": 0, "payload": "6162"},
+          {"kind": 4, "flags": 2, "channel": 1, "seq": 1, "payload": "6364"}
+        ]}
+      ]
+    },
+    {
+      "name": "writable",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 2,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "6162"},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "63", "error": "backpressure"},
+        {"op": "writable", "n": 0},
+        {"op": "out", "frames": [
+          {"kind": 4, "channel": 1, "seq": 0, "payload": "6162"}
+        ]},
+        {"op": "writable", "n": 1},
+        {"op": "writable", "n": 0}
+      ]
+    },
+    {
+      "name": "inbox-cap",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 32,
+      "inbox": 2,
+      "steps": [
+        {"op": "in", "kind": 3, "channel": 0, "seq": 0, "flags": 2, "payload": "6162"},
+        {"op": "in", "kind": 3, "channel": 0, "seq": 1, "flags": 2, "payload": "63", "error": "inbox"},
+        {"op": "in", "kind": 3, "channel": 0, "seq": 2, "flags": 2, "payload": "64", "error": "link"}
+      ]
+    },
+    {
+      "name": "mux",
+      "mux": true,
+      "fromMac": true,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "peer", "session": 0, "payload": "11111111111111111111111111111111"},
+        {"op": "peer", "session": 1, "payload": "22222222222222222222222222222222"},
+        {"op": "open", "session": 0, "channel": 1},
+        {"op": "write", "session": 0, "priority": 3, "kind": 4, "channel": 1, "payload": "61"},
+        {"op": "write", "session": 1, "priority": 1, "kind": 3, "channel": 0, "payload": "7b7d"},
+        {"op": "out", "frames": [
+          {"kind": 3, "channel": 0, "seq": 0, "payload": "7b7d", "peer": "22222222222222222222222222222222"},
+          {"kind": 4, "channel": 1, "seq": 0, "payload": "61", "peer": "11111111111111111111111111111111"}
+        ]}
       ]
     }
   ]

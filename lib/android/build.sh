@@ -71,6 +71,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/link/LinkSeal.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkFlow.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkEngine.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkMux.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkReceipts.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardState.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardAvailability.java" \

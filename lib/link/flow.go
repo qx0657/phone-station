@@ -90,6 +90,15 @@ func (s *Scheduler) Push(priority int, frame Frame, limit int) error {
 	return nil
 }
 
+func (s *Scheduler) Head() (int, bool) {
+	for priority := range s.queues {
+		if len(s.queues[priority]) > 0 {
+			return priority, true
+		}
+	}
+	return 0, false
+}
+
 func (s *Scheduler) Pop() (Frame, bool) {
 	for priority := range s.queues {
 		if len(s.queues[priority]) == 0 {

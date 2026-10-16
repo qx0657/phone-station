@@ -1,6 +1,7 @@
 package dev.phonestation.adbkeep.link;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -32,6 +33,12 @@ public final class LinkEngine {
     private long lastIn;
     private long lastOut;
     private boolean broken;
+    private byte[] peer = new byte[16];
+    private int frameLimit = LinkFrame.MAIN_PAYLOAD;
+    private int inboxLimit = 8 * 1024 * 1024;
+    private int inboxBytes;
+    private boolean writeBlocked;
+    private int writable;
     private volatile boolean stopped;
     private volatile Thread reader;
     private volatile Thread writer;
@@ -54,6 +61,52 @@ public final class LinkEngine {
         this.lastOut = startMs;
     }
 
+    public void setPeer(byte[] id) {
+        if (id == null || id.length != 16) {
+            throw new IllegalArgumentException("peer");
+        }
+        synchronized (lock) {
+            peer = Arrays.copyOf(id, 16);
+        }
+    }
+
+    public void setFrameLimit(int limit) {
+        if (limit <= 0) {
+            return;
+        }
+        synchronized (lock) {
+            frameLimit = limit;
+        }
+    }
+
+    public void setInboxLimit(int limit) {
+        if (limit <= 0) {
+            return;
+        }
+        synchronized (lock) {
+            inboxLimit = limit;
+        }
+    }
+
+    public int takeWritable() {
+        synchronized (lock) {
+            int count = writable;
+            writable = 0;
+            return count;
+        }
+    }
+
+    public int head() {
+        synchronized (lock) {
+            for (int priority = 0; priority < queues.length; priority++) {
+                if (!queues[priority].isEmpty()) {
+                    return priority;
+                }
+            }
+            return -1;
+        }
+    }
+
     /** 只传递帧，不绑定具体的 WebSocket 库。 */
     public interface Conn {
         Frame read() throws Exception;
@@ -70,9 +123,13 @@ public final class LinkEngine {
         public final byte[] payload;
 
         public Frame(int kind, int flags, long channel, long seq, byte[] payload) {
+            this(kind, flags, null, channel, seq, payload);
+        }
+
+        public Frame(int kind, int flags, byte[] peer, long channel, long seq, byte[] payload) {
             this.kind = kind;
             this.flags = flags;
-            this.peer = new byte[16];
+            this.peer = peer == null ? new byte[16] : Arrays.copyOf(peer, 16);
             this.channel = channel;
             this.seq = seq;
             this.payload = payload == null ? new byte[0] : payload.clone();
@@ -126,6 +183,64 @@ public final class LinkEngine {
         }
     }
 
+    public void sendMessage(int priority, long channel, int kind, byte[] payload) {
+        synchronized (lock) {
+            if (broken) {
+                throw new IllegalArgumentException("link");
+            }
+            byte[] body = payload == null ? new byte[0] : payload;
+            if (body.length > maxMessage) {
+                throw new IllegalArgumentException("limit");
+            }
+            int limit = frameLimit <= 0 ? LinkFrame.MAIN_PAYLOAD : frameLimit;
+            java.util.ArrayList<byte[]> parts = new java.util.ArrayList<>();
+            java.util.ArrayList<Integer> flags = new java.util.ArrayList<>();
+            if (body.length == 0) {
+                parts.add(new byte[0]);
+                flags.add(0x02);
+            } else {
+                for (int off = 0; off < body.length; ) {
+                    int next = Math.min(body.length, off + limit);
+                    parts.add(Arrays.copyOfRange(body, off, next));
+                    flags.add(next == body.length ? 0x02 : 0x04);
+                    off = next;
+                }
+            }
+            boolean account = kind == LinkFrame.KIND_DATA || kind == LinkFrame.KIND_MESSAGE;
+            int total = 0;
+            if (account) {
+                for (byte[] part : parts) {
+                    total += part.length;
+                }
+                if ((long) outbound + total > outboundLimit) {
+                    writeBlocked = true;
+                    throw new IllegalArgumentException("backpressure");
+                }
+            }
+            Stream stream = null;
+            if (channel != 0) {
+                stream = live(channel);
+                if (kind != LinkFrame.KIND_DATA && kind != LinkFrame.KIND_MESSAGE) {
+                    throw new IllegalArgumentException("kind");
+                }
+                if (total > stream.send) {
+                    throw new IllegalArgumentException("window");
+                }
+            } else if (kind != LinkFrame.KIND_MESSAGE && kind != LinkFrame.KIND_HANDSHAKE) {
+                throw new IllegalArgumentException("kind");
+            }
+            for (int i = 0; i < parts.size(); i++) {
+                queue(priority, kind, flags.get(i), channel, parts.get(i), account);
+            }
+            if (stream != null) {
+                stream.send -= total;
+                if ((flags.get(flags.size() - 1) & 0x02) != 0) {
+                    stream.ended = true;
+                }
+            }
+        }
+    }
+
     public void consume(long channel, int n) {
         synchronized (lock) {
             Stream stream = streams.get(channel);
@@ -151,11 +266,7 @@ public final class LinkEngine {
                 return;
             }
             if (frame.seq != inSeq) {
-                if (frame.channel == 0) {
-                    broken = true;
-                    throw new IllegalArgumentException("link");
-                }
-                kill(frame.channel, "seq");
+                broken = true;
                 throw new IllegalArgumentException("seq");
             }
             inSeq++;
@@ -186,6 +297,7 @@ public final class LinkEngine {
         synchronized (lock) {
             List<Chunk> out = new ArrayList<>(inbox);
             inbox.clear();
+            inboxBytes = 0;
             return out;
         }
     }
@@ -197,6 +309,9 @@ public final class LinkEngine {
     }
 
     public void advance(long nowMs) {
+    }
+
+    private void beat(long nowMs) {
         synchronized (lock) {
             LinkFlow.Beat beat = LinkFlow.heartbeat(lastIn, lastOut, nowMs);
             if (beat.dead) {
@@ -205,7 +320,7 @@ public final class LinkEngine {
             if (!beat.send) {
                 return;
             }
-            queue(LinkFlow.PRIORITY_LINK, LinkFrame.KIND_LINK, 0, 0, new byte[] {'p', 'i', 'n', 'g'}, false);
+            queue(LinkFlow.PRIORITY_LINK, LinkFrame.KIND_LINK, 0, 0, "{\"type\":\"ping\"}".getBytes(StandardCharsets.US_ASCII), false);
             lastOut = nowMs;
         }
     }
@@ -249,7 +364,7 @@ public final class LinkEngine {
                     break;
                 }
                 try {
-                    advance(now.getAsLong());
+                    beat(now.getAsLong());
                 } catch (IllegalArgumentException error) {
                     failure.compareAndSet(null, error);
                     close();
@@ -296,7 +411,8 @@ public final class LinkEngine {
                 try {
                     accept(frame);
                 } catch (IllegalArgumentException error) {
-                    if ("link".equals(error.getMessage())) {
+                    String message = error.getMessage();
+                    if ("link".equals(message) || "seq".equals(message) || "inbox".equals(message)) {
                         throw error;
                     }
                 }
@@ -369,6 +485,7 @@ public final class LinkEngine {
     private void queue(int priority, int kind, int flags, long channel, byte[] payload, boolean account) {
         byte[] body = payload == null ? new byte[0] : payload;
         if (account && (long) outbound + body.length > outboundLimit) {
+            writeBlocked = true;
             throw new IllegalArgumentException("backpressure");
         }
         push(priority, kind, flags, channel, body);
@@ -396,12 +513,18 @@ public final class LinkEngine {
             }
             if (frame.kind == LinkFrame.KIND_DATA || frame.kind == LinkFrame.KIND_MESSAGE) {
                 outbound -= frame.payload.length;
+                if (writeBlocked && outbound < outboundLimit) {
+                    writeBlocked = false;
+                    writable++;
+                }
             }
             long seq = 0;
+            byte[] id = new byte[16];
             if (frame.kind != LinkFrame.KIND_LINK) {
                 seq = outSeq++;
+                id = peer;
             }
-            return new Frame(frame.kind, frame.flags, frame.channel, seq, frame.payload);
+            return new Frame(frame.kind, frame.flags, id, frame.channel, seq, frame.payload);
         }
         return null;
     }
@@ -501,8 +624,14 @@ public final class LinkEngine {
             controlLen += frame.payload.length;
             return;
         }
+        if (inboxBytes + result.payload.length > inboxLimit) {
+            broken = true;
+            resetControl();
+            throw new IllegalArgumentException("inbox");
+        }
         controlKind = 0;
         controlLen = 0;
+        inboxBytes += result.payload.length;
         inbox.add(new Chunk(0, result.payload, result.end));
     }
 

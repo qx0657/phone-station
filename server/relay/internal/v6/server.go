@@ -125,6 +125,27 @@ func (s *Server) SetTrustedProxies(addrs []string) {
 	s.mu.Unlock()
 }
 
+// ParseTrustedProxies splits the comma-separated list intended for PHONE_RELAY_TRUSTED_PROXIES.
+// Blank pieces are skipped. A piece that is not an IP is an error, so a typo does not silently drop that proxy.
+// The phone-relay process is relay 5 and does not call this.
+func ParseTrustedProxies(text string) ([]string, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, part := range strings.Split(text, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if net.ParseIP(part) == nil {
+			return nil, fmt.Errorf("trusted proxy %q", part)
+		}
+		out = append(out, part)
+	}
+	return out, nil
+}
+
 func (s *Server) IssueEnroll() (string, error) {
 	return s.reg.issueEnroll(s.clock())
 }

@@ -2,6 +2,7 @@ package dev.phonestation.adbkeep;
 
 import dev.phonestation.adbkeep.link.LinkEngine;
 import dev.phonestation.adbkeep.link.LinkFrame;
+import dev.phonestation.adbkeep.link.LinkMux;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,18 +37,30 @@ final class LinkEngineTest {
     }
 
     private static void runCase(String name, Json item) {
-        LinkEngine endpoint = new LinkEngine(
-                item.get("fromMac").boolValue(),
-                count(item, "buffer"),
-                count(item, "outbound"),
-                count(item, "maxMessage"),
-                0L);
+        boolean muxed = item.get("mux") != null && item.get("mux").boolValue();
+        int sessions = muxed ? 2 : 1;
+        LinkEngine[] engines = new LinkEngine[sessions];
+        for (int i = 0; i < sessions; i++) {
+            engines[i] = new LinkEngine(
+                    item.get("fromMac").boolValue(),
+                    count(item, "buffer"),
+                    count(item, "outbound"),
+                    count(item, "maxMessage"),
+                    0L);
+            engines[i].setFrameLimit(count(item, "frame"));
+            engines[i].setInboxLimit(count(item, "inbox"));
+        }
+        LinkMux link = new LinkMux(0L, engines);
         List<Json> steps = item.get("steps").array();
         for (int i = 0; i < steps.size(); i++) {
             Json step = steps.get(i);
             String op = step.get("op").string();
+            int session = (int) number(step, "session");
+            if (session < 0 || session >= engines.length) {
+                throw new AssertionError(name + " step " + i + " session");
+            }
             try {
-                runStep(endpoint, step);
+                runStep(engines[session], link, step);
             } catch (AssertionError error) {
                 throw new AssertionError(name + " step " + i + " " + op + ": " + error.getMessage());
             } catch (RuntimeException error) {
@@ -56,11 +69,11 @@ final class LinkEngineTest {
         }
     }
 
-    private static void runStep(LinkEngine endpoint, Json step) {
+    private static void runStep(LinkEngine endpoint, LinkMux link, Json step) {
         String op = step.get("op").string();
         String want = text(step, "error");
         if ("out".equals(op)) {
-            matchOut(endpoint, step);
+            matchOut(link, step);
             return;
         }
         if ("inbox".equals(op)) {
@@ -76,6 +89,18 @@ final class LinkEngineTest {
                 case "write":
                     endpoint.send((int) number(step, "priority"), frame(step));
                     break;
+                case "message":
+                    endpoint.sendMessage((int) number(step, "priority"), number(step, "channel"),
+                            (int) number(step, "kind"), hex(text(step, "payload")));
+                    break;
+                case "peer":
+                    endpoint.setPeer(hex(text(step, "payload")));
+                    break;
+                case "writable":
+                    if (endpoint.takeWritable() != number(step, "n")) {
+                        throw new AssertionError("writable != count");
+                    }
+                    break;
                 case "in":
                     endpoint.accept(frame(step));
                     break;
@@ -83,7 +108,7 @@ final class LinkEngineTest {
                     endpoint.consume(number(step, "channel"), (int) number(step, "n"));
                     break;
                 case "tick":
-                    endpoint.advance(number(step, "ms"));
+                    link.advance(number(step, "ms"));
                     break;
                 default:
                     throw new AssertionError(op);
@@ -96,23 +121,24 @@ final class LinkEngineTest {
         }
     }
 
-    private static void matchOut(LinkEngine endpoint, Json step) {
+    private static void matchOut(LinkMux link, Json step) {
         List<Json> frames = array(step, "frames");
         for (Json want : frames) {
-            LinkEngine.Frame got = endpoint.pull();
+            LinkEngine.Frame got = link.pull();
             if (got == null) {
                 throw new AssertionError("empty");
             }
+            byte[] peer = text(want, "peer").isEmpty() ? new byte[16] : hex(text(want, "peer"));
             if (got.kind != number(want, "kind")
                     || got.flags != number(want, "flags")
                     || got.channel != number(want, "channel")
                     || got.seq != number(want, "seq")
                     || !Arrays.equals(got.payload, hex(text(want, "payload")))
-                    || !zeros(got.peer)) {
+                    || !Arrays.equals(got.peer, peer)) {
                 throw new AssertionError("mismatch");
             }
         }
-        if (endpoint.pull() != null) {
+        if (link.pull() != null) {
             throw new AssertionError("extra");
         }
     }
@@ -188,7 +214,7 @@ final class LinkEngineTest {
             throw new AssertionError("serve kept a broken session");
         }
         Throwable error = failure.get();
-        if (error == null || !"link".equals(error.getMessage())) {
+        if (error == null || !"seq".equals(error.getMessage())) {
             throw new AssertionError("serve error " + (error == null ? "" : error.getMessage()));
         }
     }

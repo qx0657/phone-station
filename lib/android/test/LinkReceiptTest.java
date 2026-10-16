@@ -45,6 +45,9 @@ final class LinkReceiptTest {
             capAndIndex(root.resolve("cap"));
             readOnlyOccupiesSlot(root.resolve("readonly-slot"));
             privilegedExpiresWithoutWaiting(root.resolve("sweep"));
+            finishedAge(root.resolve("finished-age"));
+            corruptReceipt(root.resolve("corrupt"));
+            replacedEpoch(root.resolve("bad-epoch"));
         } finally {
             delete(root);
         }
@@ -237,8 +240,8 @@ final class LinkReceiptTest {
         store.submit(mac, op, "clipboard.set", "keep".getBytes(), () -> "body".getBytes());
         awaitState(store, mac, op, "complete");
         clock.now = LinkReceipts.BODY_MS;
-        String text = waitFile(root.resolve(mac + "." + op + ".rec"), value -> value.endsWith("\t-"));
         LinkReceipts.Receipt expired = store.query(mac, op);
+        String text = Files.readString(root.resolve(mac + "." + op + ".rec"));
         if (!text.endsWith("\t-") || expired.body != null || expired.resultKept || !"complete".equals(expired.state)) {
             throw new AssertionError("body age");
         }
@@ -250,8 +253,14 @@ final class LinkReceiptTest {
             String op = id(61);
             store.submit(mac, op, "clipboard.set", "over".getBytes(), () -> new byte[LinkReceipts.BODY_LIMIT + 1]);
             LinkReceipts.Receipt receipt = awaitState(store, mac, op, "complete");
-            if (receipt.body != null || receipt.resultKept || !receipt.applied) {
+            if (receipt.body == null || receipt.body.length != LinkReceipts.BODY_LIMIT + 1 || receipt.resultKept || !receipt.applied) {
                 throw new AssertionError("oversized");
+            }
+        }
+        try (LinkReceipts again = new LinkReceipts(root, new Manual())) {
+            LinkReceipts.Receipt later = again.query(id(60), id(61));
+            if (later.body != null || later.resultKept || !"complete".equals(later.state)) {
+                throw new AssertionError("oversized disk");
             }
         }
     }
@@ -411,6 +420,7 @@ final class LinkReceiptTest {
             release.countDown();
             awaitState(store, mac, id(91), "complete");
             awaitState(store, mac, id(92), "complete");
+            clock.now = LinkReceipts.EVICT_MS + LinkReceipts.EVICT_MS;
             store.submit(mac, id(94), "clipboard.set", "next".getBytes(), () -> "next".getBytes());
             LinkReceipts.Receipt kept = awaitState(store, mac, id(94), "complete");
             if (!"not_found".equals(store.query(mac, id(91)).state) || !"not_found".equals(store.query(mac, id(92)).state) || kept.body == null) {
@@ -568,11 +578,8 @@ final class LinkReceiptTest {
                 return "second".getBytes();
             });
             clock.now = LinkReceipts.PRIVILEGED_QUEUE_MS + 1;
-            String text = waitFile(root.resolve(mac + "." + id(152) + ".rec"), value -> {
-                String[] parts = value.split("\t", -1);
-                return parts.length == 10 && "expired".equals(parts[5]);
-            });
-            if (!text.contains("\texpired\t") || runs.get() != 1) {
+            LinkReceipts.Receipt waiting = store.query(mac, id(152));
+            if (!"expired".equals(waiting.state) || runs.get() != 1) {
                 release.countDown();
                 throw new AssertionError("sweep " + runs.get());
             }
@@ -585,21 +592,68 @@ final class LinkReceiptTest {
         }
     }
 
-    private static String waitFile(Path file, java.util.function.Predicate<String> ready) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-        String text = "";
-        while (System.nanoTime() < deadline) {
-            try {
-                text = Files.readString(file);
-            } catch (IOException error) {
-                text = "";
+    private static void finishedAge(Path root) throws Exception {
+        Manual clock = new Manual();
+        try (LinkReceipts store = new LinkReceipts(root, clock)) {
+            String mac = id(160);
+            String op = id(161);
+            store.submit(mac, op, "clipboard.set", "age".getBytes(), () -> {
+                clock.now = LinkReceipts.BODY_MS;
+                return "kept".getBytes();
+            });
+            LinkReceipts.Receipt fresh = awaitState(store, mac, op, "complete");
+            if (fresh.body == null || !"kept".equals(new String(fresh.body, java.nio.charset.StandardCharsets.UTF_8))) {
+                throw new AssertionError("finished age kept");
             }
-            if (ready.test(text)) {
-                return text;
+            clock.now = LinkReceipts.BODY_MS + LinkReceipts.BODY_MS;
+            LinkReceipts.Receipt dropped = store.query(mac, op);
+            if (dropped.body != null || !"complete".equals(dropped.state)) {
+                throw new AssertionError("finished age dropped");
             }
-            Thread.sleep(20);
         }
-        return text;
+    }
+
+    private static void corruptReceipt(Path root) throws Exception {
+        Files.createDirectories(root);
+        String mac = id(162);
+        String op = id(163);
+        Files.writeString(root.resolve(mac + "." + op + ".rec"), "not-a-receipt");
+        Files.writeString(root.resolve(".pending-left.tmp"), "temp");
+        try (LinkReceipts store = new LinkReceipts(root, new Manual())) {
+            LinkReceipts.Receipt unknown = store.query(mac, op);
+            if (!"unknown".equals(unknown.state) || unknown.body != null) {
+                throw new AssertionError("corrupt " + unknown.state);
+            }
+            if (Files.exists(root.resolve(".pending-left.tmp"))) {
+                throw new AssertionError("temp");
+            }
+            if (!Files.isRegularFile(root.resolve("corrupt").resolve(mac + "." + op + ".rec"))) {
+                throw new AssertionError("quarantine");
+            }
+        }
+        try (LinkReceipts again = new LinkReceipts(root, new Manual())) {
+            if (!"unknown".equals(again.query(mac, op).state)) {
+                throw new AssertionError("corrupt restart");
+            }
+        }
+    }
+
+    private static void replacedEpoch(Path root) throws Exception {
+        Files.createDirectories(root);
+        Files.writeString(root.resolve("epoch"), "not-hex");
+        String mac = id(164);
+        String op = id(165);
+        String line = String.join("\t", "v1", mac, op, "clipboard.set", "ab", "complete", "1", "boot-1", "0", "0", "YQ==");
+        Files.writeString(root.resolve(mac + "." + op + ".rec"), line);
+        try (LinkReceipts store = new LinkReceipts(root, new Manual())) {
+            if (store.epoch().length() != 32 || "not-hex".equals(store.epoch())) {
+                throw new AssertionError("epoch replaced");
+            }
+            LinkReceipts.Receipt kept = store.query(mac, op);
+            if (!"complete".equals(kept.state) || kept.body == null || kept.body.length != 1) {
+                throw new AssertionError("epoch receipt");
+            }
+        }
     }
 
     private static void cancelQueued(LinkReceipts store) throws Exception {

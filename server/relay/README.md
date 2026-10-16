@@ -55,3 +55,5 @@
 ## 中继 6
 
 `internal/v6` 是下一版中继的注册表和 `GET /v2/link`。测试进程在临时目录上用真实 TLS 启动它，随本模块的 `go test` 进入 `scripts/check.sh`。`cmd/phone-relay` 不引用这个包，所以 `scripts/build-relay.sh` 打出的发布包仍是中继 5，不会在公网上提供 `/v2/link`。协议字节、邀请和注册表规则见 [中继 6](../../docs/link-v2.md#中继-6)。隔离实例和 `phone-relay enroll` 留到切换部署。
+
+可信代理默认关闭。`ParseTrustedProxies` 解析逗号分隔的 IP，准备给 `PHONE_RELAY_TRUSTED_PROXIES`。当前 `phone-relay` 是中继 5，不读这个变量；上表里的环境变量也不包含它。部署中继 6 时由那个进程接上。
