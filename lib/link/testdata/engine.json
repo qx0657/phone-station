@@ -1,0 +1,252 @@
+{
+  "cases": [
+    {
+      "name": "out-of-order",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 1, "payload": "61", "error": "seq"},
+        {"op": "inbox", "items": []},
+        {"op": "out", "frames": [
+          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a22736571227d"}
+        ]}
+      ]
+    },
+    {
+      "name": "interleaved",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "flags": 4, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 3, "seq": 1, "flags": 4, "payload": "62"},
+        {"op": "in", "kind": 4, "channel": 1, "seq": 2, "payload": "63"},
+        {"op": "inbox", "items": [{"channel": 1, "payload": "6163", "end": false}]},
+        {"op": "in", "kind": 4, "channel": 3, "seq": 3, "flags": 2, "payload": "64"},
+        {"op": "inbox", "items": [{"channel": 3, "payload": "6264", "end": true}]},
+        {"op": "consume", "channel": 1, "n": 2},
+        {"op": "out", "frames": [
+          {"kind": 5, "channel": 1, "seq": 0, "payload": "00000002"}
+        ]}
+      ]
+    },
+    {
+      "name": "window-send",
+      "fromMac": true,
+      "buffer": 4,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "61616161"},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "62", "error": "window"},
+        {"op": "out", "frames": [
+          {"kind": 4, "channel": 1, "seq": 0, "payload": "61616161"}
+        ]},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "62", "error": "window"}
+      ]
+    },
+    {
+      "name": "window-grant",
+      "fromMac": true,
+      "buffer": 4,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "in", "kind": 5, "channel": 1, "seq": 0, "payload": "00000001", "error": "window"},
+        {"op": "out", "frames": [
+          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a2277696e646f77227d"}
+        ]}
+      ]
+    },
+    {
+      "name": "window-receive",
+      "fromMac": false,
+      "buffer": 4,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "payload": "61616161"},
+        {"op": "inbox", "items": [{"channel": 1, "payload": "61616161", "end": false}]},
+        {"op": "in", "kind": 4, "channel": 1, "seq": 1, "payload": "62", "error": "window"},
+        {"op": "out", "frames": [
+          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a2277696e646f77227d"}
+        ]},
+        {"op": "inbox", "items": []}
+      ]
+    },
+    {
+      "name": "reset",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "flags": 4, "payload": "61"},
+        {"op": "in", "kind": 6, "channel": 1, "seq": 1},
+        {"op": "inbox", "items": []},
+        {"op": "in", "kind": 4, "channel": 1, "seq": 2, "payload": "62", "error": "channel"}
+      ]
+    },
+    {
+      "name": "reset-drops-send",
+      "fromMac": true,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "flags": 4, "payload": "61"},
+        {"op": "in", "kind": 6, "channel": 1, "seq": 0},
+        {"op": "out", "frames": []},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "62", "error": "channel"}
+      ]
+    },
+    {
+      "name": "slow-receiver",
+      "fromMac": true,
+      "buffer": 100,
+      "outbound": 4,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "61616161"},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "62", "error": "backpressure"},
+        {"op": "out", "frames": [
+          {"kind": 4, "channel": 1, "seq": 0, "payload": "61616161"}
+        ]},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "62"},
+        {"op": "out", "frames": [
+          {"kind": 4, "channel": 1, "seq": 1, "payload": "62"}
+        ]}
+      ]
+    },
+    {
+      "name": "fragment",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "flags": 4, "payload": "61"},
+        {"op": "in", "kind": 3, "channel": 1, "seq": 1, "payload": "62", "error": "fragment"},
+        {"op": "inbox", "items": []},
+        {"op": "out", "frames": [
+          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a22667261676d656e74227d"}
+        ]}
+      ]
+    },
+    {
+      "name": "limit",
+      "fromMac": false,
+      "buffer": 32,
+      "outbound": 64,
+      "maxMessage": 3,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "payload": "61616161", "error": "limit"},
+        {"op": "inbox", "items": []},
+        {"op": "out", "frames": [
+          {"kind": 6, "channel": 1, "seq": 0, "payload": "7b22636f6465223a226c696d6974227d"}
+        ]}
+      ]
+    },
+    {
+      "name": "priority-seq",
+      "fromMac": true,
+      "buffer": 32,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "payload": "66"},
+        {"op": "write", "priority": 1, "kind": 3, "channel": 0, "payload": "7b7d"},
+        {"op": "out", "frames": [
+          {"kind": 3, "channel": 0, "seq": 0, "payload": "7b7d"},
+          {"kind": 4, "channel": 1, "seq": 1, "payload": "66"}
+        ]}
+      ]
+    },
+    {
+      "name": "streams",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 2, "error": "channel"},
+        {"op": "open", "channel": 1},
+        {"op": "open", "channel": 3},
+        {"op": "open", "channel": 5},
+        {"op": "open", "channel": 7},
+        {"op": "open", "channel": 9},
+        {"op": "open", "channel": 11},
+        {"op": "open", "channel": 13},
+        {"op": "open", "channel": 15},
+        {"op": "open", "channel": 17, "error": "streams"}
+      ]
+    },
+    {
+      "name": "idle",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 32,
+      "steps": [
+        {"op": "tick", "ms": 19000},
+        {"op": "out", "frames": []},
+        {"op": "tick", "ms": 20000},
+        {"op": "out", "frames": [
+          {"kind": 1, "seq": 0, "payload": "70696e67"}
+        ]},
+        {"op": "tick", "ms": 45000, "error": "dead"}
+      ]
+    },
+    {
+      "name": "stream-slots",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 64,
+      "steps": [
+        {"op": "open", "channel": 1},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 1, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 3},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 3, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 5},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 5, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 7},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 7, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 9},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 9, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 11},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 11, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 13},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 13, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 15},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 15, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 17},
+        {"op": "write", "priority": 3, "kind": 4, "channel": 17, "flags": 2, "payload": "61"},
+        {"op": "open", "channel": 1, "error": "channel"}
+      ]
+    },
+    {
+      "name": "stream-slots-recv",
+      "fromMac": false,
+      "buffer": 8,
+      "outbound": 64,
+      "steps": [
+        {"op": "in", "kind": 4, "channel": 1, "seq": 0, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 3, "seq": 1, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 5, "seq": 2, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 7, "seq": 3, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 9, "seq": 4, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 11, "seq": 5, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 13, "seq": 6, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 15, "seq": 7, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 17, "seq": 8, "flags": 2, "payload": "61"},
+        {"op": "in", "kind": 4, "channel": 1, "seq": 9, "payload": "62", "error": "channel"}
+      ]
+    },
+    {
+      "name": "control-seq",
+      "fromMac": true,
+      "buffer": 8,
+      "outbound": 32,
+      "steps": [
+        {"op": "in", "kind": 3, "channel": 0, "seq": 1, "payload": "7b7d", "error": "link"},
+        {"op": "in", "kind": 3, "channel": 0, "seq": 0, "payload": "7b7d", "error": "link"}
+      ]
+    }
+  ]
+}

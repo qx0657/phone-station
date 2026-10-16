@@ -102,6 +102,23 @@ func (s *Scheduler) Pop() (Frame, bool) {
 	return Frame{}, false
 }
 
+// Drop removes queued data and message frames for one stream, for example after reset.
+func (s *Scheduler) Drop(channel uint32) []Frame {
+	var dropped []Frame
+	for priority := range s.queues {
+		kept := make([]Frame, 0, len(s.queues[priority]))
+		for _, frame := range s.queues[priority] {
+			if frame.Channel == channel && (frame.Kind == KindData || frame.Kind == KindMessage) {
+				dropped = append(dropped, frame)
+				continue
+			}
+			kept = append(kept, frame)
+		}
+		s.queues[priority] = kept
+	}
+	return dropped
+}
+
 // Heartbeat reports a ping when nothing has been sent for 20 seconds.
 // Forty-five seconds without an inbound frame closes the link, and a dead link does not ping.
 func Heartbeat(lastInbound, lastOutbound, now time.Time) (send bool, dead bool) {
