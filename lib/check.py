@@ -1,6 +1,7 @@
 """Local regressions; all generated products live in a temporary directory."""
 import argparse
 import os
+import re
 from pathlib import Path
 import platform
 import py_compile
@@ -33,6 +34,7 @@ MAC_TESTS = {
     "AdbDeviceStream": ["AdbDeviceStream"],
     "PairingPrompt": ["PairingPrompt"],
     "UsageCounters": ["UsageCounters"],
+    "LocalEventSession": ["ClipboardProtocol", "LocalEventSession"],
 }
 
 
@@ -61,6 +63,67 @@ def agent_docs():
                 raise ValueError(f"{link} 未指向项目 Skill 源码")
 
 
+def page_subscriptions():
+    """每页视图里读到的 station.<会话> 必须出现在该页订阅表或常驻订阅里。"""
+    mac = ROOT / "app/mac"
+    station = (mac / "Station.swift").read_text()
+    sessions = set()
+    for line in station.splitlines():
+        match = re.match(r"\s+(?:let|var) (\w+)\s*(?::\s*([A-Za-z0-9_]+))?(?:\s*=\s*([A-Za-z0-9_]+))?", line)
+        if not match:
+            continue
+        blob = (match.group(2) or "") + (match.group(3) or "")
+        if "Session" in blob or blob in {"StationFeedback", "StationAppearance"}:
+            sessions.add(match.group(1))
+    if not sessions:
+        raise ValueError("没有解析到 Station 会话")
+    body = station.split("private func bindPage()", 1)[1].split("private func observe", 1)[0]
+    head, tail = body.split("switch page", 1)
+    always = set(re.findall(r"observe\((\w+)\)", head))
+    subscribed = {}
+    for part in re.split(r"\n\s+case ", tail)[1:]:
+        header, _, rest = part.partition(":")
+        names = [piece.strip()[1:] for piece in header.split(",") if piece.strip().startswith(".")]
+        observed = set(re.findall(r"observe\((\w+)\)", rest))
+        for name in names:
+            subscribed[name] = observed
+    structs = {}
+    for file in mac.glob("*.swift"):
+        text = file.read_text()
+        marks = list(re.finditer(r"(?m)^(struct|enum|final class|class|@main|private extension|extension) ([A-Za-z0-9_]+)", text))
+        for index, mark in enumerate(marks):
+            end = marks[index + 1].start() if index + 1 < len(marks) else len(text)
+            structs[mark.group(2)] = text[mark.start():end]
+    views = (mac / "StationView.swift").read_text().split("switch station.page", 1)[1]
+    missing = []
+    for part in re.split(r"\n\s+case ", views)[1:]:
+        header, _, rest = part.partition(":")
+        pages = [piece.strip()[1:] for piece in header.split(",") if piece.strip().startswith(".")]
+        block = rest.split("\n    }", 1)[0]
+        roots = re.findall(r"\b([A-Z][A-Za-z0-9]*)\s*\(", block)
+        seen = []
+        reads = set(re.findall(r"station\.([A-Za-z_][A-Za-z0-9_]*)", block)) & sessions
+        pending = [name for name in roots if name in structs]
+        while pending:
+            name = pending.pop()
+            if name in seen:
+                continue
+            seen.append(name)
+            chunk = structs[name]
+            reads |= set(re.findall(r"station\.([A-Za-z_][A-Za-z0-9_]*)", chunk)) & sessions
+            pending.extend(ref for ref in re.findall(r"\b([A-Z][A-Za-z0-9]*)\s*\(", chunk) if ref in structs and ref not in seen)
+        for page in pages:
+            if page not in subscribed:
+                missing.append(f"{page} 没有订阅表")
+                continue
+            gap = reads - always - subscribed[page]
+            if gap:
+                missing.append(f"{page} 读了 {', '.join(sorted(gap))}，订阅表没有")
+    if missing:
+        raise ValueError("页面订阅表与视图不一致：" + "；".join(missing))
+    return len(subscribed)
+
+
 def main():
     parser = argparse.ArgumentParser(description="本机回归检查：文档、语法、Python、Java、Go race、Swift；不操作手机。")
     parser.add_argument("--core", action="store_true", help="仅运行跨平台检查，明确跳过 Swift 编译和测试")
@@ -83,6 +146,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="phone-station-check-") as temp:
         work = Path(temp)
         agent_docs()
+        print(f"页面订阅表 {page_subscriptions()} 页通过", flush=True)
         print(f"Markdown 文件与锚点 {check_doc_links(ROOT)} 份通过", flush=True)
         for name in ("scripts", "lib", ".agents", "server"):
             directory = ROOT / name

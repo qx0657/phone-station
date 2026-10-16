@@ -46,6 +46,11 @@ final class FeaturePolicy {
             default: return "";
         }
     }
+    /** 空功能名且不在状态白名单里的，是未知工具，不能当成权限拒绝。 */
+    static boolean known(String tool) {
+        return !feature(tool).isEmpty() || STATUS.contains(tool) || "station_operation_status".equals(tool);
+    }
+
     static boolean allows(boolean master, Map<String, Boolean> enabled, String tool) {
         // Cleanup and metadata remain safe even while stopping a service.
         if (STATUS.contains(tool) || tool.equals("station_screen_close") || tool.equals("station_terminal_close")

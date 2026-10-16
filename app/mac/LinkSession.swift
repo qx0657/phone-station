@@ -65,11 +65,29 @@ final class LinkSession: ObservableObject {
     private var statusRevision = 0
     private var controlEpoch = 0
     private var connectionEpoch = 0
+    /// track-devices 仍列着、但 shell true 失败的序列号。列表里消失之前不当作在线。
+    private var unreachableSerial: String?
+    private var listedSerial: String?
+    private var gatewayLocalOnline: Bool?
+    private var localMcp: Bool?
+    private var panelOpen = false
+    private var livenessInFlight = false
+    private var idleTask: Task<Void, Never>?
+    var idleLivenessNanoseconds: UInt64 = 15_000_000_000
+    private let shellAlive: @Sendable (String) -> Bool
+    private let connectCommand: @Sendable () -> CommandResult
+    private let featureShell: @Sendable (String) -> String
 
     init(feedback: StationFeedback,
-         reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) }) {
+         reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) },
+         shellAlive: @escaping @Sendable (String) -> Bool = { LinkSession.shellTrue($0) },
+         connectCommand: @escaping @Sendable () -> CommandResult = { StationRunner.scriptResult("connect.sh", timeout: 30) },
+         featureShell: @escaping @Sendable (String) -> String = { LinkSession.readFeatureProjection($0) }) {
         self.feedback = feedback
         self.reader = reader
+        self.shellAlive = shellAlive
+        self.connectCommand = connectCommand
+        self.featureShell = featureShell
     }
 
     var isConnected: Bool { link == .connected || remoteConnected }
@@ -193,8 +211,8 @@ final class LinkSession: ObservableObject {
                    link: reading.link, serial: reading.serial, readingControls: controls,
                    reconnectable: reading.reconnectable)
             if revision == statusRevision {
-                phoneFeatures = reading.features
-                connectionPreferences = reading.preferences
+                if reading.features != nil { phoneFeatures = reading.features }
+                if reading.preferences != nil { connectionPreferences = reading.preferences }
             }
         } while probeAgain
         probeInFlight = false
@@ -229,11 +247,12 @@ final class LinkSession: ObservableObject {
                 Self.describe(devices, trustedSerial: trusted, adb: StationRunner.executable("adb"))
             }.value
             guard revision == self.statusRevision else { return }
+            if reading.serial == nil || (self.unreachableSerial != nil && reading.serial != self.unreachableSerial) {
+                self.unreachableSerial = nil
+            }
             self.accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
                         link: reading.link, serial: reading.serial, readingControls: false,
                         reconnectable: reading.reconnectable)
-            self.phoneFeatures = nil
-            self.connectionPreferences = nil
         }
     }
 
@@ -363,35 +382,51 @@ final class LinkSession: ObservableObject {
                         link newLink: Link, serial newSerial: String? = nil, readingControls: Bool,
                         reconnectable: Bool = false) {
         guard revision == statusRevision else { return }
+        var linkValue = newLink
+        var serialValue = newSerial
+        var reconnect = reconnectable
+        if linkValue == .connected, serialValue == unreachableSerial {
+            linkValue = .offline
+            serialValue = nil
+            reconnect = false
+        }
         if deviceName != name { deviceName = name }
         if deviceDetail != detail { deviceDetail = detail }
         if self.transport != transport { self.transport = transport }
-        if link != newLink { link = newLink }
-        let serialChanged = serial != newSerial
+        if link != linkValue { link = linkValue }
+        let serialChanged = serial != serialValue
         if serialChanged {
             connectionEpoch += 1
-            serial = newSerial
+            serial = serialValue
             battery = nil
             connectionPreferences = nil
+            phoneFeatures = nil
         }
-        if newLink == .connected, let newSerial {
-            trustedSerial = newSerial
+        let previousListed = listedSerial
+        if let serialValue {
+            listedSerial = serialValue
+        } else if unreachableSerial == nil {
+            listedSerial = nil
+        }
+        if listedSerial != previousListed { restartIdleLiveness() }
+        if linkValue == .connected, let serialValue {
+            trustedSerial = serialValue
             pairedDeviceName = name == "PGT-AN20" ? "荣耀 PGT-AN20" : name
             if needsWirelessPairing { needsWirelessPairing = false }
         } else {
             trustedSerial = nil
         }
-        if let newSerial {
+        if let serialValue {
             if (readingControls || serialChanged), feedback.activity == nil {
-                refreshStayAwake(serial: newSerial)
+                refreshStayAwake(serial: serialValue)
                 onRefreshTorch()
             }
         } else if stayAwake {
             stayAwake = false
         }
         onMenuIcon?(isConnected)
-        onSerial(newSerial)
-        considerReconnect(reconnectable: reconnectable)
+        onSerial(serialValue)
+        considerReconnect(reconnectable: reconnect)
     }
 
     private func refreshStayAwake(serial: String) {
@@ -466,8 +501,9 @@ final class LinkSession: ObservableObject {
 
     private func launchConnect() {
         UsageCounters.noteReconnect("link")
+        let run = connectCommand
         Task.detached(priority: .userInitiated) {
-            let result = StationRunner.scriptResult("connect.sh", timeout: 30)
+            let result = run()
             await MainActor.run { self.finishConnect(result) }
         }
     }
@@ -518,6 +554,92 @@ final class LinkSession: ObservableObject {
             }
             await self.probe(readingControls: false)
         }
+    }
+
+    /// 网关本地通道从在线变为离线，而 adb 仍列着这台设备时，做一次存活探测。
+    func noteGatewayLocal(_ online: Bool) {
+        let previous = gatewayLocalOnline
+        gatewayLocalOnline = online
+        guard previous == true, !online, let serial = listedSerial ?? self.serial else { return }
+        Task { await confirmAlive(serial) }
+    }
+
+    func notePanel(_ open: Bool) {
+        guard panelOpen != open else { return }
+        panelOpen = open
+        restartIdleLiveness()
+    }
+
+    func noteLocalMcp(_ enabled: Bool?) {
+        guard localMcp != enabled else { return }
+        localMcp = enabled
+        restartIdleLiveness()
+    }
+
+    /// MCP 读不到功能开关时，用一次 shell 读手机投影出来的设置。
+    func readProjectedFeatures() async {
+        guard let serial else { return }
+        let read = featureShell
+        let output = await Task.detached { read(serial) }.value
+        guard self.serial == serial else { return }
+        if let features = PhoneFeatureState.adb(output) { phoneFeatures = features }
+        if let preferences = PhoneConnectionPreferences.adb(output) {
+            connectionPreferences = preferences
+            noteLocalMcp(preferences.localMcp)
+        }
+    }
+
+    nonisolated static func featureQuery() -> String {
+        let names = ["phonestation_enabled"]
+            + PhoneFeatureState.keys.map { "phonestation_feature_" + $0.replacingOccurrences(of: ".", with: "_") }
+            + ["phonestation_mcp", "phonestation_remote"]
+        return names.map { "settings get global \($0)" }.joined(separator: "; ")
+    }
+
+    private nonisolated static func shellTrue(_ serial: String) -> Bool {
+        guard let adb = StationRunner.executable("adb") else { return false }
+        return StationRunner.capture(adb, ["-s", serial, "shell", "true"], timeout: 2).succeeded
+    }
+
+    private nonisolated static func readFeatureProjection(_ serial: String) -> String {
+        guard let adb = StationRunner.executable("adb") else { return "" }
+        let result = StationRunner.capture(adb, ["-s", serial, "shell", featureQuery()], timeout: 8)
+        return result.succeeded ? result.output : ""
+    }
+
+    /// 本机 MCP 关闭时没有网关探测。面板打开期间每 15 秒查一次，关闭不查。
+    private func restartIdleLiveness() {
+        idleTask?.cancel()
+        idleTask = nil
+        guard panelOpen, localMcp == false, listedSerial != nil else { return }
+        idleTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: self.idleLivenessNanoseconds)
+                if Task.isCancelled { return }
+                guard self.panelOpen, self.localMcp == false, let serial = self.listedSerial else { return }
+                await self.confirmAlive(serial)
+            }
+        }
+    }
+
+    private func confirmAlive(_ serial: String) async {
+        if livenessInFlight { return }
+        livenessInFlight = true
+        let check = shellAlive
+        let alive = await Task.detached { check(serial) }.value
+        livenessInFlight = false
+        guard listedSerial == serial || self.serial == serial else { return }
+        if alive {
+            let recover = unreachableSerial == serial
+            if recover { unreachableSerial = nil }
+            if recover { await self.probe(readingControls: false) }
+            return
+        }
+        unreachableSerial = serial
+        listedSerial = serial
+        statusRevision += 1
+        accept(statusRevision, name: "手机未连接", detail: "正在重新连接…", link: .offline,
+               readingControls: false, reconnectable: true)
     }
 }
 

@@ -24,6 +24,8 @@ public final class FeaturePolicyTest {
         selections.put("alerts", true);
         check(FeaturePolicy.allows(true, selections, "station_notify"), "reverse direction remains enabled");
         check(!FeaturePolicy.allows(true, selections, "station_new_unknown_tool"), "unknown tool denies by default");
+        check(!FeaturePolicy.known("station_new_unknown_tool"), "unknown tool is not a permission error");
+        check(FeaturePolicy.known("station_event_wait"), "local wait is a known tool");
         check(FeaturePolicy.allows(false, selections, "station_screen_close"), "cleanup is always possible");
         check(FeaturePolicy.allows(false, selections, "station_controls_status"), "metadata is safe");
         check(FeaturePolicy.allows(false, selections, "station_event_wait"), "local wait stays available");

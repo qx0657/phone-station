@@ -148,8 +148,84 @@ struct ConnectionStatusTest {
         sequence.release.signal()
         await probe.value
         precondition(racing.serial == nil && enabledSerials.isEmpty, "断线事件后的旧探测不能重新启用操作")
+        await livenessTest()
         await remoteControlsTest()
         print("ConnectionStatusTest ok")
+    }
+
+    @MainActor static func livenessTest() async {
+        let query = LinkSession.featureQuery()
+        precondition(query.contains("settings get global phonestation_enabled"))
+        precondition(query.contains("phonestation_feature_files_read"))
+        precondition(query.contains("phonestation_mcp") && query.contains("phonestation_remote"))
+        precondition(!query.contains("\n"), "feature switches share one shell")
+        precondition(query.filter { $0 == ";" }.count == PhoneFeatureState.keys.count + 2)
+        precondition(!FeatureReadPolicy.shouldRead(serialOnline: true, mcpAvailable: true, mcpHasFeatures: true))
+        precondition(FeatureReadPolicy.shouldRead(serialOnline: true, mcpAvailable: true, mcpHasFeatures: false))
+        precondition(FeatureReadPolicy.shouldRead(serialOnline: true, mcpAvailable: false, mcpHasFeatures: false))
+        precondition(!FeatureReadPolicy.shouldRead(serialOnline: false, mcpAvailable: false, mcpHasFeatures: false))
+
+        final class Log: @unchecked Sendable {
+            let lock = NSLock()
+            var shells: [String] = []
+            var connects = 0
+            var alive = false
+            func shell(_ serial: String) -> Bool {
+                lock.lock(); shells.append(serial); let alive = self.alive; lock.unlock(); return alive
+            }
+            func connect() -> CommandResult {
+                lock.lock(); connects += 1; lock.unlock()
+                return CommandResult(code: 1, output: "skipped", timedOut: false)
+            }
+        }
+        let log = Log()
+        let connected = LinkReading(name: "PGT-AN20", detail: "", transport: "无线连接", link: .connected, serial: "dead-phone")
+        let link = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
+                               shellAlive: { log.shell($0) }, connectCommand: { log.connect() })
+        await link.probe(readingControls: false)
+        precondition(link.serial == "dead-phone")
+        link.noteGatewayLocal(false)
+        link.noteGatewayLocal(false)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        precondition(log.shells.isEmpty && log.connects == 0, "offline without a prior online sample does not probe")
+        link.noteGatewayLocal(true)
+        link.noteGatewayLocal(false)
+        for _ in 0..<40 where log.shells.isEmpty { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(log.shells == ["dead-phone"] && link.serial == nil, "a failed shell true drops the stale adb session")
+        for _ in 0..<40 where log.connects == 0 { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(log.connects == 1, "a dead session uses the existing reconnect")
+        await link.probe(readingControls: false)
+        precondition(link.serial == nil, "track-devices style rediscovery does not mark a dead session online")
+        log.alive = true
+        link.noteGatewayLocal(true)
+        link.noteGatewayLocal(false)
+        for _ in 0..<40 where link.serial != "dead-phone" { try? await Task.sleep(nanoseconds: 25_000_000) }
+        precondition(link.serial == "dead-phone" && log.connects == 1, "a later successful probe restores the session")
+
+        let idle = Log()
+        idle.alive = true
+        let quiet = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
+                                 shellAlive: { idle.shell($0) }, connectCommand: { idle.connect() })
+        quiet.idleLivenessNanoseconds = 40_000_000
+        quiet.noteLocalMcp(false)
+        await quiet.probe(readingControls: false)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        precondition(idle.shells.isEmpty, "a closed panel does not probe")
+        quiet.notePanel(true)
+        for _ in 0..<40 where idle.shells.isEmpty { try? await Task.sleep(nanoseconds: 20_000_000) }
+        precondition(!idle.shells.isEmpty && idle.connects == 0, "an open panel probes while local MCP is off")
+        let seen = idle.shells.count
+        quiet.notePanel(false)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        precondition(idle.shells.count == seen, "closing the panel stops the probe")
+
+        let projection = (["1"] + Array(repeating: "0", count: PhoneFeatureState.keys.count) + ["0", "1"]).joined(separator: "\n")
+        let features = LinkSession(feedback: StationFeedback(), reader: { _ in connected },
+                                    featureShell: { _ in projection })
+        await features.probe(readingControls: false)
+        await features.readProjectedFeatures()
+        precondition(features.phoneFeatures?.master == true && features.phoneFeatures?.allows("shell") == false)
+        precondition(features.connectionPreferences == PhoneConnectionPreferences(localMcp: false, remote: true))
     }
 
     @MainActor static func remoteControlsTest() async {

@@ -22,6 +22,7 @@ final class McpSession: ObservableObject {
 
     var onRemoteConnection: (Bool) -> Void = { _ in }
     var onRemoteChecking: (Bool) -> Void = { _ in }
+    var onLocalOnline: (Bool) -> Void = { _ in }
     var allowRemotePair: () -> Bool = { false }
 
     private let feedback: StationFeedback
@@ -281,7 +282,10 @@ final class McpSession: ObservableObject {
         if requestAvailable != status.requestAvailable { requestAvailable = status.requestAvailable }
         if gatewayReady != status.gatewayReady { gatewayReady = status.gatewayReady }
         let local = status.localOnline ?? (status.channel == "local")
-        if localOnline != local { localOnline = local }
+        if localOnline != local {
+            localOnline = local
+            onLocalOnline(local)
+        }
         if remoteOnline != status.remoteConnected { remoteOnline = status.remoteConnected }
         if remoteChecking != status.remoteChecking { remoteChecking = status.remoteChecking }
         if remoteConfigured != status.remoteConfigured { remoteConfigured = status.remoteConfigured }

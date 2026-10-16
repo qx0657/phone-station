@@ -143,7 +143,7 @@ cp -R "$ROOT/app/mac/en.lproj" "$ROOT/app/mac/zh-Hans.lproj" "$CONTENTS/Resource
 cp "$ROOT/README.md" "$RESOURCES/README.md"
 mkdir -p "$RESOURCES/licenses"
 cp "$ROOT/docs/licenses/"*.txt "$RESOURCES/licenses/"
-for name in connect.sh disconnect.sh host-state.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh terminal.sh install-apk.sh; do
+for name in connect.sh disconnect.sh status.sh mirror.sh record.sh screenshot.sh stay-awake.sh torch.sh mcp.sh pair-code.sh android.sh notify.sh shell.sh terminal.sh install-apk.sh; do
   cp "$ROOT/scripts/$name" "$RESOURCES/scripts/$name"
 done
 cp "$ROOT/build/adb-keep.apk" "$RESOURCES/phone-app.apk"

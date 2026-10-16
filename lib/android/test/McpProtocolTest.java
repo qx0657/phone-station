@@ -37,6 +37,15 @@ final class McpProtocolTest {
         expect(!Files.exists(home.resolve("bad.txt")));
         expect(reply(files, mutation.replace("\"id\":\"read\",", "")).status == 202);
         expect(!Files.exists(home.resolve("bad.txt")));
+        String unknown = reply(files, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"station_missing\",\"arguments\":{}}}").body;
+        expect(unknown.contains("\"code\":-32001") && unknown.contains("\"code\":\"unknown_tool\""));
+        expect(!unknown.contains("-32602"));
+        Json listed = Json.parse(reply(files, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}").body);
+        for (Json tool : listed.get("result").get("tools").array()) {
+            expect(FeaturePolicy.known(tool.get("name").string()));
+        }
+        expect(FeaturePolicy.known("station_event_wait"));
+        expect(!FeaturePolicy.known("station_missing"));
         expect(reply(files, "[" + (ping + ",").repeat(64) + ping + "]").body.contains("-32600"));
         Files.delete(home);
         System.out.println("McpProtocolTest ok");

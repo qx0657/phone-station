@@ -299,6 +299,7 @@ enum ClipboardRPC {
     }()
     struct Failure: LocalizedError {
         let message: String
+        var code: String? = nil
         var errorDescription: String? { message }
     }
     static func call(endpoint: String, token: String, name: String, arguments: [String: Any]) async throws -> Data {
@@ -356,8 +357,15 @@ enum ClipboardRPC {
             throw Failure(message: "网关需要重新核对本地通道")
         }
         guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = rpc["result"] as? [String: Any],
+              let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw Failure(message: "手机暂时未连接，请检查 MCP 服务和手机版本")
+        }
+        if let error = rpc["error"] as? [String: Any] {
+            let payload = error["data"] as? [String: Any]
+            throw Failure(message: error["message"] as? String ?? "手机暂时未连接，请检查 MCP 服务和手机版本",
+                          code: payload?["code"] as? String)
+        }
+        guard let result = rpc["result"] as? [String: Any],
               let content = result["content"] as? [[String: Any]],
               let text = content.first(where: { $0["type"] as? String == "text" })?["text"] as? String else {
             throw Failure(message: "手机暂时未连接，请检查 MCP 服务和手机版本")

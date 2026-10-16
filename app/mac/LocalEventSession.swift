@@ -9,10 +9,16 @@ final class LocalEventSession {
     var onClipboard: () -> Void = {}
     var onNotifications: () -> Void = {}
     var onActive: (Bool) -> Void = { _ in }
+    var perform: (String, String, [String: Any]) async throws -> Data = { endpoint, token, arguments in
+        try await ClipboardRPC.callDetached(endpoint: endpoint, token: token, name: "station_event_wait", arguments: arguments, timeout: 30)
+    }
     private var task: Task<Void, Never>?
     private var clipSeen: Int64 = 0
     private var noteSeen: Int64 = 0
     private var active = false
+    private var gaveUp = false
+    private var identitySerial: String?
+    private var identityVersion: String?
 
     func start() {
         guard task == nil else { return }
@@ -22,10 +28,23 @@ final class LocalEventSession {
     func stop() {
         task?.cancel()
         task = nil
+        gaveUp = false
         setActive(false)
     }
 
+    /// 序列号或手机应用版本变了，就重新尝试挂起等待。同一身份只放弃一次。
+    func noteIdentity(serial: String?, appVersion: String?) {
+        let changed = serial != identitySerial || appVersion != identityVersion
+        identitySerial = serial
+        identityVersion = appVersion
+        guard changed, gaveUp else { return }
+        gaveUp = false
+        start()
+    }
+
     private func loop() async {
+        let mine = task
+        defer { if task == mine { task = nil } }
         while !Task.isCancelled {
             guard !remote(), let (endpoint, token) = route() else {
                 setActive(false)
@@ -33,8 +52,7 @@ final class LocalEventSession {
                 continue
             }
             do {
-                let data = try await ClipboardRPC.callDetached(endpoint: endpoint, token: token, name: "station_event_wait",
-                    arguments: ["clientId": clientID(), "clipboard": Int(clipSeen), "notifications": Int(noteSeen)], timeout: 30)
+                let data = try await perform(endpoint, token, ["clientId": clientID(), "clipboard": Int(clipSeen), "notifications": Int(noteSeen)])
                 let reply = try JSONDecoder().decode(Reply.self, from: data)
                 if reply.clipboard != clipSeen {
                     clipSeen = reply.clipboard
@@ -49,7 +67,10 @@ final class LocalEventSession {
                 return
             } catch {
                 setActive(false)
-                if Self.missing(error) { return }
+                if Self.isUnknownTool(error) {
+                    gaveUp = true
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -66,7 +87,7 @@ final class LocalEventSession {
         var notifications: Int64
     }
 
-    private static func missing(_ error: Error) -> Bool {
-        error.localizedDescription.contains("没有这个工具")
+    static func isUnknownTool(_ error: Error) -> Bool {
+        (error as? ClipboardRPC.Failure)?.code == "unknown_tool"
     }
 }

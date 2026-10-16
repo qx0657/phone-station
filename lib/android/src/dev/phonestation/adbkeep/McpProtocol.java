@@ -116,6 +116,8 @@ final class McpProtocol {
                 return rpc(id, Json.obj());
             }
             return rpcError(id, -32601, "没有这个方法");
+        } catch (UnknownTool error) {
+            return rpcError(id, -32001, error.getMessage(), Json.obj().put("code", "unknown_tool"));
         } catch (IllegalArgumentException error) {
             return rpcError(id, -32602, error.getMessage());
         } catch (RuntimeException error) {
@@ -156,6 +158,7 @@ final class McpProtocol {
         if (args == null || args.isNull()) {
             args = Json.obj();
         }
+        if (!FeaturePolicy.known(name)) { throw new UnknownTool(); }
         try {
             if (host != null) { host.authorize(name); }
             return toolOk(dispatch(name, args, files, host));
@@ -335,7 +338,7 @@ final class McpProtocol {
         if ("station_file_open".equals(name)) {
             return host(host).open(required(args, "path"));
         }
-        throw new IllegalArgumentException("没有这个工具");
+        throw new UnknownTool();
     }
 
     private static StationHost host(StationHost host) {
@@ -760,11 +763,22 @@ final class McpProtocol {
     }
 
     private static Reply rpcError(Json id, int code, String message) {
+        return rpcError(id, code, message, null);
+    }
+
+    private static Reply rpcError(Json id, int code, String message, Json data) {
+        Json error = Json.obj().put("code", code).put("message", message);
+        if (data != null) { error.put("data", data); }
         return new Reply(200, Json.obj()
                 .put("jsonrpc", "2.0")
                 .put("id", id == null ? Json.nul() : id)
-                .put("error", Json.obj().put("code", code).put("message", message))
+                .put("error", error)
                 .emit());
+    }
+
+    /** 工具名不在这版协议里。和参数错误分开，调用方按 data.code 判断，不看文案。 */
+    static final class UnknownTool extends RuntimeException {
+        UnknownTool() { super("没有这个工具"); }
     }
 
     static final class Reply {

@@ -4,7 +4,7 @@ import Foundation
 enum UsageCountersTest {
     static func main() {
         precondition(UsageCounters.processKind(executable: URL(fileURLWithPath: "/usr/bin/adb"), arguments: ["devices", "-l"]) == "adb")
-        precondition(UsageCounters.processKind(executable: URL(fileURLWithPath: "/bin/zsh"), arguments: ["/tmp/host-state.sh", "mark"]) == "script")
+        precondition(UsageCounters.processKind(executable: URL(fileURLWithPath: "/bin/zsh"), arguments: ["/tmp/connect.sh"]) == "script")
         precondition(UsageCounters.processKind(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "printf ok"]) == "other")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

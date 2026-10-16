@@ -150,6 +150,15 @@ final class StationBridge implements StationHost {
         return ShizukuShell.execute(context, request, () -> authorize("station_shell_exec"));
     }
 
+    private String packageVersion() {
+        try {
+            String version = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+            return version == null ? "" : version;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return "";
+        }
+    }
+
     private static boolean verifiedModel() { return "PGT-AN20".equals(Build.MODEL.replace('_', '-')); }
     private static void requireVerifiedModel() {
         if (!verifiedModel()) { throw new FileFailure("当前机型 " + Build.MODEL + " 尚未验证，停止设备操作"); }
@@ -170,7 +179,7 @@ final class StationBridge implements StationHost {
         else if (!controlsAllowed) { lamp = Json.obj().put("available", false).put("on", Json.nul()).put("reason", RemotePermissionInfo.denied("controls")); }
         Json permissions = Json.obj();
         for (String scope : RemotePolicy.SCOPES) { permissions.put(scope, RemoteStore.permission(context, scope)); }
-        return Json.obj().put("model", Build.MODEL).put("verified", verified).put("remotePermissions", permissions).put("remotePermissionPageVersion", 1).put("features", StationFeatures.status(context))
+        return Json.obj().put("model", Build.MODEL).put("verified", verified).put("appVersion", packageVersion()).put("remotePermissions", permissions).put("remotePermissionPageVersion", 1).put("features", StationFeatures.status(context))
                 .put("screenAvailable", screenAllowed && verified && shell.get("available").boolValue() && RemoteStore.enabled(context) && RemoteStore.configured(context))
                 .put("screenReason", !StationFeatures.active(context, "screen") ? FeaturePolicy.denied(StationFeatures.master(context), "screen") : !screenAllowed ? RemotePermissionInfo.denied("screen") : !verified ? unsupported
                         : !shell.get("available").boolValue() ? shell.get("reason").string() : "")

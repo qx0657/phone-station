@@ -60,7 +60,7 @@ Authorization: Bearer <mcp.sh 打印的令牌>
 
 当前 `initialize` 返回协议版本 `2025-03-26`，`serverInfo.name` 为「手机工位」，`serverInfo.version` 为手机 APK 的版本名。成功之后就可以 `tools/list` 和 `tools/call`；实际工具集合以这次的 `tools/list` 为准。没有 `Mcp-Session-Id`，也不提供 SSE：已鉴权的 `GET /mcp` 回 405，并带 `Allow: POST`；未知路径回 404。
 
-请求必须是 JSON-RPC 2.0，`id` 为字符串或整数，不能为 null；`params` 若存在必须是对象。没有 `id` 的合法通知，以及合法客户端应答，只接受并忽略，回 HTTP 202 空正文，不执行工具。支持 1–64 项批次，各请求结果保留原编号，通知不占应答项；混有无效帧时逐项返回协议错误。同一批次请求编号重复时，在执行任何一项前拒绝整个批次。JSON 重复字段或解析失败回 `-32700`，无效帧回 `-32600`，错误参数回 `-32602`，未知方法回 `-32601`。工具执行失败仍写在结果里，`isError` 为真，正文是 `{"error":"…"}`。
+请求必须是 JSON-RPC 2.0，`id` 为字符串或整数，不能为 null；`params` 若存在必须是对象。没有 `id` 的合法通知，以及合法客户端应答，只接受并忽略，回 HTTP 202 空正文，不执行工具。支持 1–64 项批次，各请求结果保留原编号，通知不占应答项；混有无效帧时逐项返回协议错误。同一批次请求编号重复时，在执行任何一项前拒绝整个批次。JSON 重复字段或解析失败回 `-32700`，无效帧回 `-32600`，错误参数回 `-32602`，未知方法回 `-32601`。未知工具回 `-32001`，`data.code` 为 `unknown_tool`，不看文案。其他工具执行失败仍写在结果里，`isError` 为真，正文是 `{"error":"…"}`。
 
 手机服务和桌面网关检查每个请求的 Host 与 Origin：Host 只允许 `localhost`、`127.0.0.1`、`[::1]`，支持 adb 转发端口；Origin 若存在，必须为使用相同端口的 HTTP 回环来源。远端 Host、跨站或跨端口 Origin 回 403，即使 Bearer 令牌正确也不能通过；原生客户端可以不发 Origin。手机拒绝重复 Host、Origin、Authorization 和长度头，不接受分块编码；正文严格按 UTF-8 解码。来源校验和 GET 行为依据 [MCP 2025-03-26 HTTP 传输规范](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)，帧与批次规则依据 [基础消息规范](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
 

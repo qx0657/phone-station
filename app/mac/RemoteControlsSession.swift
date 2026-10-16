@@ -13,6 +13,7 @@ struct RemoteControlsReading: Decodable {
     var remoteEnabled: Bool?
     struct Torch: Decodable { var available: Bool; var on: Bool?; var reason: String }
     var model: String
+    var appVersion: String?
     var verified: Bool
     var stayAwake: Bool
     var stayAwakeAvailable: Bool
@@ -73,6 +74,7 @@ final class RemoteControlsSession: ObservableObject {
     var accessMonitoring: () -> Bool = { false }
     private var nextPoll = Date.distantPast
     var onFinishedCapture: () -> Void = {}
+    var onUpdated: () -> Void = {}
     private let feedback: StationFeedback
     private var timer: Timer?
     private var inFlight = false
@@ -154,6 +156,7 @@ final class RemoteControlsSession: ObservableObject {
                 guard ticket == epoch, let now = route(), now.0 == endpoint, now.1 == token else { return }
                 reading = try JSONDecoder().decode(RemoteControlsReading.self, from: data)
                 readAt = Date(); readRoute = (endpoint, token); failure = nil
+                onUpdated()
             } catch {
                 guard ticket == epoch, let now = route(), now.0 == endpoint, now.1 == token else { return }
                 reading = nil; failure = "无法核对远程控制状态，请检查连接、Shizuku 或更新手机工位。"

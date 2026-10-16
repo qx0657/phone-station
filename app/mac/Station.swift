@@ -70,7 +70,11 @@ final class Station: ObservableObject {
         health = DeviceHealthSession()
         remoteControls = RemoteControlsSession(feedback: feedback)
         wire()
-        $panelVisible.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
+        $panelVisible.sink { [weak self] visible in
+            self?.bindPage()
+            self?.link.notePanel(visible)
+            if visible { self?.refreshAdbFeaturesIfNeeded() }
+        }.store(in: &subscriptions)
         $page.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
         bindPage()
     }
@@ -88,9 +92,9 @@ final class Station: ObservableObject {
         observe(mcp)
         switch page {
         case .main:
-            observe(health); observe(clipboard); observe(notifications); observe(torch); observe(screen); observe(remoteControls)
+            observe(health); observe(clipboard); observe(notifications); observe(torch); observe(screen); observe(remoteControls); observe(files)
         case .connection:
-            observe(pairing)
+            observe(pairing); observe(setup)
         case .commands, .editCommand:
             observe(commands); observe(remoteControls)
         case .more:
@@ -102,11 +106,11 @@ final class Station: ObservableObject {
         case .mcp, .remoteRelay:
             observe(remoteControls)
         case .remotePermissions:
-            observe(remoteControls)
+            observe(remoteControls); observe(setup)
         case .features:
             observe(remoteControls); observe(setup)
         case .clipboard:
-            observe(clipboard); observe(remoteControls)
+            observe(clipboard); observe(remoteControls); observe(setup)
         case .notifications:
             observe(notifications); observe(remoteControls)
         }
@@ -119,12 +123,8 @@ final class Station: ObservableObject {
     }
 
     var phoneFeatures: PhoneFeatureState? {
-        let readiness = mcp.requestAvailable ? remoteControls.reading?.features : nil
-        guard var local = link.phoneFeatures else { return readiness }
-        if let readiness, local.master == readiness.master && local.selected == readiness.selected {
-            local.reasons = readiness.reasons
-        }
-        return local
+        if mcp.requestAvailable, let readiness = remoteControls.reading?.features { return readiness }
+        return link.phoneFeatures
     }
     func featureAllows(_ key: String) -> Bool { phoneFeatures?.allows(key) ?? true }
     private var controlPreferences: PhoneConnectionPreferences? {
@@ -132,7 +132,7 @@ final class Station: ObservableObject {
         return PhoneConnectionPreferences(localMcp: reading.localMcp, remote: reading.remoteEnabled)
     }
     var mcpPresentation: McpServicePresentation {
-        let preferences = link.connectionPreferences ?? controlPreferences
+        let preferences = (mcp.requestAvailable ? controlPreferences : nil) ?? link.connectionPreferences
         let local = mcp.localOnline && preferences?.localMcp != false
         let remote = mcp.remoteOnline && preferences?.remote != false
         return McpServicePresentation(paused: phoneFeatures?.master == false, gatewayReady: mcp.gatewayReady,
@@ -278,9 +278,16 @@ final class Station: ObservableObject {
             }
         }
         link.onSerial = { [weak self] serial in
-            self?.torch.noteSerial(serial)
-            self?.commands.noteSerial(serial)
-            self?.mcp.noteSerial(serial)
+            guard let self else { return }
+            self.torch.noteSerial(serial)
+            self.commands.noteSerial(serial)
+            self.mcp.noteSerial(serial)
+            self.publishEventIdentity()
+            if serial != nil { self.refreshAdbFeaturesIfNeeded() }
+        }
+        remoteControls.onUpdated = { [weak self] in
+            self?.publishEventIdentity()
+            self?.syncLocalMcp()
         }
         mcp.onRemoteConnection = { [weak self] connected in
             guard let self else { return }
@@ -298,11 +305,35 @@ final class Station: ObservableObject {
         mcp.onRemoteChecking = { [weak self] checking in
             self?.link.noteRemoteChecking(checking)
         }
+        mcp.onLocalOnline = { [weak self] online in
+            self?.link.noteGatewayLocal(online)
+        }
         torch.onQuit = {
             NSApplication.shared.terminate(nil)
         }
         setup.onFinished = { [weak self] in
             Task { await self?.link.probe(readingControls: true) }
         }
+    }
+
+    private func publishEventIdentity() {
+        localEvents.noteIdentity(serial: link.serial, appVersion: remoteControls.reading?.appVersion)
+    }
+
+    private func syncLocalMcp() {
+        link.noteLocalMcp((mcp.requestAvailable ? controlPreferences?.localMcp : nil) ?? link.connectionPreferences?.localMcp)
+    }
+
+    /// MCP 读不到开关、adb 仍在线时，连上和打开面板各读一次，不恢复每秒轮询。
+    private func refreshAdbFeaturesIfNeeded() {
+        guard FeatureReadPolicy.shouldRead(serialOnline: link.serial != nil, mcpAvailable: mcp.requestAvailable,
+                                            mcpHasFeatures: remoteControls.reading?.features != nil) else { return }
+        Task { await link.readProjectedFeatures() }
+    }
+}
+
+enum FeatureReadPolicy {
+    static func shouldRead(serialOnline: Bool, mcpAvailable: Bool, mcpHasFeatures: Bool) -> Bool {
+        serialOnline && !(mcpAvailable && mcpHasFeatures)
     }
 }
