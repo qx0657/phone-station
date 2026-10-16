@@ -46,18 +46,15 @@ final class LinkSession: ObservableObject {
 
     private let feedback: StationFeedback
     private let reader: @Sendable (String?) -> LinkReading
-    private let heartbeat: @Sendable () -> Void
     /// 已经确认是 PGT-AN20 的序列号。菜单栏复查时序列号没变就不再读型号。
     private var trustedSerial: String?
     private var linkWatch: Task<Void, Never>?
-    private var heartbeatWatch: Task<Void, Never>?
+    private var watching = false
     private static let linkWatchInterval: UInt64 = 1_000_000_000
     private var deviceStream: AdbDeviceStream?
     private var probeInFlight = false
     private var probeAgain = false
     private var controlsRequested = false
-    private var heartbeatInFlight = false
-    private var lastHeartbeat = Date.distantPast
     private var tidying = false
     private var pairedDeviceName = ""
     private var decision = ReconnectDecision()
@@ -70,11 +67,9 @@ final class LinkSession: ObservableObject {
     private var connectionEpoch = 0
 
     init(feedback: StationFeedback,
-         reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) },
-         heartbeat: @escaping @Sendable () -> Void = { _ = StationRunner.scriptResult("host-state.sh", ["mark"], timeout: 3) }) {
+         reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) }) {
         self.feedback = feedback
         self.reader = reader
-        self.heartbeat = heartbeat
     }
 
     var isConnected: Bool { link == .connected || remoteConnected }
@@ -160,7 +155,8 @@ final class LinkSession: ObservableObject {
     /// 设备增减来自 track-devices。不再每秒执行 adb devices 或 settings get。
     /// 非 TCP 的 adb 服务连不上这条订阅，仍按原来的间隔复查设备列表。
     func startWatch() {
-        guard heartbeatWatch == nil else { return }
+        guard !watching else { return }
+        watching = true
         if StationRunner.executable("adb") != nil,
            let endpoint = AdbDeviceStream.Endpoint.configured(StationRunner.environment) {
             let stream = AdbDeviceStream(endpoint: endpoint)
@@ -178,12 +174,6 @@ final class LinkSession: ObservableObject {
             }
         }
         Task { await probe(readingControls: false) }
-        heartbeatWatch = Task { @MainActor in
-            while !Task.isCancelled {
-                if self.serial != nil { self.markHeartbeat() }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-        }
     }
 
     func probe(readingControls: Bool) async {
@@ -211,8 +201,8 @@ final class LinkSession: ObservableObject {
     }
 
     func stopWatch() {
+        watching = false
         linkWatch?.cancel(); linkWatch = nil
-        heartbeatWatch?.cancel(); heartbeatWatch = nil
         deviceStream?.stop(); deviceStream = nil
     }
 
@@ -382,7 +372,6 @@ final class LinkSession: ObservableObject {
             connectionEpoch += 1
             serial = newSerial
             battery = nil
-            lastHeartbeat = .distantPast
             connectionPreferences = nil
         }
         if newLink == .connected, let newSerial {
@@ -397,7 +386,6 @@ final class LinkSession: ObservableObject {
                 refreshStayAwake(serial: newSerial)
                 onRefreshTorch()
             }
-            markHeartbeat()
         } else if stayAwake {
             stayAwake = false
         }
@@ -438,16 +426,6 @@ final class LinkSession: ObservableObject {
     private func bumpControls() -> Int {
         controlEpoch += 1
         return controlEpoch
-    }
-
-    private func markHeartbeat() {
-        guard !heartbeatInFlight, Date().timeIntervalSince(lastHeartbeat) >= 2 else { return }
-        heartbeatInFlight = true
-        lastHeartbeat = Date()
-        Task.detached(priority: .utility) {
-            self.heartbeat()
-            await MainActor.run { self.heartbeatInFlight = false }
-        }
     }
 
     func noteWirelessPaired() {

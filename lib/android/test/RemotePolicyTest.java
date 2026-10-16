@@ -59,6 +59,7 @@ final class RemotePolicyTest {
         // authorization when it finally acquires the lock.
         java.util.concurrent.atomic.AtomicReference<RemotePolicy> current = new java.util.concurrent.atomic.AtomicReference<>(write);
         StationHost changing = (StationHost) Proxy.newProxyInstance(StationHost.class.getClassLoader(), new Class<?>[] {StationHost.class}, (proxy, method, values) -> {
+            if (method.getName().equals("noteAuthenticated")) { return null; }
             if (method.getName().equals("authorize")) { current.get().require((String) values[0]); return null; }
             throw new AssertionError("unexpected host dispatch");
         });
@@ -83,6 +84,7 @@ final class RemotePolicyTest {
     private static RemotePolicy policy(String scope) { return new RemotePolicy(Collections.singleton(scope)); }
     private static StationHost host(RemotePolicy policy) {
         return (StationHost) Proxy.newProxyInstance(StationHost.class.getClassLoader(), new Class<?>[] {StationHost.class}, (proxy, method, args) -> {
+            if (method.getName().equals("noteAuthenticated")) { return null; }
             if (method.getName().equals("authorize")) { policy.require((String) args[0]); return null; }
             throw new AssertionError("Unauthorized host operation dispatched: " + method.getName());
         });

@@ -27,8 +27,7 @@ func (g *gateway) subscriptions(w http.ResponseWriter, r *http.Request, value co
 		http.Error(w, "remote unavailable", 503)
 		return
 	}
-	transport := pinnedTransport(value.RemotePin)
-	defer transport.CloseIdleConnections()
+	transport := relayTransport(value.RemotePin)
 	dialCtx, stop := context.WithTimeout(r.Context(), 10*time.Second)
 	remote, _, err := websocket.Dial(dialCtx, strings.Replace(strings.TrimRight(value.RemoteURL, "/"), "https://", "wss://", 1)+"/v1/desktop/events", &websocket.DialOptions{
 		HTTPClient: &http.Client{Transport: transport, CheckRedirect: rejectRelayRedirect}, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},

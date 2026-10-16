@@ -15,7 +15,6 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.net.ConnectivityManager;
-import android.net.Uri;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
@@ -548,18 +547,6 @@ final class StationNotifications {
         }
         settingObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override
-            public void onChange(boolean selfChange, Uri uri) {
-                // 心跳由电脑经 adb 写入，应用自己的设置写入在各自的 put 处计数。
-                if (uri != null) {
-                    String key = uri.getLastPathSegment();
-                    if (HostLink.SETTING.equals(key) || HostLink.TRANSPORT_SETTING.equals(key)) {
-                        UsageCounters.shared.settingsWrite();
-                    }
-                }
-                onChange(selfChange);
-            }
-
-            @Override
             public void onChange(boolean selfChange) {
                 connectionChanged();
                 scheduleHostExpiry(context);
@@ -569,10 +556,6 @@ final class StationNotifications {
                 Settings.Global.getUriFor("adb_wifi_enabled"), false, settingObserver);
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, settingObserver);
-        context.getApplicationContext().getContentResolver().registerContentObserver(
-                Settings.Global.getUriFor(HostLink.SETTING), false, settingObserver);
-        context.getApplicationContext().getContentResolver().registerContentObserver(
-                Settings.Global.getUriFor(HostLink.TRANSPORT_SETTING), false, settingObserver);
         appContext = context.getApplicationContext();
         watchShizuku();
         ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
@@ -591,9 +574,7 @@ final class StationNotifications {
 
     private static void scheduleHostExpiry(Context context) {
         handler().removeCallbacks(expireHost);
-        long marked = Settings.Global.getLong(context.getContentResolver(), HostLink.SETTING, 0L);
-        long now = System.currentTimeMillis();
-        long delay = HostLink.linked(marked, now) ? Math.max(1L, marked + HostLink.FRESH_MS + 1L - now) : -1L;
+        long delay = HostPresence.untilStale();
         long remote = PhoneRelayClient.expiresIn();
         if (remote >= 0L) { delay = delay < 0L ? remote : Math.min(delay, remote); }
         long nowElapsed = SystemClock.elapsedRealtime();

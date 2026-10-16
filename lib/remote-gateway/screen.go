@@ -36,7 +36,7 @@ func (g *gateway) screen(w http.ResponseWriter, r *http.Request, value config) {
 	}
 	dialCtx, stop := context.WithTimeout(r.Context(), 10*time.Second)
 	remote, _, err := websocket.Dial(dialCtx, strings.Replace(value.RemoteURL, "https://", "wss://", 1)+"/v1/screen/desktop/"+id, &websocket.DialOptions{
-		HTTPClient: &http.Client{Transport: pinnedTransport(value.RemotePin), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		HTTPClient: &http.Client{Transport: relayTransport(value.RemotePin), CheckRedirect: rejectRelayRedirect},
 		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
 	})
 	stop()

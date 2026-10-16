@@ -32,12 +32,24 @@ final class HostLinkTest {
                 || !"".equals(HostLink.connectionType(0L, now, "usb", false))) {
             throw new AssertionError("connection type follows live transports");
         }
-        System.out.println("HostLinkTest ok");
+        if (!HostLink.freshElapsed(1_000L, 1_000L)
+                || !HostLink.freshElapsed(1_000L, 1_000L + HostLink.FRESH_MS)
+                || HostLink.freshElapsed(1_000L, 1_000L + HostLink.FRESH_MS + 1L)
+                || HostLink.freshElapsed(-1L, 1_000L)
+                || HostLink.freshElapsed(2_000L, 1_000L)) {
+            throw new AssertionError("elapsed freshness");
+        }
+        if (HostLink.untilStale(1_000L, 1_000L) != HostLink.FRESH_MS + 1L
+                || HostLink.untilStale(1_000L, 1_000L + HostLink.FRESH_MS) != 1L
+                || HostLink.untilStale(-1L, 1_000L) != -1L) {
+            throw new AssertionError("until stale");
+        }
         if (HostLink.localLinked(now, now, "wireless", false, true)
                 || HostLink.localLinked(now, now, "wireless", true, false)
                 || !HostLink.localLinked(now, now, "wireless", true, true)
                 || !HostLink.localLinked(now, now, "usb", false, false)) {
             throw new AssertionError("Wi-Fi loss invalidates wireless heartbeat immediately, preserving USB");
         }
+        System.out.println("HostLinkTest ok");
     }
 }

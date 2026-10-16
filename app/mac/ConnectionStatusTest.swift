@@ -126,7 +126,7 @@ struct ConnectionStatusTest {
 
         let adb = LinkSession(feedback: StationFeedback(), reader: { _ in
             LinkReading(name: "PGT-AN20", detail: "", transport: "无线连接", link: .connected, serial: "test-phone")
-        }, heartbeat: {})
+        })
         await adb.probe(readingControls: false)
         precondition(adb.serial == "test-phone" && adb.statusLabel == "已连接")
         adb.noteRemoteConnection(true)
@@ -136,7 +136,7 @@ struct ConnectionStatusTest {
         adb.noteRemoteChecking(true)
         precondition(adb.statusLabel == "已连接", "一条通道待确认不覆盖另一条已确认连接")
         let sequence = ProbeSequence()
-        let racing = LinkSession(feedback: StationFeedback(), reader: { sequence.read($0) }, heartbeat: {})
+        let racing = LinkSession(feedback: StationFeedback(), reader: { sequence.read($0) })
         var enabledSerials: [String] = []
         racing.onSerial = { if let serial = $0 { enabledSerials.append(serial) } }
         let probe = Task { await racing.probe(readingControls: false) }

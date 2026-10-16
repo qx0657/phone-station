@@ -3,16 +3,16 @@ package dev.phonestation.adbkeep;
 /**
  * 电脑有没有连上。没有 Android 依赖，构建时在电脑上跑测试。
  *
- * <p>adb 连着时，电脑把 {@link #SETTING} 写成手机当时的时间。这个时间还新，或远程通道在线，
- * 就显示已连接。adb 断开后写不进去，过了 {@link #FRESH_MS} 就不再把 adb 算作在线。
- * 不看系统那条「已连接到无线调试」：它可以被划掉或全部清除，划掉之后会话还可以在。
+ * <p>正在使用的本地心跳是 {@link #freshElapsed}：已认证的本地 MCP 请求记下开机后时间，
+ * {@link #FRESH_MS} 内算在线。{@link #SETTING} 上的墙钟比较留在这里，供原来的边界测试；
+ * 手机不再读取这两个系统设置。
  */
 final class HostLink {
     /** {@code settings global} 的键。值是手机本地时间的毫秒，0 表示电脑明确写成未连接。 */
     static final String SETTING = "phonestation_host_ms";
     static final String TRANSPORT_SETTING = "phonestation_host_transport";
 
-    /** 超过这么久没有新的写入，就不再算连着。电脑大约每 2 秒写一次。 */
+    /** 超过这么久没有新的已认证请求，就不再算本地在线。网关大约每秒探测一次。 */
     static final long FRESH_MS = 6_000L;
 
     private HostLink() {}
@@ -37,6 +37,19 @@ final class HostLink {
                                boolean wifiConnected, boolean wirelessEnabled) {
         return linked(markedAtMs, nowMs)
                 && (!"wireless".equals(transport) || (wifiConnected && wirelessEnabled));
+    }
+
+    /** {@code seenElapsed < 0} 表示还没有过已认证请求。时钟往回走不算在线。 */
+    static boolean freshElapsed(long seenElapsed, long nowElapsed) {
+        return seenElapsed >= 0L && nowElapsed >= seenElapsed && nowElapsed - seenElapsed <= FRESH_MS;
+    }
+
+    /** 还新鲜时，距离过期还要等多久。已经过期返回 -1。多 1 毫秒，避免刚好卡在边界。 */
+    static long untilStale(long seenElapsed, long nowElapsed) {
+        if (!freshElapsed(seenElapsed, nowElapsed)) {
+            return -1L;
+        }
+        return FRESH_MS - (nowElapsed - seenElapsed) + 1L;
     }
 
     static String headline(boolean linked) {

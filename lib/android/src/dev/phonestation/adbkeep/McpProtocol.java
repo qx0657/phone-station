@@ -12,6 +12,7 @@ final class McpProtocol {
         if (!authorized(authorization, token)) {
             return new Reply(401, Json.obj().put("error", "需要 Authorization: Bearer").emit());
         }
+        if (host != null) { host.noteAuthenticated(); }
         Json message;
         try {
             message = Json.parse(body);

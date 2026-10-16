@@ -69,6 +69,8 @@ final class StationBridge implements StationHost {
         this.localRevision = RemoteStore.permissionRevision(context);
     }
 
+    @Override public void noteAuthenticated() { HostPresence.noteLocal(); }
+
     @Override public void authorize(String tool) {
         StationFeatures.require(context, tool);
         if (access != null) { access.accept(tool); }

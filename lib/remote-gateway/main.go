@@ -402,13 +402,62 @@ func configPath() (string, error) {
 	return filepath.Join(root, "Phone Station", "remote.json"), nil
 }
 
+// Cached by path, mtime, and size. Another process changes the file; this
+// process updates the cache in saveConfig. A same-size rewrite that does not
+// change mtime would stay cached until the next real change.
+var configCache struct {
+	mu    sync.Mutex
+	path  string
+	mod   time.Time
+	size  int64
+	value config
+}
+
+func cachedConfig(path string, info os.FileInfo) (config, bool) {
+	configCache.mu.Lock()
+	defer configCache.mu.Unlock()
+	if configCache.path == path && configCache.size == info.Size() && configCache.mod.Equal(info.ModTime()) {
+		return configCache.value, true
+	}
+	return config{}, false
+}
+
+func storeConfig(path string, info os.FileInfo, value config) {
+	configCache.mu.Lock()
+	configCache.path = path
+	configCache.mod = info.ModTime()
+	configCache.size = info.Size()
+	configCache.value = value
+	configCache.mu.Unlock()
+}
+
+func clearConfig(path string) {
+	configCache.mu.Lock()
+	if path == "" || configCache.path == path {
+		configCache.path = ""
+	}
+	configCache.mu.Unlock()
+}
+
 func loadConfig() (config, error) {
 	path, err := configPath()
 	if err != nil {
 		return config{}, err
 	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		clearConfig(path)
+		return config{}, nil
+	}
+	if err != nil {
+		return config{}, err
+	}
+	if value, ok := cachedConfig(path, info); ok {
+		return value, nil
+	}
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		clearConfig(path)
 		return config{}, nil
 	}
 	if err != nil {
@@ -417,6 +466,9 @@ func loadConfig() (config, error) {
 	var value config
 	if err := json.Unmarshal(body, &value); err != nil {
 		return config{}, fmt.Errorf("read remote config: %w", err)
+	}
+	if again, statErr := os.Stat(path); statErr == nil && again.Size() == info.Size() && again.ModTime().Equal(info.ModTime()) {
+		storeConfig(path, again, value)
 	}
 	return value, nil
 }
@@ -458,7 +510,13 @@ func saveConfig(value config) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempName, path)
+	if err := os.Rename(tempName, path); err != nil {
+		return err
+	}
+	if info, err := os.Stat(path); err == nil {
+		storeConfig(path, info, value)
+	}
+	return nil
 }
 
 // Pairing and the background adb-token refresh run in different processes.
@@ -1052,7 +1110,7 @@ func (g *gateway) probeLocal(token string) probeResult {
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"local-probe","method":"ping"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: time.Second, CheckRedirect: rejectRelayRedirect}).Do(request)
+	response, err := localProbeClient.Do(request)
 	if err != nil {
 		return probeResult{}
 	}
@@ -1267,26 +1325,29 @@ func (g *gateway) remoteCall(ctx context.Context, value config, payload []byte) 
 }
 
 // kind is the logical call, not each handshake inside it. A real submission
-// also starts the keychain helper; test doubles do not.
+// starts the keychain helper only when the revision is not already cached.
 func (g *gateway) invokeRemote(ctx context.Context, value config, payload []byte, kind string) (relayResponse, error) {
 	g.usage.request(kind)
 	if g.callRemote != nil {
 		return g.callRemote(ctx, value, payload)
 	}
-	g.usage.process("keychain")
-	return remoteCall(ctx, value, payload)
-}
-
-func remoteCall(ctx context.Context, value config, payload []byte) (relayResponse, error) {
-	token, err := loadRemoteToken(value)
+	token, fetched, err := lookupRemoteToken(value)
+	if fetched {
+		g.usage.process("keychain")
+	}
 	if err != nil {
 		return relayResponse{}, err
 	}
-	transport := pinnedTransport(value.RemotePin)
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Timeout: 4 * time.Minute, Transport: transport, CheckRedirect: rejectRelayRedirect}
+	return remoteCall(ctx, value, token, payload)
+}
+
+func remoteCall(ctx context.Context, value config, token string, payload []byte) (relayResponse, error) {
+	client := &http.Client{Timeout: 4 * time.Minute, Transport: relayTransport(value.RemotePin), CheckRedirect: rejectRelayRedirect}
 	endpoint := strings.TrimRight(value.RemoteURL, "/")
 	operationID, err := relayOperationID(ctx, client, endpoint, token)
+	if errors.Is(err, errRelayUnauthorized) {
+		forgetRemoteToken(value.RemoteRevision)
+	}
 	if err != nil {
 		return relayResponse{}, err
 	}
@@ -1302,6 +1363,9 @@ func remoteCall(ctx context.Context, value config, payload []byte) (relayRespons
 		return relayResponse{}, fmt.Errorf("relay operation %s outcome unknown: %w", operationID, err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		forgetRemoteToken(value.RemoteRevision)
+	}
 	result, err := readBody(response.Body, maxBody)
 	if err != nil {
 		return relayResponse{}, err
@@ -1335,6 +1399,9 @@ func relayOperationID(ctx context.Context, client *http.Client, endpoint, token 
 	}
 	defer response.Body.Close()
 	body, err := readBody(response.Body, 16384)
+	if response.StatusCode == http.StatusUnauthorized {
+		return "", errRelayUnauthorized
+	}
 	if err != nil || response.StatusCode != 200 {
 		return "", errors.New("relay handshake rejected before submission")
 	}
@@ -1388,6 +1455,32 @@ func postRelayCall(ctx context.Context, client *http.Client, endpoint, token str
 }
 
 func rejectRelayRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+
+var errRelayUnauthorized = errors.New("relay credential rejected")
+
+// One short-timeout client for the local probe. The phone still answers
+// Connection: close, so this reuses the client object, not the TCP connection.
+var localProbeClient = &http.Client{Timeout: localTimeout, CheckRedirect: rejectRelayRedirect}
+
+var relayPool struct {
+	mu        sync.Mutex
+	pin       string
+	transport *http.Transport
+}
+
+func relayTransport(pin string) *http.Transport {
+	relayPool.mu.Lock()
+	defer relayPool.mu.Unlock()
+	if relayPool.transport != nil && relayPool.pin == pin {
+		return relayPool.transport
+	}
+	if relayPool.transport != nil {
+		relayPool.transport.CloseIdleConnections()
+	}
+	relayPool.pin = pin
+	relayPool.transport = pinnedTransport(pin)
+	return relayPool.transport
+}
 
 func pinnedTransport(pin string) *http.Transport {
 	expected, _ := hex.DecodeString(pin)
@@ -1623,16 +1716,58 @@ func printCredentials() error {
 	return nil
 }
 
+var remoteTokens struct {
+	mu       sync.Mutex
+	revision string
+	token    string
+	ok       bool
+}
+
+func cachedRemoteToken(revision string) (string, bool) {
+	remoteTokens.mu.Lock()
+	defer remoteTokens.mu.Unlock()
+	if remoteTokens.ok && remoteTokens.revision == revision {
+		return remoteTokens.token, true
+	}
+	return "", false
+}
+
+func rememberRemoteToken(revision, token string) {
+	remoteTokens.mu.Lock()
+	remoteTokens.revision = revision
+	remoteTokens.token = token
+	remoteTokens.ok = true
+	remoteTokens.mu.Unlock()
+}
+
+func forgetRemoteToken(revision string) {
+	remoteTokens.mu.Lock()
+	if remoteTokens.revision == revision {
+		remoteTokens.token = ""
+		remoteTokens.ok = false
+	}
+	remoteTokens.mu.Unlock()
+}
+
 func loadRemoteToken(value config) (string, error) {
+	token, _, err := lookupRemoteToken(value)
+	return token, err
+}
+
+func lookupRemoteToken(value config) (token string, fetched bool, err error) {
+	if token, ok := cachedRemoteToken(value.RemoteRevision); ok {
+		return token, false, nil
+	}
 	output, err := runKeychain("get", nil, value.RemoteRevision)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	token := strings.TrimSpace(string(output))
+	token = strings.TrimSpace(string(output))
 	if len(token) != 64 || !isHex(token) {
-		return "", errors.New("remote credential is invalid")
+		return "", true, errors.New("remote credential is invalid")
 	}
-	return token, nil
+	rememberRemoteToken(value.RemoteRevision, token)
+	return token, true, nil
 }
 
 func runKeychain(action string, input []byte, revision string) ([]byte, error) {

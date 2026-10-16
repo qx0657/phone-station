@@ -4,7 +4,7 @@ import android.content.Context;
 import android.provider.Settings;
 import android.util.Log;
 
-/** 合并 adb 心跳和远程通道，供首页与常驻通知使用。 */
+/** 合并内存里的本地心跳和远程通道，供首页与常驻通知使用。 */
 final class HostProbe {
     private static String lastHeadline;
 
@@ -27,26 +27,21 @@ final class HostProbe {
     }
 
     static HostProbe current(Context context) {
-        long marked = Settings.Global.getLong(
-                context.getContentResolver(), HostLink.SETTING, 0L);
         boolean remoteConnected = RemoteStore.enabled(context) && PhoneRelayClient.connected();
         boolean remoteChecking = RemoteStore.enabled(context) && PhoneRelayClient.checking();
+        boolean local = HostPresence.fresh()
+                && Settings.Global.getInt(context.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1;
         long now = System.currentTimeMillis();
-        String transport = Settings.Global.getString(context.getContentResolver(), HostLink.TRANSPORT_SETTING);
-        if (Settings.Global.getInt(context.getContentResolver(), Settings.Global.ADB_ENABLED, 0) != 1
-                || !HostLink.localLinked(marked, now, transport,
-                KeeperEngine.wifiHandle(context) != -1L, KeeperEngine.wifiAdbEnabled(context))) {
-            marked = 0L;
-        }
+        long marked = local ? now : 0L;
         boolean linked = HostLink.linked(marked, now, remoteConnected);
-        String connectionType = HostLink.connectionType(marked, now, transport, remoteConnected);
+        String connectionType = HostLink.connectionType(marked, now, "", remoteConnected);
         String headline = !linked && remoteChecking ? "确认连接中" : HostLink.headline(linked);
         if (!linked && remoteChecking) { connectionType = "远程连接待确认"; }
         if (!headline.equals(lastHeadline)) {
             Log.i(KeeperEngine.TAG, "host " + headline);
             lastHeadline = headline;
         }
-        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking, HostLink.linked(marked, now), transport);
+        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking, local, "");
     }
 
     static boolean remoteOnly(Context context) {

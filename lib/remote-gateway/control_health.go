@@ -24,16 +24,15 @@ func (g *gateway) readControlHealth(ctx context.Context, value config) (controlH
 	}
 	key := value.remoteProfileKey()
 	if g.statusProfile != key || g.statusClient == nil {
-		g.usage.process("keychain")
-		token, err := loadRemoteToken(value)
+		token, fetched, err := lookupRemoteToken(value)
+		if fetched {
+			g.usage.process("keychain")
+		}
 		if err != nil {
 			return controlHealth{}, err
 		}
 		g.statusToken = token
-		if g.statusClient != nil {
-			g.statusClient.CloseIdleConnections()
-		}
-		g.statusClient = &http.Client{Transport: pinnedTransport(value.RemotePin), Timeout: 3 * time.Second, CheckRedirect: rejectRelayRedirect}
+		g.statusClient = &http.Client{Transport: relayTransport(value.RemotePin), Timeout: 3 * time.Second, CheckRedirect: rejectRelayRedirect}
 		g.statusProfile = key
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(value.RemoteURL, "/")+"/v1/desktop/status", nil)
@@ -48,9 +47,10 @@ func (g *gateway) readControlHealth(ctx context.Context, value config) (controlH
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
-		g.statusClient.CloseIdleConnections()
+		forgetRemoteToken(value.RemoteRevision)
 		g.statusClient = nil
 		g.statusToken = ""
+		g.statusProfile = ""
 	}
 	body, err := readBody(response.Body, 16384)
 	if err != nil {
