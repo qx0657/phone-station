@@ -51,3 +51,7 @@
 ## 中继 5 的控制与事件连接
 
 新增手机 `/v1/phone/control` 与电脑 `/v1/desktop/events` WSS，减少手机空闲短请求与 MCP 健康探测。控制派发和 HTTP 共用 durable-epochs-v1 回执，旧轮询保留兼容；通知和剪贴板仅发送变化信号，授权后的正文仍经原 MCP 接口读取。心跳、租约、版本顺序及验证边界见 [远程控制与事件](../../docs/remote-control.md)。代理须为新增路径透传 Upgrade。
+
+## 中继 6
+
+`internal/v6` 是下一版中继的注册表和 `GET /v2/link`。测试进程在临时目录上用真实 TLS 启动它，随本模块的 `go test` 进入 `scripts/check.sh`。`cmd/phone-relay` 不引用这个包，所以 `scripts/build-relay.sh` 打出的发布包仍是中继 5，不会在公网上提供 `/v2/link`。协议字节、邀请和注册表规则见 [中继 6](../../docs/link-v2.md#中继-6)。隔离实例和 `phone-relay enroll` 留到切换部署。

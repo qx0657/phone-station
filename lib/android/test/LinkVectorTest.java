@@ -6,6 +6,7 @@ import dev.phonestation.adbkeep.link.LinkSafety;
 import dev.phonestation.adbkeep.link.LinkSeal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.Arrays;
 
 /** Go 与 Java 读同一份链路向量。 */
@@ -94,7 +95,40 @@ final class LinkVectorTest {
                 }
             }
         }
+        checkTranscripts();
         System.out.println("link vectors ok");
+    }
+
+    private static void checkTranscripts() throws Exception {
+        byte[] station = fill(16, 0x11);
+        byte[] nonce = fill(32, 0x22);
+        byte[] device = fill(16, 0x33);
+        byte[] code = fill(16, 0x44);
+        byte[] invitation = fill(16, 0x55);
+        if (!Arrays.equals(sha256(LinkAuth.enrollMessage(station, nonce, device, code, "main")), hex("28b265654ea39c8988ce7515423255e3295b4e86ebff878c48473487de36002f"))
+                || !Arrays.equals(sha256(LinkAuth.joinMessage(station, nonce, device, invitation, "main")), hex("e47093674462494c7f377d111faf45bd8a25e6b7be7dda25d84402d6812fced3"))
+                || !Arrays.equals(sha256(LinkAuth.approveMessage(station, invitation, device)), hex("26e8fd0aaf218a1e8063941858db263430729067dd2ddfd727176484f0ce1e97"))
+                || !Arrays.equals(LinkAuth.invitationProof(fill(16, 0x66), fill(4, 0x77), "n", "phone", "main"), hex("fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3"))) {
+            throw new AssertionError("transcript");
+        }
+        try {
+            LinkAuth.enrollMessage(station, nonce, device, code, "side");
+            throw new AssertionError("purpose");
+        } catch (IllegalArgumentException expected) {
+            if (!"length".equals(expected.getMessage())) {
+                throw new AssertionError("purpose");
+            }
+        }
+    }
+
+    private static byte[] fill(int size, int value) {
+        byte[] out = new byte[size];
+        Arrays.fill(out, (byte) value);
+        return out;
+    }
+
+    private static byte[] sha256(byte[] body) throws Exception {
+        return MessageDigest.getInstance("SHA-256").digest(body);
     }
 
     private static Path vectors() {

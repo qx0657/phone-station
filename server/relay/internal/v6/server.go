@@ -1,0 +1,856 @@
+package v6
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+	"phone-station/link"
+)
+
+// Server is the relay 6 link endpoint. cmd/phone-relay does not import it.
+type Server struct {
+	reg           *registry
+	station       []byte
+	stationHex    string
+	log           io.Writer
+	now           func() time.Time
+	idle          time.Duration
+	mu            sync.Mutex
+	links         map[string]*session
+	pending       map[string]*pendingJoin
+	failures      map[string][]time.Time
+	closed        bool
+	persistBroken bool
+}
+
+type session struct {
+	id      [16]byte
+	hexID   string
+	purpose string
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+	limit   int
+}
+
+type pendingJoin struct {
+	invitation string
+	inviter    string
+	deviceID   string
+	spki       []byte
+	name       string
+	kind       string
+	purpose    string
+	result     chan error
+}
+
+func Open(dir string) (*Server, error) {
+	reg, err := openRegistry(dir)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := hex.DecodeString(reg.data.StationID)
+	if err != nil {
+		reg.close()
+		return nil, err
+	}
+	return &Server{
+		reg:        reg,
+		station:    raw,
+		stationHex: reg.data.StationID,
+		links:      map[string]*session{},
+		pending:    map[string]*pendingJoin{},
+		failures:   map[string][]time.Time{},
+	}, nil
+}
+
+func (s *Server) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	sessions := make([]*session, 0, len(s.links))
+	for _, sess := range s.links {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+	for _, sess := range sessions {
+		_ = sess.conn.Close(websocket.StatusGoingAway, "")
+	}
+	s.reg.close()
+	return nil
+}
+
+func (s *Server) IssueEnroll() (string, error) {
+	if s.broken() {
+		return "", errPersist
+	}
+	code, err := s.reg.issueEnroll(s.clock())
+	if errors.Is(err, errPersist) {
+		s.markBroken()
+	}
+	return code, err
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v2/link" || r.URL.RawQuery != "" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Header.Get("Origin") != "" {
+		http.Error(w, "origin", http.StatusForbidden)
+		return
+	}
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		http.Error(w, "closed", http.StatusServiceUnavailable)
+		return
+	}
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		return
+	}
+	go s.serve(conn, hostOnly(r.RemoteAddr))
+}
+
+func (s *Server) serve(conn *websocket.Conn, remote string) {
+	defer conn.CloseNow()
+	conn.SetReadLimit(8192)
+	nonce, err := s.writeHello(conn)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	frame, err := readFrame(ctx, conn, link.MainPayload)
+	cancel()
+	if err != nil || frame.Kind != link.KindLink {
+		return
+	}
+	msg, err := parseControl(frame.Payload)
+	if err != nil {
+		s.fail(conn, "rejected")
+		return
+	}
+	switch msg.Type {
+	case "enroll":
+		s.beginEnroll(conn, remote, nonce, msg)
+	case "join":
+		s.beginJoin(conn, remote, nonce, msg)
+	case "auth":
+		s.beginAuth(conn, remote, nonce, msg)
+	default:
+		s.fail(conn, "rejected")
+	}
+}
+
+func (s *Server) writeHello(conn *websocket.Conn) ([]byte, error) {
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+	body, err := marshal(message{Type: "hello", Protocol: 2, StationID: s.stationHex, Nonce: hex.EncodeToString(nonce[:])})
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := writeLink(ctx, conn, body); err != nil {
+		return nil, err
+	}
+	out := make([]byte, 32)
+	copy(out, nonce[:])
+	return out, nil
+}
+
+func (s *Server) beginEnroll(conn *websocket.Conn, remote string, nonce []byte, msg message) {
+	if !s.allow(remote) {
+		s.fail(conn, "rate_limited")
+		return
+	}
+	if s.broken() {
+		s.fail(conn, "unavailable")
+		return
+	}
+	code, spki, sig, ok := s.enrollMaterial(remote, msg)
+	if !ok {
+		s.fail(conn, "rejected")
+		return
+	}
+	id := deviceID(spki)
+	transcript, err := link.EnrollMessage(s.station, nonce, id[:], code, msg.Purpose)
+	if err != nil || link.VerifySignature(spki, transcript, sig) != nil {
+		s.note(remote)
+		s.fail(conn, "bad_signature")
+		return
+	}
+	sum := sha256.Sum256(code)
+	now := s.clock()
+	err = s.reg.mutate(func(f *fileFormat) error {
+		if f.Enroll == nil || !f.Enroll.Expires.After(now) {
+			return errRejected
+		}
+		want, err := hex.DecodeString(f.Enroll.Hash)
+		if err != nil || len(want) != sha256.Size || subtle.ConstantTimeCompare(sum[:], want) != 1 {
+			return errRejected
+		}
+		hexID := hex.EncodeToString(id[:])
+		if findDevice(f, hexID) != nil || len(f.Devices) >= 32 {
+			return errRejected
+		}
+		f.Devices = append(f.Devices, deviceRec{ID: hexID, PublicKey: encodeKey(spki), Name: msg.Name, Kind: "mac"})
+		f.Enroll = nil
+		f.RegistryVersion++
+		return nil
+	})
+	if err != nil {
+		s.failPersist(conn, remote, err)
+		return
+	}
+	sess := s.attachNew(conn, id, msg.Purpose)
+	s.record(prefix(sess.hexID), "enroll")
+	s.ready(sess)
+	s.broadcastRegistry()
+	s.broadcastPresence(sess, true)
+	s.readLoop(sess)
+}
+
+func (s *Server) enrollMaterial(remote string, msg message) ([]byte, []byte, []byte, bool) {
+	if msg.Kind != "mac" || !purposeOK(msg.Purpose) || !validName(msg.Name) {
+		s.note(remote)
+		return nil, nil, nil, false
+	}
+	code, err := decodeHex(msg.Code, 16)
+	spki, err2 := decodeKey(msg.PublicKey)
+	sig, err3 := decodeSig(msg.Sig)
+	if err != nil || err2 != nil || err3 != nil {
+		s.note(remote)
+		return nil, nil, nil, false
+	}
+	return code, spki, sig, true
+}
+
+func (s *Server) beginAuth(conn *websocket.Conn, remote string, nonce []byte, msg message) {
+	if !s.allow(remote) {
+		s.fail(conn, "rate_limited")
+		return
+	}
+	if s.broken() {
+		s.fail(conn, "unavailable")
+		return
+	}
+	if !purposeOK(msg.Purpose) || !validName(msg.App) {
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	rawID, err := decodeHex(msg.DeviceID, 16)
+	sig, err2 := decodeSig(msg.Sig)
+	if err != nil || err2 != nil {
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	var id [16]byte
+	copy(id[:], rawID)
+	snap := s.reg.snapshot()
+	device := findDevice(&snap, msg.DeviceID)
+	if device == nil {
+		s.note(remote)
+		s.fail(conn, "unknown_device")
+		return
+	}
+	if device.Revoked {
+		s.note(remote)
+		s.fail(conn, "revoked")
+		return
+	}
+	spki, err := decodeKey(device.PublicKey)
+	transcript, err2 := link.RelayAuthMessage(s.station, nonce, id[:], msg.Purpose)
+	if err != nil || err2 != nil || link.VerifySignature(spki, transcript, sig) != nil {
+		s.note(remote)
+		s.fail(conn, "bad_signature")
+		return
+	}
+	sess := s.attachNew(conn, id, msg.Purpose)
+	s.record(prefix(sess.hexID), "auth")
+	s.ready(sess)
+	s.broadcastPresence(sess, true)
+	s.readLoop(sess)
+}
+
+func (s *Server) beginJoin(conn *websocket.Conn, remote string, nonce []byte, msg message) {
+	if !s.allow(remote) {
+		s.fail(conn, "rate_limited")
+		return
+	}
+	if s.broken() {
+		s.fail(conn, "unavailable")
+		return
+	}
+	spki, sig, invitation, ok := s.joinMaterial(msg)
+	if !ok {
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	id := deviceID(spki)
+	hexID := hex.EncodeToString(id[:])
+	transcript, err := link.JoinMessage(s.station, nonce, id[:], invitation, msg.Purpose)
+	if err != nil || link.VerifySignature(spki, transcript, sig) != nil {
+		s.note(remote)
+		s.fail(conn, "bad_signature")
+		return
+	}
+	snap := s.reg.snapshot()
+	inv := findInvite(&snap, msg.InvitationID)
+	now := s.clock()
+	if inv == nil || !inv.Expires.After(now) || inv.AttemptsLeft < 1 || inv.Kind != msg.Kind {
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	if device := findDevice(&snap, hexID); device != nil && !device.Revoked {
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	s.mu.Lock()
+	inviter := s.links[inv.Inviter+"/main"]
+	s.mu.Unlock()
+	if inviter == nil {
+		s.fail(conn, "undeliverable")
+		return
+	}
+	if err := s.reg.useAttempt(msg.InvitationID, now); err != nil {
+		s.failPersist(conn, remote, err)
+		return
+	}
+	pending := &pendingJoin{
+		invitation: msg.InvitationID,
+		inviter:    inv.Inviter,
+		deviceID:   hexID,
+		spki:       spki,
+		name:       msg.Name,
+		kind:       msg.Kind,
+		purpose:    msg.Purpose,
+		result:     make(chan error, 1),
+	}
+	s.mu.Lock()
+	if _, exists := s.pending[msg.InvitationID]; exists {
+		s.mu.Unlock()
+		s.refund(msg.InvitationID)
+		s.note(remote)
+		s.fail(conn, "rejected")
+		return
+	}
+	s.pending[msg.InvitationID] = pending
+	s.mu.Unlock()
+	request := message{
+		Type: "join_request", InvitationID: msg.InvitationID, DeviceID: hexID,
+		PublicKey: encodeKey(spki), Name: msg.Name, Kind: msg.Kind, Purpose: msg.Purpose, Proof: msg.Proof,
+	}
+	if err := s.writeMsg(inviter, request); err != nil {
+		if s.dropPending(msg.InvitationID, pending) {
+			s.refund(msg.InvitationID)
+			s.fail(conn, "undeliverable")
+			return
+		}
+	}
+	s.record(prefix(hexID), "join")
+	decision := s.waitJoin(msg.InvitationID, pending)
+	if decision != nil {
+		s.note(remote)
+		s.fail(conn, codeOf(decision))
+		return
+	}
+	sess := s.attachNew(conn, id, msg.Purpose)
+	s.ready(sess)
+	s.broadcastRegistry()
+	s.broadcastPresence(sess, true)
+	s.readLoop(sess)
+}
+
+func (s *Server) joinMaterial(msg message) ([]byte, []byte, []byte, bool) {
+	if !purposeOK(msg.Purpose) || (msg.Kind != "mac" && msg.Kind != "phone") || !validName(msg.Name) {
+		return nil, nil, nil, false
+	}
+	if _, err := decodeHex(msg.Proof, 32); err != nil {
+		return nil, nil, nil, false
+	}
+	spki, err := decodeKey(msg.PublicKey)
+	sig, err2 := decodeSig(msg.Sig)
+	invitation, err3 := decodeHex(msg.InvitationID, 16)
+	if err != nil || err2 != nil || err3 != nil {
+		return nil, nil, nil, false
+	}
+	return spki, sig, invitation, true
+}
+
+func (s *Server) readLoop(sess *session) {
+	defer func() {
+		s.detach(sess)
+		s.record(prefix(sess.hexID), "disconnect")
+	}()
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), s.idleLimit())
+		frame, err := readFrame(ctx, sess.conn, sess.limit)
+		cancel()
+		if err != nil {
+			return
+		}
+		if frame.Kind == link.KindLink {
+			msg, err := parseControl(frame.Payload)
+			if err != nil {
+				s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+				continue
+			}
+			s.onControl(sess, msg)
+			continue
+		}
+		s.forward(sess, frame)
+	}
+}
+
+func (s *Server) onControl(sess *session, msg message) {
+	switch msg.Type {
+	case "ping":
+		s.writeMsg(sess, message{Type: "ping"})
+	case "invite":
+		s.onInvite(sess, msg)
+	case "approve":
+		s.onApprove(sess, msg)
+	case "reject":
+		s.onReject(sess, msg)
+	case "revoke":
+		s.onRevoke(sess, msg)
+	default:
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+	}
+}
+
+func (s *Server) onInvite(sess *session, msg message) {
+	if s.broken() {
+		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
+		return
+	}
+	if msg.Kind != "mac" && msg.Kind != "phone" {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	var created inviteRec
+	err := s.reg.mutate(func(f *fileFormat) error {
+		self := findDevice(f, sess.hexID)
+		if self == nil || self.Revoked || self.Kind != "mac" {
+			return errRejected
+		}
+		kept := make([]inviteRec, 0, len(f.Invitations))
+		now := s.clock()
+		for _, inv := range f.Invitations {
+			if inv.Expires.After(now) && inv.AttemptsLeft > 0 {
+				kept = append(kept, inv)
+			}
+		}
+		if len(kept) >= 4 {
+			return errRejected
+		}
+		var raw [16]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return err
+		}
+		created = inviteRec{ID: hex.EncodeToString(raw[:]), Inviter: sess.hexID, Kind: msg.Kind, Expires: now.UTC().Add(10 * time.Minute), AttemptsLeft: 5}
+		f.Invitations = append(kept, created)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errPersist) {
+			s.markBroken()
+			s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
+			return
+		}
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	s.writeMsg(sess, message{Type: "invite", InvitationID: created.ID, Kind: created.Kind, Expires: created.Expires.Format(time.RFC3339)})
+}
+
+func (s *Server) onApprove(sess *session, msg message) {
+	if s.broken() {
+		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
+		return
+	}
+	invitation, err := decodeHex(msg.InvitationID, 16)
+	device, err2 := decodeHex(msg.DeviceID, 16)
+	sig, err3 := decodeSig(msg.Sig)
+	if err != nil || err2 != nil || err3 != nil {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	snap := s.reg.snapshot()
+	self := findDevice(&snap, sess.hexID)
+	inv := findInvite(&snap, msg.InvitationID)
+	if self == nil || self.Revoked || self.Kind != "mac" || inv == nil || inv.Inviter != sess.hexID {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	spki, err := decodeKey(self.PublicKey)
+	transcript, err2 := link.ApproveMessage(s.station, invitation, device)
+	if err != nil || err2 != nil || link.VerifySignature(spki, transcript, sig) != nil {
+		s.writeMsg(sess, message{Type: "error", Code: "bad_signature"})
+		return
+	}
+	pending := s.claim(msg.InvitationID, msg.DeviceID)
+	if pending == nil {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	err = s.reg.approve(*pending)
+	if errors.Is(err, errPersist) {
+		s.markBroken()
+	}
+	if err != nil {
+		pending.result <- err
+		s.writeMsg(sess, message{Type: "error", Code: codeOf(err)})
+		return
+	}
+	pending.result <- nil
+	s.record(prefix(sess.hexID), "approve")
+}
+
+func (s *Server) onReject(sess *session, msg message) {
+	snap := s.reg.snapshot()
+	inv := findInvite(&snap, msg.InvitationID)
+	if inv == nil || inv.Inviter != sess.hexID {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	pending := s.claim(msg.InvitationID, msg.DeviceID)
+	if pending == nil {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	pending.result <- errRejected
+}
+
+func (s *Server) onRevoke(sess *session, msg message) {
+	if s.broken() {
+		s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
+		return
+	}
+	if _, err := decodeHex(msg.DeviceID, 16); err != nil || msg.DeviceID == sess.hexID {
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	if err := s.reg.revoke(msg.DeviceID); err != nil {
+		if errors.Is(err, errPersist) {
+			s.markBroken()
+			s.writeMsg(sess, message{Type: "error", Code: "unavailable"})
+			return
+		}
+		s.writeMsg(sess, message{Type: "error", Code: "rejected"})
+		return
+	}
+	for _, other := range s.sessions() {
+		if other.hexID == msg.DeviceID {
+			_ = other.conn.Close(websocket.StatusPolicyViolation, "")
+		}
+	}
+	s.broadcastRegistry()
+	s.record(prefix(sess.hexID), "revoke")
+}
+
+func (s *Server) forward(from *session, frame link.Frame) {
+	if frame.Peer == from.id {
+		s.undeliverable(from)
+		return
+	}
+	s.mu.Lock()
+	dest := s.links[hex.EncodeToString(frame.Peer[:])+"/"+from.purpose]
+	s.mu.Unlock()
+	if dest == nil {
+		s.undeliverable(from)
+		return
+	}
+	out := frame
+	out.Peer = from.id
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err := dest.write(ctx, out)
+	cancel()
+	if err != nil {
+		_ = dest.conn.Close(websocket.StatusGoingAway, "")
+		s.undeliverable(from)
+	}
+}
+
+func (s *Server) undeliverable(sess *session) {
+	s.writeMsg(sess, message{Type: "error", Code: "undeliverable"})
+	s.record(prefix(sess.hexID), "undeliverable")
+}
+
+func (s *Server) ready(sess *session) {
+	snap := s.reg.snapshot()
+	s.writeMsg(sess, message{Type: "ready", RegistryVersion: snap.RegistryVersion, Peers: s.peersExcept(sess)})
+}
+
+func (s *Server) broadcastRegistry() {
+	snap := s.reg.snapshot()
+	views := make([]deviceView, 0, len(snap.Devices))
+	for _, device := range snap.Devices {
+		views = append(views, deviceView{DeviceID: device.ID, PublicKey: device.PublicKey, Name: device.Name, Kind: device.Kind, Revoked: device.Revoked})
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].DeviceID < views[j].DeviceID })
+	msg := message{Type: "registry", RegistryVersion: snap.RegistryVersion, Devices: views}
+	for _, sess := range s.sessions() {
+		s.writeMsg(sess, msg)
+	}
+}
+
+func (s *Server) broadcastPresence(sess *session, online bool) {
+	msg := message{Type: "presence", DeviceID: sess.hexID, Purpose: sess.purpose, Online: &online}
+	for _, other := range s.sessions() {
+		if other != sess {
+			s.writeMsg(other, msg)
+		}
+	}
+}
+
+func (s *Server) peersExcept(self *session) []peerView {
+	var out []peerView
+	for _, other := range s.sessions() {
+		if other != self {
+			out = append(out, peerView{DeviceID: other.hexID, Purpose: other.purpose})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DeviceID == out[j].DeviceID {
+			return out[i].Purpose < out[j].Purpose
+		}
+		return out[i].DeviceID < out[j].DeviceID
+	})
+	return out
+}
+
+func (s *Server) attachNew(conn *websocket.Conn, id [16]byte, purpose string) *session {
+	sess := newSession(conn, id, purpose)
+	if old := s.attach(sess); old != nil {
+		_ = old.conn.Close(websocket.StatusPolicyViolation, "")
+	}
+	return sess
+}
+
+func newSession(conn *websocket.Conn, id [16]byte, purpose string) *session {
+	limit := link.MainPayload
+	if purpose == "media" {
+		limit = link.MediaPayload
+	}
+	conn.SetReadLimit(int64(link.HeaderSize + limit))
+	return &session{id: id, hexID: hex.EncodeToString(id[:]), purpose: purpose, conn: conn, limit: limit}
+}
+
+func (c *session) write(ctx context.Context, frame link.Frame) error {
+	raw, err := link.Encode(frame, c.limit)
+	if err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.conn.Write(ctx, websocket.MessageBinary, raw)
+}
+
+func (c *session) writeJSON(ctx context.Context, msg message) error {
+	body, err := marshal(msg)
+	if err != nil {
+		return err
+	}
+	return c.write(ctx, link.Frame{Kind: link.KindLink, Payload: body})
+}
+
+func (s *Server) writeMsg(sess *session, msg message) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return sess.writeJSON(ctx, msg)
+}
+
+func (s *Server) attach(sess *session) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := sess.hexID + "/" + sess.purpose
+	old := s.links[key]
+	s.links[key] = sess
+	return old
+}
+
+func (s *Server) detach(sess *session) {
+	s.mu.Lock()
+	key := sess.hexID + "/" + sess.purpose
+	current := s.links[key] == sess
+	if current {
+		delete(s.links, key)
+	}
+	s.mu.Unlock()
+	if current {
+		s.broadcastPresence(sess, false)
+	}
+}
+
+func (s *Server) sessions() []*session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*session, 0, len(s.links))
+	for _, sess := range s.links {
+		out = append(out, sess)
+	}
+	return out
+}
+
+func (s *Server) claim(invitation, device string) *pendingJoin {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.pending[invitation]
+	if pending == nil || pending.deviceID != device {
+		return nil
+	}
+	delete(s.pending, invitation)
+	return pending
+}
+
+func (s *Server) dropPending(invitation string, pending *pendingJoin) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending[invitation] != pending {
+		return false
+	}
+	delete(s.pending, invitation)
+	return true
+}
+
+func (s *Server) waitJoin(invitation string, pending *pendingJoin) error {
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-pending.result:
+		return err
+	case <-timer.C:
+		if s.dropPending(invitation, pending) {
+			return errRejected
+		}
+		return <-pending.result
+	}
+}
+
+func (s *Server) refund(id string) {
+	if err := s.reg.refund(id); errors.Is(err, errPersist) {
+		s.markBroken()
+	}
+}
+
+func (s *Server) allow(ip string) bool {
+	now := s.clock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(ip, now)
+	return len(s.failures[ip]) < 8
+}
+
+func (s *Server) note(ip string) {
+	now := s.clock()
+	s.mu.Lock()
+	s.failures[ip] = append(s.failures[ip], now)
+	s.mu.Unlock()
+}
+
+func (s *Server) prune(ip string, now time.Time) {
+	cut := now.Add(-10 * time.Minute)
+	kept := s.failures[ip][:0]
+	for _, at := range s.failures[ip] {
+		if at.After(cut) {
+			kept = append(kept, at)
+		}
+	}
+	s.failures[ip] = kept
+}
+
+func (s *Server) clock() time.Time {
+	s.mu.Lock()
+	now := s.now
+	s.mu.Unlock()
+	if now == nil {
+		return time.Now()
+	}
+	return now()
+}
+
+func (s *Server) idleLimit() time.Duration {
+	s.mu.Lock()
+	idle := s.idle
+	s.mu.Unlock()
+	if idle > 0 {
+		return idle
+	}
+	return 45 * time.Second
+}
+
+func (s *Server) broken() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistBroken
+}
+
+func (s *Server) markBroken() {
+	s.mu.Lock()
+	s.persistBroken = true
+	s.mu.Unlock()
+}
+
+func (s *Server) record(id, reason string) {
+	s.mu.Lock()
+	writer := s.log
+	s.mu.Unlock()
+	if writer == nil {
+		return
+	}
+	fmt.Fprintf(writer, "link %s %s\n", id, reason)
+}
+
+func (s *Server) failPersist(conn *websocket.Conn, remote string, err error) {
+	if errors.Is(err, errPersist) {
+		s.markBroken()
+		s.fail(conn, "unavailable")
+		return
+	}
+	s.note(remote)
+	s.fail(conn, codeOf(err))
+}
+
+func (s *Server) fail(conn *websocket.Conn, code string) {
+	s.record("-", code)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if body, err := marshal(message{Type: "error", Code: code}); err == nil {
+		_ = writeLink(ctx, conn, body)
+	}
+	_ = conn.Close(websocket.StatusPolicyViolation, "")
+}
+
+func hostOnly(remote string) string {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		return remote
+	}
+	return host
+}

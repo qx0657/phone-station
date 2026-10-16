@@ -1,6 +1,6 @@
 # 设计稿：统一链路与设备身份（Link v2）
 
-状态：设计稿。L0 向量和 L1 链路库已进入源码，没有接入现有通道；其余仍未实施。当前协议仍以 [中继合约](relay-contract.md)、[远程控制与事件](remote-control.md)、[远程屏幕](remote-screen.md) 和 [MCP](mcp.md) 为准。Link v2 指 Mac 与手机之间统一的传输与身份层，与 Mac App 里表示 adb 连接的 `LinkSession` 无关。
+状态：设计稿。L0 向量、L1 链路库和 L3 中继 6 已进入源码。现有 MCP、网关和中继 5 仍按原协议运行；L2 与 L4 之后仍未实施。当前协议仍以 [中继合约](relay-contract.md)、[远程控制与事件](remote-control.md)、[远程屏幕](remote-screen.md) 和 [MCP](mcp.md) 为准。Link v2 指 Mac 与手机之间统一的传输与身份层，与 Mac App 里表示 adb 连接的 `LinkSession` 无关。
 
 已定前提：不保留旧协议和旧工具名，三端同批升级；多设备只服务同一所有者的多台 Mac 与多台手机；端到端加密可选、默认关闭，默认仍信任自建中继；机型改为能力探测，相应的 AGENTS.md 规则随实施修改。本篇覆盖传输、设备身份、配对与授权、操作回执、事件、端到端加密和中继 6。AI 工具面、Mac 常驻进程整合和手机特权进程合并见[改造路线](roadmap.md)，实施前各自细化。
 
@@ -241,7 +241,7 @@ Mac 在会话内发送 `subscribe {topics, cursors}`，手机回 `subscribed`，
 
 ### 首台 Mac 加入中继
 
-中继 6 的配置只有监听地址、TLS 证书和状态目录，不再有令牌。部署者在服务器上运行 `phone-relay enroll`，生成 128 位的一次性加入码，30 分钟内有效。加入码只在终端显示一次，中继只保存它的摘要，不写日志。首台 Mac 在「连接设置 → 远程接入」填写中继地址、SPKI 指纹和加入码（隐藏输入或 stdin），用设备密钥签名提交 `enroll`，成为注册表里的第一台设备。所有 Mac 都遗失时，用同一命令再生成新码。
+中继 6 的配置只有监听地址、TLS 证书和状态目录，不再有令牌。部署者在服务器上运行 `phone-relay enroll`，生成 128 位的一次性加入码，30 分钟内有效。加入码只在终端显示一次，中继只保存它的摘要，不写日志。首台 Mac 在「连接设置 → 远程接入」填写中继地址、SPKI 指纹和加入码（隐藏输入或 stdin），用设备密钥签名提交 `enroll`，并声明 `purpose`，这条连接随之成为该用途的链路。所有 Mac 都遗失时，用同一命令再生成新码。签名字节和当前代码位置见[中继 6](#中继-6)。发布命令上的 `phone-relay enroll` 留到切换部署；这一阶段由测试进程调用库接口生成加入码。
 
 ### 邀请新设备
 
@@ -258,7 +258,7 @@ sequenceDiagram
   participant N as 新设备
   participant R as 中继
   participant M as 邀请方 Mac
-  N->>R: 建链后发送 join {invitationId, publicKey, name, kind, proof, sig}
+  N->>R: 建链后发送 join {invitationId, publicKey, name, kind, purpose, proof, sig}
   R->>M: join_request（核对邀请编号与剩余次数后转发）
   M->>M: 用邀请密钥核对 proof，计算安全码
   N->>N: 计算安全码
@@ -267,7 +267,7 @@ sequenceDiagram
   R-->>M: 向所有设备推送 registry 变化
 ```
 
-`proof` 是用邀请密钥对新设备公钥、名称与类型计算的 HMAC-SHA256，由邀请方 Mac 核对，核对失败计入尝试次数；`sig` 是新设备对中继随机数的签名，证明持有私钥。安全码取 `SHA-256("ps-sas-v1" ‖ 邀请方公钥 ‖ 新设备公钥 ‖ invitationId ‖ 双方各自看到的中继 SPKI)` 的前 4 字节，按大端无符号整数对 1000000 取模，显示为 6 位数字，不足补 0。两把公钥和中继 SPKI 都是 SubjectPublicKeyInfo DER，invitationId 是 16 字节，中间没有长度前缀。中继替换任何一方的公钥或证书，两端的安全码就会不同。二维码和本地链路的邀请密钥有 128 位，中继无法离线猜出，安全码只用于确认；手动输入的码较短，所以必须比对。
+`proof` 与 `sig` 的字节见[中继 6](#中继-6)。邀请方 Mac 核对 proof，失败时回 `reject`，这次尝试计入剩余 5 次。`sig` 证明新设备持有私钥。安全码取 `SHA-256("ps-sas-v1" ‖ 邀请方公钥 ‖ 新设备公钥 ‖ invitationId ‖ 双方各自看到的中继 SPKI)` 的前 4 字节，按大端无符号整数对 1000000 取模，显示为 6 位数字，不足补 0。两把公钥和中继 SPKI 都是 SubjectPublicKeyInfo DER，invitationId 是 16 字节，中间没有长度前缀。中继替换任何一方的公钥或证书，两端的安全码就会不同。二维码和本地链路的邀请密钥有 128 位，中继无法离线猜出，安全码只用于确认；手动输入的码较短，所以必须比对。
 
 加入中继不等于获得手机访问权。新加入的手机把邀请方 Mac 写入自己的授权列表，前提是用户在手机上点「允许」。新加入的 Mac 第一次向已有手机发起会话时会被拒绝，手机随即显示请求通知，用户在手机上核对安全码后允许。新加入的 Mac 默认只有状态权限，与现在「远程默认只允许查看状态」一致。
 
@@ -328,7 +328,21 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 - 持久状态只有一个 `registry.json`：`stationId`、`registryVersion`、设备、撤销记录、未使用的邀请和加入码摘要。权限 0600，写入时用临时文件、fsync 和原子替换，沿用单实例锁。文件损坏或版本未知时拒绝启动并保留文件，不静默重置。
 - 不保存操作、回执或结果正文，只在内存中转发。目标设备离线时返回 `undeliverable`；Mac 可以在对方上线后用原编号重发，由手机按回执去重。
 - 每个工位最多 32 台设备；每台设备一条主链路、一条媒体链路；认证失败和加入尝试按来源地址与邀请限流。
-- 日志只记连接事件、deviceId 前缀和原因，不记负载、密钥、邀请码或加入码。
+- 日志只记连接事件、deviceId 前缀和原因，不记负载、密钥、邀请码或加入码。认证失败记原因词，deviceId 还没确定时前缀记为 `-`。
+- 控制消息放在 kind 为 0x01 的帧里，一条 WebSocket 二进制消息一帧，不压缩。`GET /v2/link` 之外的路径、查询字符串、非 GET 和非空 Origin 都拒绝。服务端先发 `hello`（`protocol` 为 2、`stationId`、32 字节 `nonce`）。`enroll` 或 `join` 成功后，这条连接就是所声明的 `purpose`，随后发 `ready`。已在注册表里的设备用 `auth` 建链，原文沿用[建链与认证](#建链与认证)里的中继认证。
+- 同一来源地址 10 分钟内认证或加入失败 8 次后返回 `rate_limited`。邀请不匹配、名额已满或证明被邀请方拒绝时返回 `rejected`。注册表写不下去时返回 `unavailable`，并拒绝之后新的认证、加入和撤销，原文件保留。已建立的链路上，目标不在同一 `purpose` 或已经离线时返回 `undeliverable`，连接保持。
+- 文件格式版本是 1。版本不符、JSON 损坏、权限不是 0600，或目录里已有其他状态文件时，拒绝启动并保留原文件。
+
+| 原文 | 字节 |
+| --- | --- |
+| enroll | `phone-station link-v2 enroll` ‖ stationId(16) ‖ nonce(32) ‖ deviceId(16) ‖ 加入码(16) ‖ purpose 的 ASCII |
+| join | `phone-station link-v2 join` ‖ stationId(16) ‖ nonce(32) ‖ deviceId(16) ‖ invitationId(16) ‖ purpose 的 ASCII |
+| approve | `phone-station link-v2 approve` ‖ stationId(16) ‖ invitationId(16) ‖ 新 deviceId(16) |
+| proof | HMAC-SHA256，密钥是 16 字节邀请密钥。消息是新设备 SPKI ‖ 名称的 UTF-8 ‖ `00` ‖ kind ‖ `00` ‖ purpose。中继只转发，由邀请方核对 |
+
+样本输入是固定的重复字节（station `11`、nonce `22`、device `33`、加入码 `44`、invitation `55`、proof 密钥 `66`、短 SPKI `77`，名称 `n`，kind `phone`，purpose `main`）。SHA-256 与 proof 由 Go `TestTranscriptBytes` 和 Java `LinkVectorTest` 固定：enroll `28b265654ea39c8988ce7515423255e3295b4e86ebff878c48473487de36002f`，join `e47093674462494c7f377d111faf45bd8a25e6b7be7dda25d84402d6812fced3`，approve `26e8fd0aaf218a1e8063941858db263430729067dd2ddfd727176484f0ce1e97`，proof `fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3`。
+
+本阶段的服务器在 `server/relay/internal/v6`，由测试进程在临时目录上监听真实 TLS。`cmd/phone-relay` 不引用它，`scripts/build-relay.sh` 打出的仍是中继 5。隔离实例留到切换前。
 
 ## 失败与恢复
 
@@ -362,10 +376,10 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 | 步骤 | 内容 | 本机验收 | 真机验收 |
 | --- | --- | --- | --- |
-| L0 规格与向量 | 帧编解码、认证签名、安全码和加密的测试向量放在仓库，Go 与 Java 共用。向量已在 `lib/link/testdata/vectors.json`，两种实现都读它；尚未接入网关、中继或手机服务 | 两种实现读同一组向量 | — |
-| L1 链路库 | Go 实现供网关和中继共用，Java 实现供手机使用。库已在 `lib/link` 与 `dev.phonestation.adbkeep.link`，尚未被网关、中继或手机服务调用 | 分片、流控、优先级、心跳、超限和畸形帧拒绝 | — |
+| L0 规格与向量 | 帧编解码、认证签名、安全码和加密的测试向量放在仓库，Go 与 Java 共用。向量已在 `lib/link/testdata/vectors.json`。加入、邀请和批准的原文由两种语言的测试锁定同一组摘要。中继 6 的测试服务器使用帧和这些原文；网关、中继 5 和手机服务仍不使用 | 两种实现读同一组向量 | — |
+| L1 链路库 | Go 实现供网关和中继共用，Java 实现供手机使用。库已在 `lib/link` 与 `dev.phonestation.adbkeep.link`。中继 6 的测试服务器调用帧编解码；网关、中继 5 和手机服务仍不调用分片、窗口和优先级 | 分片、流控、优先级、心跳、超限和畸形帧拒绝 | — |
 | L2 手机回执 | 回执扩展到全部有副作用的方法，加入 `receiptEpoch` 和执行队列 | 写前落盘、重启转换、冲突、同编号并发插入 | 强杀与重启后查询 |
-| L3 中继 6 | 路由、注册表、加入码、邀请、在线推送 | 真实 TLS 联合测试接入 `scripts/check.sh` | 隔离实例 |
+| L3 中继 6 | 路由、注册表、加入码、邀请和在线推送已在 `server/relay/internal/v6`。真实 TLS 测试随 `server/relay` 的 `go test` 进入 `scripts/check.sh`。发布命令仍是中继 5 | 真实 TLS 联合测试接入 `scripts/check.sh` | 隔离实例 |
 | L4 网关切换 | 本地与远程都走 Link v2；跨通道查询；事件替代轮询 | 断线、切换、晚到的重复提交 | Wi-Fi 与蜂窝切换、后台保活、对照基线测耗电 |
 | L5 配对界面 | 两端的加入、邀请、授权列表和撤销页面，遵守 [DESIGN.md 开发约束](../DESIGN.md#开发约束) | [界面改动验收](validation.md#界面改动验收) | 拍照导入、adb 配对、手动输入 |
 | L6 端到端加密 | 握手、加密、拒绝降级 | 向量、篡改、重放、换钥 | 投屏延迟与 CPU |
