@@ -8,7 +8,11 @@ public final class LinkFrame {
     public static final int MAIN_PAYLOAD = 32 * 1024;
     public static final int MEDIA_PAYLOAD = 256 * 1024;
     public static final int KIND_LINK = 0x01;
+    public static final int KIND_HANDSHAKE = 0x02;
+    public static final int KIND_MESSAGE = 0x03;
+    public static final int KIND_DATA = 0x04;
     public static final int KIND_CREDIT = 0x05;
+    public static final int KIND_RESET = 0x06;
 
     public final int kind;
     public final int flags;
