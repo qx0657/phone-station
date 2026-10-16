@@ -70,7 +70,7 @@ Mac 端链路由网关持有，Mac 常驻进程拆分后由该进程持有；App
 | 签名 | DER 编码的 ECDSA-SHA256 | 同左 |
 | 公钥编码 | SubjectPublicKeyInfo DER | 同左 |
 
-`deviceId` 取公钥 SPKI DER 的 SHA-256 前 16 字节，JSON 中写成 32 位小写十六进制，界面显示设备名与前 8 位。设备密钥不轮换也不导出；重置身份就是一台新设备，需要重新加入。选 P-256 是因为 Secure Enclave 只支持 P-256，Android Keystore 自 API 23 起支持 P-256 签名，Go 标准库也能直接使用。软件密钥回退时，保护强度等同现在保存在登录钥匙串里的令牌。Mac 另外保存中继地址、指纹和已知设备列表；手机保存同样的资料和自己的授权列表。
+`deviceId` 取公钥 SPKI DER 的 SHA-256 前 16 字节，JSON 中写成 32 位小写十六进制，界面显示设备名与前 8 位。设备密钥不轮换也不导出；重置身份就是一台新设备，需要重新加入。选 P-256 是因为 Secure Enclave 只支持 P-256，Android Keystore 自 API 23 起支持 P-256 签名，Go 标准库也能直接使用。软件密钥回退放在登录钥匙串。临时签名进程没有钥匙串访问组，按创建它的用户放行，避免弹出授权；同一用户的其他进程也能使用这把密钥。现有中继令牌只信任创建它的程序。Mac 另外保存中继地址、指纹和已知设备列表；手机保存同样的资料和自己的授权列表。
 
 中继初始化时生成随机的 `stationId`。所有签名都带用途前缀和 `stationId`，同一签名不能用于另一台中继或另一种用途。
 
@@ -409,7 +409,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 ## 实施前要核实
 
-1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥；不能时改用登录钥匙串中的软件密钥。
+1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥：不能。2026-10-16 本机自检，没有钥匙串访问组 entitlement 的临时签名程序，以及 `codesign --sign -` 的临时 App，创建 Secure Enclave P-256 都返回 -34018。两者改用登录钥匙串中的软件 P-256，签名和校验成功，名称以 `phone-station-selftest-` 开头的测试密钥已删除。没有系统授权弹窗。`scripts/build-mac-app.sh` 同样是临时签名，仓库没有 entitlement。正在使用的 App 没有替换，也没有拿它做这次自检。P2 接入通道前走这条软件密钥回退。
 2. PGT-AN20 上 Keystore P-256 签名的耗时，以及是否有 StrongBox。
 3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。
 4. 手机上 Java-WebSocket 服务端模式的线程与内存，与现有 `McpHttp` 对比。

@@ -35,6 +35,7 @@ MAC_TESTS = {
     "PairingPrompt": ["PairingPrompt"],
     "UsageCounters": ["UsageCounters"],
     "LocalEventSession": ["ClipboardProtocol", "LocalEventSession"],
+    "DeviceKey": ["DeviceKey"],
 }
 
 
@@ -190,10 +191,10 @@ def main():
         command = [swift, "-parse-as-library", "-swift-version", "5", "-target", platform.machine() + "-apple-macosx13.0", "-sdk", sdk]
         for name, sources in MAC_TESTS.items():
             binary = work / (name + "Test")
-            run([*command, "-framework", "UserNotifications", *[mac / (source + ".swift") for source in dict.fromkeys(["StationLocalization", *sources])], mac / (name + "Test.swift"), "-o", binary])
+            run([*command, "-framework", "UserNotifications", "-framework", "Security", "-framework", "CryptoKit", *[mac / (source + ".swift") for source in dict.fromkeys(["StationLocalization", *sources])], mac / (name + "Test.swift"), "-o", binary])
             run([binary])
         sources = sorted(file for file in mac.glob("*.swift") if not file.name.endswith("Test.swift") and file.name != "MakeIcon.swift")
-        for framework in ("SwiftUI", "AppKit", "ServiceManagement", "QuartzCore", "AVFoundation", "ImageIO", "UserNotifications"):
+        for framework in ("SwiftUI", "AppKit", "ServiceManagement", "QuartzCore", "AVFoundation", "ImageIO", "UserNotifications", "Security", "CryptoKit"):
             command += ["-framework", framework]
         run([*command, *[file for file in sources if file.name != "PhoneStationApp.swift"], mac / "ConnectionStatusTest.swift", "-o", work / "ConnectionStatusTest"])
         run([work / "ConnectionStatusTest"])
