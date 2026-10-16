@@ -64,7 +64,7 @@ AI 优先使用已连接 MCP 工具，或 `mcp.sh call` 从 stdin 提交 JSON-RP
 
 `scripts/` 是用户入口，`lib/` 是内部实现，`app/mac/` 是原生 Mac，`lib/android/` 是手机应用，`server/relay/` 是公网服务端。新用户脚本用 zsh、`set -euo pipefail`、按自身目录 source `../lib/common.sh`，支持 `-h`；不用 zsh 中与 PATH 绑定的变量名 path。需要 adb 的操作先 connect.sh，再 online_serial 获取唯一在线设备；远程 shell/安装不 connect。mDNS 发现统一用 `lib/adb_mdns.py`。
 
-统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/四个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
+统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/五个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
 
 改 Android Java/资源后运行 `lib/android/build.sh`，只在电脑构建并测试，不碰手机。完整 Mac 包用 `scripts/build-mac-app.sh`，公网包用 `scripts/build-relay.sh`。android.sh 是设备安装入口，不用于单纯构建。改 notify-sound/PlayPcm.java 或 torch/Torch.java 时运行各自 build.sh，不手改 dex，不把 R8 jar 放仓库。灯光跟随声音的机型限制、持灯与暂停规则见 [docs/torch.md](docs/torch.md)，通知与媒体音量差异见 [docs/notify.md](docs/notify.md)。
 

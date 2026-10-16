@@ -65,6 +65,10 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/FileTypes.java" \
   "$here/src/dev/phonestation/adbkeep/StationHost.java" \
   "$here/src/dev/phonestation/adbkeep/LocalEventWait.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkFrame.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkAuth.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkSafety.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkSeal.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardState.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardAvailability.java" \
   "$here/src/dev/phonestation/adbkeep/HealthStatus.java" \
@@ -102,6 +106,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/UsageCountersTest.java" \
   "$here/test/HelperPinsTest.java" \
   "$here/test/LocalEventWaitTest.java" \
+  "$here/test/LinkVectorTest.java" \
   "$here/test/JsonTest.java" \
   "$here/test/FilePolicyTest.java" \
   "$here/test/FileOpsTest.java" \
@@ -139,6 +144,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.StationNoteTest
 (cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.UsageCountersTest)
 java -cp "$work/policy" dev.phonestation.adbkeep.HelperPinsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.LocalEventWaitTest
+java -cp "$work/policy" dev.phonestation.adbkeep.LinkVectorTest
 java -cp "$work/policy" dev.phonestation.adbkeep.JsonTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest

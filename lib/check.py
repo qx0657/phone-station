@@ -92,6 +92,7 @@ def main():
                 py_compile.compile(str(source), cfile=str(work / "syntax.pyc"), doraise=True)
         print("文档镜像、Skill 入口与脚本语法通过", flush=True)
         run(["go", "-C", ROOT / "lib/remote-gateway", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/link", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "server/relay", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "lib/android/terminal", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "lib/android/screen", "test", "-race", "./..."])
