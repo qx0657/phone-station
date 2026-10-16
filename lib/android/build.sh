@@ -75,6 +75,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/ClipboardState.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardAvailability.java" \
   "$here/src/dev/phonestation/adbkeep/HealthStatus.java" \
+  "$here/src/dev/phonestation/adbkeep/DeviceKeyReport.java" \
   "$here/src/dev/phonestation/adbkeep/NotificationSyncState.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardMethods.java" \
   "$here/src/dev/phonestation/adbkeep/ShellRequest.java" \
@@ -126,6 +127,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/ShellRunnerTest.java" \
   "$here/test/ClipboardStateTest.java" \
   "$here/test/HealthStatusTest.java" \
+  "$here/test/DeviceKeyReportTest.java" \
   "$here/test/NotificationSyncStateTest.java"
 java -cp "$work/policy" dev.phonestation.adbkeep.KeeperPolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.WirelessControlTest
@@ -167,6 +169,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.TerminalJobsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ShellRunnerTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ClipboardStateTest
 java -cp "$work/policy" dev.phonestation.adbkeep.HealthStatusTest
+java -cp "$work/policy" dev.phonestation.adbkeep.DeviceKeyReportTest
 java -cp "$work/policy" dev.phonestation.adbkeep.NotificationSyncStateTest
 
 print -r -- "打包资源…"

@@ -178,6 +178,7 @@ public final class FileMcpService extends Service {
         if (server != null && token != null) {
             writer.println("mcp token " + token);
         }
+        writer.println(PhoneDeviceKey.diagnostic());
     }
 
     private String versionName() {
