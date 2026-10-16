@@ -32,7 +32,8 @@ public abstract class StationActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
-        if (!StationAppearance.signature(this).equals(appearance)) { recreate(); }
+        if (!StationAppearance.signature(this).equals(appearance)) { recreate(); return; }
+        StationNotifications.noteVisible(this);
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         if (chrome != null) { chrome.saveDisplayState(state); }

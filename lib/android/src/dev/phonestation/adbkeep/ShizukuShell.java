@@ -1,14 +1,9 @@
 package dev.phonestation.adbkeep;
 
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.RemoteException;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import rikka.shizuku.Shizuku;
 
@@ -58,19 +53,8 @@ final class ShizukuShell {
         synchronized (EXECUTION) {
             authorize.run();
             requireAvailable(context);
-            Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
-                    new ComponentName(context, ShellUserService.class))
-                    .tag("station-shell").processNameSuffix("shell").daemon(false).version(1);
-            Connection connection = new Connection();
-            boolean binding = false;
+            IBinder binder = PrivilegedHelper.acquire(context, HelperPins.SHELL);
             try {
-                // 仅在真正执行时启动特权进程；每次结束删除，避免留下旧 APK 的执行服务。
-                binding = true;
-                UsageCounters.shared.helperStart("shell");
-                Shizuku.bindUserService(args, connection);
-                if (!connection.ready.await(5_000, TimeUnit.MILLISECONDS) || connection.binder == null) {
-                    throw new FileFailure("Shizuku 执行服务没有连上，请检查手机上的 Shizuku 状态");
-                }
                 requireAvailable(context);
                 authorize.run();
                 Parcel input = Parcel.obtain();
@@ -80,7 +64,7 @@ final class ShizukuShell {
                     input.writeString(request.command);
                     input.writeInt(request.timeoutMs);
                     input.writeInt(request.maxOutputBytes);
-                    if (!connection.binder.transact(ShellUserService.EXECUTE, input, output, 0)) {
+                    if (!binder.transact(ShellUserService.EXECUTE, input, output, 0)) {
                         throw new FileFailure("Shizuku 执行服务不支持这个操作");
                     }
                     output.readException();
@@ -93,20 +77,12 @@ final class ShizukuShell {
                     output.recycle();
                     input.recycle();
                 }
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new FileFailure("shell 请求被中断；请核实结果，不要自动重做");
             } catch (RemoteException | SecurityException stopped) {
                 throw new FileFailure("Shizuku 连接中断或授权已撤销；请核实结果，不要自动重做");
             } catch (IllegalStateException stopped) {
                 throw new FileFailure("Shizuku 服务已停止，请在手机上重新启动");
             } finally {
-                if (binding) {
-                    try {
-                        UsageCounters.shared.helperStop("shell");
-                        Shizuku.unbindUserService(args, connection, true);
-                    } catch (RuntimeException ignored) {}
-                }
+                PrivilegedHelper.shellFinished();
             }
         }
     }
@@ -118,20 +94,4 @@ final class ShizukuShell {
         }
     }
 
-    private static final class Connection implements ServiceConnection {
-        final CountDownLatch ready = new CountDownLatch(1);
-        volatile IBinder binder;
-
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            binder = service;
-            ready.countDown();
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            binder = null;
-            ready.countDown();
-        }
-    }
 }

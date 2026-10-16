@@ -1,21 +1,15 @@
 package dev.phonestation.adbkeep;
 
 import android.app.KeyguardManager;
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.SystemClock;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import rikka.shizuku.Shizuku;
 
 final class SharedClipboard {
     private static final ClipboardState STATE = new ClipboardState();
-    private static Connection connection;
-    private static Shizuku.UserServiceArgs serviceArgs;
     private static volatile String lastFailure = "";
+    private static String shownAvailability = "";
     private static volatile long macContact = -1;
     private static volatile String phoneKind = "";
     private static volatile String macKind = "";
@@ -32,12 +26,39 @@ final class SharedClipboard {
     static synchronized boolean lease(Context context, String client) {
         long now = SystemClock.elapsedRealtime();
         boolean active = !client.isEmpty() && StationFeatures.active(context, "clipboard") && STATE.lease(client, now);
-        IBinder binder = connection == null ? null : connection.binder;
+        IBinder binder = PrivilegedHelper.binder();
+        boolean wasWatching = leaseAt >= 0;
         if (active && binder != null && binder.isBinderAlive()) {
-            if (watchedBinder == binder || watch(binder, changes)) { watchedBinder = binder; leaseAt = now; return true; }
+            if (watchedBinder == binder || watch(binder, changes)) {
+                watchedBinder = binder; leaseAt = now; noteWatch(context, wasWatching); return true;
+            }
         }
         if (watchedBinder != null) { watch(watchedBinder, null); watchedBinder = null; }
-        leaseAt = -1; STATE.lease("", now); return false;
+        leaseAt = -1; STATE.lease("", now); noteWatch(context, wasWatching); return false;
+    }
+    private static void noteWatch(Context context, boolean wasWatching) {
+        if ((leaseAt >= 0) != wasWatching) { publishUi(health(context)); }
+        else { StationNotifications.touchFreshness(); }
+    }
+    private static void publishUi(Json availability) {
+        String next = availability.get("status").string() + "\0" + availability.get("reason").string()
+                + "\0" + availability.get("ready").boolValue() + "\0" + availability.get("macOnline").boolValue();
+        if (next.equals(shownAvailability)) { StationNotifications.touchFreshness(); return; }
+        shownAvailability = next;
+        StationNotifications.connectionChanged();
+    }
+    static synchronized long untilStale(long now) {
+        long contact = freshLeft(macContact, now, 10_000L);
+        long lease = freshLeft(leaseAt, now, 45_000L);
+        long healthWindow = contact < 0 ? lease : lease < 0 ? contact : Math.max(contact, lease);
+        long state = STATE.untilStale(now);
+        if (healthWindow < 0) { return state < 0 ? -1L : Math.max(1L, state); }
+        if (state < 0) { return Math.max(1L, healthWindow); }
+        return Math.max(1L, Math.min(healthWindow, state));
+    }
+    private static long freshLeft(long at, long now, long window) {
+        if (at < 0 || now < at || now - at >= window) { return -1L; }
+        return window - (now - at);
     }
     private static boolean watch(IBinder binder, IBinder observer) {
         Parcel input = Parcel.obtain(), output = Parcel.obtain();
@@ -83,7 +104,9 @@ final class SharedClipboard {
         }
         if (!shared(context)) { close(); }
         StationFeatures.publish(context);
-        return status(context);
+        Json result = status(context);
+        publishUi(result.get("availability"));
+        return result;
     }
     static synchronized Json status(Context context) {
         Json availability = health(context);
@@ -100,10 +123,14 @@ final class SharedClipboard {
         try {
             recordKinds(STATE.refresh(access(context), SystemClock.elapsedRealtime()));
             lastFailure = "";
-            return status(context);
+            Json refreshed = status(context);
+            publishUi(refreshed.get("availability"));
+            return refreshed;
         } catch (FileFailure unavailable) {
             lastFailure = unavailable.getMessage();
-            return status(context).put("phone", Json.nul()).put("error", unavailable.getMessage());
+            Json failed = status(context).put("phone", Json.nul()).put("error", unavailable.getMessage());
+            publishUi(failed.get("availability"));
+            return failed;
         }
     }
     private static ClipboardState.Access access(Context context) {
@@ -127,12 +154,16 @@ final class SharedClipboard {
             recordKinds(result);
             lastFailure = "";
             if (args.get("clientId") != null) { macContact = SystemClock.elapsedRealtime(); }
+            Json availability = health(context);
+            publishUi(availability);
             return result.put("shared", true).put("automatic", automatic(context))
                     .put("images", images(context)).put("imagesSupported", true).put("recoverySupported", true)
-                    .put("availability", health(context));
+                    .put("availability", availability);
         } catch (FileFailure unavailable) {
             lastFailure = unavailable.getMessage();
-            return status(context).put("phone", Json.nul()).put("error", unavailable.getMessage());
+            Json failed = status(context).put("phone", Json.nul()).put("error", unavailable.getMessage());
+            publishUi(failed.get("availability"));
+            return failed;
         }
     }
     static synchronized Json write(Context context, String text) {
@@ -148,28 +179,15 @@ final class SharedClipboard {
         StationFeatures.require(context, code == ClipboardUserService.READ ? "station_clipboard_get" : "station_clipboard_set");
         Json status = ShizukuShell.status(context);
         if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
-        if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
-            close();
-            serviceArgs = new Shizuku.UserServiceArgs(new ComponentName(context, ClipboardUserService.class))
-                    .tag("station-clipboard").processNameSuffix("clipboard").daemon(false).version(69);
-            Connection next = new Connection();
-            connection = next;
-            try {
-                UsageCounters.shared.helperStart("clipboard");
-                Shizuku.bindUserService(serviceArgs, next);
-                if (!next.ready.await(5, TimeUnit.SECONDS) || next.binder == null) {
-                    close(); throw new FileFailure("剪贴板后台服务未连接，请检查 Shizuku");
-                }
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt(); close(); throw new FileFailure("剪贴板连接被中断");
-            } catch (RuntimeException error) { close(); throw new FileFailure("剪贴板后台服务未连接，请检查 Shizuku"); }
-        }
+        IBinder binder;
+        try { binder = PrivilegedHelper.acquire(context, HelperPins.CLIPBOARD); }
+        catch (RuntimeException error) { close(); throw new FileFailure("剪贴板后台服务未连接，请检查 Shizuku"); }
         Parcel input = Parcel.obtain();
         Parcel output = Parcel.obtain();
         try {
             input.writeInterfaceToken(ClipboardUserService.DESCRIPTOR);
             if (code == ClipboardUserService.WRITE) { input.writeString(text); }
-            if (!connection.binder.transact(code, input, output, 0)) { throw new FileFailure("请更新手机端剪贴板服务"); }
+            if (!binder.transact(code, input, output, 0)) { throw new FileFailure("请更新手机端剪贴板服务"); }
             StationFeatures.require(context, code == ClipboardUserService.READ ? "station_clipboard_get" : "station_clipboard_set");
             output.readException();
             Json result = Json.parse(output.readString());
@@ -180,22 +198,14 @@ final class SharedClipboard {
         } finally { input.recycle(); output.recycle(); }
     }
     static synchronized void close() {
-        if (connection != null && serviceArgs != null) {
-            UsageCounters.shared.helperStop("clipboard");
-            try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
-        }
-        connection = null; serviceArgs = null; watchedBinder = null; leaseAt = -1; STATE.clear();
-        macContact = -1; lastFailure = ""; phoneKind = ""; macKind = "";
+        PrivilegedHelper.release(HelperPins.CLIPBOARD);
+        watchedBinder = null; leaseAt = -1; STATE.clear();
+        macContact = -1; lastFailure = ""; phoneKind = ""; macKind = ""; shownAvailability = "";
+        StationNotifications.connectionChanged();
     }
     private static void recordKinds(Json state) {
         Json phone = state.get("phone"), mac = state.get("mac");
         phoneKind = phone == null || phone.isNull() ? "" : phone.get("kind").string();
         macKind = mac == null || mac.isNull() ? "" : mac.get("kind").string();
-    }
-    private static final class Connection implements ServiceConnection {
-        final CountDownLatch ready = new CountDownLatch(1);
-        volatile IBinder binder;
-        public void onServiceConnected(ComponentName name, IBinder service) { binder = service; ready.countDown(); }
-        public void onServiceDisconnected(ComponentName name) { binder = null; ready.countDown(); }
     }
 }

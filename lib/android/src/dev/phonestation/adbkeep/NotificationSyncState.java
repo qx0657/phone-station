@@ -112,6 +112,15 @@ final class NotificationSyncState {
         prune(now);
         return events.isEmpty() ? -1 : Math.max(1L, events.peekFirst().time + MAX_AGE_MS - now);
     }
+    synchronized long untilOffline(long now) {
+        if (!online(now)) { return -1L; }
+        long poll = lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS ? ONLINE_MS - (now - lastPoll) : -1L;
+        long lease = subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L
+                ? 45_000L - (now - leaseAt) : -1L;
+        if (poll < 0) { return Math.max(1L, lease); }
+        if (lease < 0) { return Math.max(1L, poll); }
+        return Math.max(1L, Math.max(poll, lease));
+    }
     private boolean online(long now) { return (lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS)
             || (subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L); }
     private String cursor() { return session + ":" + sequence; }

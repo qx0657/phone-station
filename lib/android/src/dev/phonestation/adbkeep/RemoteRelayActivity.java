@@ -2,8 +2,6 @@ package dev.phonestation.adbkeep;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
@@ -31,11 +29,7 @@ public final class RemoteRelayActivity extends StationActivity {
     private Button forget;
     private boolean busy;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable connectionChanged = this::paintStatus;
-    private final Runnable refresh = new Runnable() {
-        public void run() { paintStatus(); handler.postDelayed(this, 1_000); }
-    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -98,10 +92,10 @@ public final class RemoteRelayActivity extends StationActivity {
     }
 
     @Override protected void onResume() {
-        super.onResume(); StationConnectionEvents.add(connectionChanged); handler.post(refresh);
+        super.onResume(); StationConnectionEvents.add(connectionChanged); paintStatus();
     }
     @Override protected void onPause() {
-        StationConnectionEvents.remove(connectionChanged); handler.removeCallbacks(refresh); super.onPause();
+        StationConnectionEvents.remove(connectionChanged); super.onPause();
     }
     @Override protected void onStop() { token.setText(""); super.onStop(); }
     @Override protected void onDestroy() { worker.shutdown(); super.onDestroy(); }

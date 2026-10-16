@@ -41,7 +41,9 @@ final class ClipboardStateTest {
         state.exchange(access, args("4", "manual-mode", version), false, 500);
         expect(access.writes == 1, "manual preview must not change clipboard");
         expect("manual-mode".equals(state.snapshot(500).get("mac").get("text").string()), "Mac preview available");
+        expect(state.untilStale(500) == 10_000L, "preview stays fresh for the contact window");
         expect(state.snapshot(10_501).get("mac").isNull(), "offline preview must expire");
+        expect(state.untilStale(10_501) == -1L, "expired preview has no further deadline");
         state.exchange(access, args("5", "offline-copy", version), true, 11_000);
         expect(access.writes == 1, "old connection must not replay");
         access.clip = new ClipboardState.Clip("sensitive", "secret");

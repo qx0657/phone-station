@@ -3,8 +3,6 @@ package dev.phonestation.adbkeep;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
@@ -20,11 +18,9 @@ public final class RemotePermissionsActivity extends StationActivity {
     private TextView channel;
     private TextView feedback;
     private boolean painting;
+    private boolean active;
     private final Map<String, StationChrome.Control> controls = new LinkedHashMap<>();
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable refresh = new Runnable() {
-        public void run() { paint(); handler.postDelayed(this, 1_000L); }
-    };
+    private final Runnable connectionChanged = () -> { if (active) { paint(); } };
 
     static Intent intent(android.content.Context context, String scope) {
         return new Intent(context, RemotePermissionsActivity.class).putExtra(EXTRA_SCOPE, scope);
@@ -76,8 +72,12 @@ public final class RemotePermissionsActivity extends StationActivity {
             });
         }
     }
-    @Override protected void onResume() { super.onResume(); handler.post(refresh); }
-    @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onResume() {
+        super.onResume(); active = true; StationConnectionEvents.add(connectionChanged); paint();
+    }
+    @Override protected void onPause() {
+        active = false; StationConnectionEvents.remove(connectionChanged); super.onPause();
+    }
     private void paint() {
         boolean configured = RemoteStore.configured(this);
         summary.setText(StationText.translate(RemoteStore.permissionSummary(this)));

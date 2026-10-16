@@ -35,9 +35,6 @@ public final class McpHelpActivity extends StationActivity {
     private boolean active;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable connectionChanged = () -> { if (active) { paint(); } };
-    private final Runnable refresh = new Runnable() {
-        public void run() { if (active) { paint(); handler.postDelayed(this, 2_000L); } }
-    };
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -93,10 +90,10 @@ public final class McpHelpActivity extends StationActivity {
     }
 
     @Override protected void onResume() {
-        super.onResume(); active = true; StationConnectionEvents.add(connectionChanged); handler.post(refresh);
+        super.onResume(); active = true; StationConnectionEvents.add(connectionChanged); paint();
     }
     @Override protected void onPause() {
-        active = false; StationConnectionEvents.remove(connectionChanged); handler.removeCallbacks(refresh); super.onPause();
+        active = false; StationConnectionEvents.remove(connectionChanged); super.onPause();
     }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy(); }
     @Override protected void onSaveInstanceState(Bundle saved) {

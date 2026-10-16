@@ -29,6 +29,8 @@ import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
 
+import rikka.shizuku.Shizuku;
+
 /**
  * 无线调试保持和 MCP服务共用一条常驻通知。
  *
@@ -63,6 +65,10 @@ final class StationNotifications {
     private static boolean seenInShade;
     private static ContentObserver settingObserver;
     private static ConnectivityManager.NetworkCallback wifiCallback;
+    private static Context appContext;
+    private static boolean shizukuWatching;
+    private static final Shizuku.OnBinderReceivedListener shizukuUp = StationNotifications::connectionChanged;
+    private static final Shizuku.OnBinderDeadListener shizukuDown = StationNotifications::connectionChanged;
     private static final Runnable expireHost = StationNotifications::connectionChanged;
     private static Handler mainHandler;
     private static int returnGeneration;
@@ -86,11 +92,32 @@ final class StationNotifications {
         StationConnectionEvents.changed();
         new Handler(Looper.getMainLooper()).post(() -> {
             Service service = live();
-            if (service != null) {
-                update(service);
-                scheduleHostExpiry(service);
-            }
+            if (service != null) { update(service); }
+            Context context = service != null ? service : appContext;
+            if (context != null) { scheduleHostExpiry(context); }
         });
+    }
+
+    /** 倒计时还没到点，只改下一次刷新，不重绘页面。 */
+    static void touchFreshness() {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Service service = live();
+            Context context = service != null ? service : appContext;
+            if (context != null) { scheduleHostExpiry(context); }
+        });
+    }
+
+    static void noteVisible(Context context) {
+        appContext = context.getApplicationContext();
+        watchShizuku();
+        scheduleHostExpiry(appContext);
+    }
+
+    private static void watchShizuku() {
+        if (shizukuWatching) { return; }
+        shizukuWatching = true;
+        Shizuku.addBinderReceivedListenerSticky(shizukuUp);
+        Shizuku.addBinderDeadListener(shizukuDown);
     }
 
     /** 服务刚被拉起，必须进前台。已经在前台时只按状态决定要不要改通知。 */
@@ -546,6 +573,8 @@ final class StationNotifications {
                 Settings.Global.getUriFor(HostLink.SETTING), false, settingObserver);
         context.getApplicationContext().getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(HostLink.TRANSPORT_SETTING), false, settingObserver);
+        appContext = context.getApplicationContext();
+        watchShizuku();
         ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
         if (connectivity != null) {
             wifiCallback = new ConnectivityManager.NetworkCallback() {
@@ -567,6 +596,11 @@ final class StationNotifications {
         long delay = HostLink.linked(marked, now) ? Math.max(1L, marked + HostLink.FRESH_MS + 1L - now) : -1L;
         long remote = PhoneRelayClient.expiresIn();
         if (remote >= 0L) { delay = delay < 0L ? remote : Math.min(delay, remote); }
+        long nowElapsed = SystemClock.elapsedRealtime();
+        long clipboard = SharedClipboard.untilStale(nowElapsed);
+        if (clipboard >= 0L) { delay = delay < 0L ? clipboard : Math.min(delay, clipboard); }
+        long notifications = PhoneNotifications.untilOffline(nowElapsed);
+        if (notifications >= 0L) { delay = delay < 0L ? notifications : Math.min(delay, notifications); }
         if (delay >= 0L) { handler().postDelayed(expireHost, delay); }
     }
 

@@ -141,6 +141,15 @@ final class ClipboardState {
         return png;
     }
 
+    synchronized long untilStale(long now) {
+        if (mac == null) { return -1L; }
+        long seen = macSeen > 0 && now >= macSeen && now - macSeen < 10_000L ? 10_000L - (now - macSeen) : -1L;
+        long lease = leased(now) ? 45_000L - (now - leaseAt) : -1L;
+        if (seen < 0 && lease < 0) { return -1L; }
+        if (seen < 0) { return Math.max(1L, lease); }
+        if (lease < 0) { return Math.max(1L, seen); }
+        return Math.max(1L, Math.max(seen, lease));
+    }
     synchronized Json snapshot(long now) {
         boolean online = mac != null && (now - macSeen < 10_000L || leased(now));
         return Json.obj().put("phone", phone == null ? Json.nul() : phone.json())

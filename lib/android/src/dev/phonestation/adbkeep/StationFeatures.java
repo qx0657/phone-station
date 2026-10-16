@@ -70,8 +70,9 @@ final class StationFeatures {
         publish(context);
         RemoteStore.invalidate(context);
         if (!enabled) {
+            ShizukuTorch.close();
             SharedClipboard.close(); PhoneNotifications.state(context);
-            StationBridge.closeJobs(); ShizukuTorch.close();
+            StationBridge.closeJobs(); PrivilegedHelper.release(HelperPins.SHELL);
             context.stopService(new Intent(context, KeeperService.class));
             KeeperAlarm.cancel(context); FileMcpService.stop(context);
             // Restore only the snapshot created by this application.
@@ -89,7 +90,7 @@ final class StationFeatures {
         if ("notifications".equals(key)) { PhoneNotifications.state(context); }
         if (!selected(context, key)) {
             if ("screen".equals(key)) { ShizukuScreen.close(); }
-            if ("shell".equals(key)) { ShizukuTerminal.close(); }
+            if ("shell".equals(key)) { ShizukuTerminal.close(); PrivilegedHelper.release(HelperPins.SHELL); }
             if ("torch".equals(key)) { ShizukuTorch.close(); }
             if ("awake".equals(key)) { StayAwakeController.release(context); }
         }

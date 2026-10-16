@@ -41,9 +41,8 @@ public final class NotificationActivity extends StationActivity {
     private final java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean painting;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable refresh = new Runnable() {
-        @Override public void run() { refreshSync(); handler.postDelayed(this, 2_000); }
-    };
+    private boolean active;
+    private final Runnable connectionChanged = () -> { if (active) { refreshSync(); } };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,10 +123,14 @@ public final class NotificationActivity extends StationActivity {
         refreshDisplay();
         soundValue.setText(StationText.translate(soundLabel(KeeperStore.alertSound(this))));
         rebindListener();
-        handler.post(refresh);
+        active = true;
+        StationConnectionEvents.add(connectionChanged);
+        refreshSync();
     }
 
-    @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onPause() {
+        active = false; StationConnectionEvents.remove(connectionChanged); super.onPause();
+    }
 
     private void refreshSync() {
         Json state = PhoneNotifications.status(this);

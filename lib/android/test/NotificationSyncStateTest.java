@@ -69,6 +69,12 @@ final class NotificationSyncStateTest {
         expect(large.get("title").string().length() == 199 && large.get("text").string().length() == 3999, "truncate without splitting surrogate pairs");
         try { state.poll("", null, 18_300); throw new AssertionError("empty client accepted"); }
         catch (IllegalArgumentException expected) { }
+        state.configure(true, Set.of("chat"));
+        state.access(true);
+        state.listener(true);
+        state.poll("mac", null, 20_000);
+        expect(state.untilOffline(20_000) == 15_000L, "mac stays online for the poll window");
+        expect(state.untilOffline(35_000) == -1L, "poll window ends without another contact");
         System.out.println("手机通知白名单、权限、去重、断线与队列边界通过");
     }
     private static void post(NotificationSyncState state, String pkg, String key, String body, long now) {

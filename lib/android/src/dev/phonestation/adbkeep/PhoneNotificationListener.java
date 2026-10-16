@@ -10,9 +10,9 @@ import android.service.notification.StatusBarNotification;
 
 /** 系统通知使用权由用户授予；不读取未选择应用的正文，不补扫旧通知。 */
 public final class PhoneNotificationListener extends NotificationListenerService {
-    @Override public void onListenerConnected() { PhoneNotifications.state(this).listener(true); }
-    @Override public void onListenerDisconnected() { PhoneNotifications.state(this).listener(false); }
-    @Override public void onDestroy() { PhoneNotifications.state(this).listener(false); super.onDestroy(); }
+    @Override public void onListenerConnected() { PhoneNotifications.state(this).listener(true); StationNotifications.connectionChanged(); }
+    @Override public void onListenerDisconnected() { PhoneNotifications.state(this).listener(false); StationNotifications.connectionChanged(); }
+    @Override public void onDestroy() { PhoneNotifications.state(this).listener(false); StationNotifications.connectionChanged(); super.onDestroy(); }
 
     @Override public void onNotificationPosted(StatusBarNotification posted) {
         if (!StationFeatures.active(this, "notifications")) { return; }

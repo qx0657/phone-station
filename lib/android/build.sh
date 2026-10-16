@@ -57,6 +57,7 @@ javac --release 17 -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/StationNote.java" \
   "$here/src/dev/phonestation/adbkeep/StationText.java" \
   "$here/src/dev/phonestation/adbkeep/UsageCounters.java" \
+  "$here/src/dev/phonestation/adbkeep/HelperPins.java" \
   "$here/src/dev/phonestation/adbkeep/FilePolicy.java" \
   "$here/src/dev/phonestation/adbkeep/Json.java" \
   "$here/src/dev/phonestation/adbkeep/StationPlaces.java" \
@@ -98,6 +99,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/StationNoteTest.java" \
   "$here/test/StationTextTest.java" \
   "$here/test/UsageCountersTest.java" \
+  "$here/test/HelperPinsTest.java" \
   "$here/test/JsonTest.java" \
   "$here/test/FilePolicyTest.java" \
   "$here/test/FileOpsTest.java" \
@@ -133,6 +135,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.AboutCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.StationNoteTest
 (cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.StationTextTest)
 (cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.UsageCountersTest)
+java -cp "$work/policy" dev.phonestation.adbkeep.HelperPinsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.JsonTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest

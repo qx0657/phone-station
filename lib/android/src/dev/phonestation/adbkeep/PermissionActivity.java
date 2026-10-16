@@ -10,8 +10,6 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
@@ -51,14 +49,7 @@ public final class PermissionActivity extends StationActivity {
     private boolean expanded;
     private boolean active;
     private String shown;
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable refresh = new Runnable() {
-        @Override public void run() {
-            if (!active) { return; }
-            render();
-            handler.postDelayed(this, 1_000L);
-        }
-    };
+    private final Runnable connectionChanged = () -> { if (active) { render(); } };
     private final Shizuku.OnBinderReceivedListener shizukuBinder = this::render;
     private final Shizuku.OnRequestPermissionResultListener shizukuPermission =
             (code, grantResult) -> render();
@@ -96,7 +87,6 @@ public final class PermissionActivity extends StationActivity {
 
     @Override
     protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
         Shizuku.removeBinderReceivedListener(shizukuBinder);
         Shizuku.removeRequestPermissionResultListener(shizukuPermission);
         super.onDestroy();
@@ -107,12 +97,13 @@ public final class PermissionActivity extends StationActivity {
         super.onResume();
         AlertChannel.ensure(this);
         active = true;
-        handler.post(refresh);
+        StationConnectionEvents.add(connectionChanged);
+        render();
     }
 
     @Override protected void onPause() {
         active = false;
-        handler.removeCallbacks(refresh);
+        StationConnectionEvents.remove(connectionChanged);
         super.onPause();
     }
 

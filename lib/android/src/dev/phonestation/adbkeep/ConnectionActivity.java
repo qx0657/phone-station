@@ -6,6 +6,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -42,9 +43,14 @@ public final class ConnectionActivity extends StationActivity {
     private boolean updatingSwitch;
     private boolean updatingWireless;
     private boolean active;
+    private final AtomicBoolean usageQueued = new AtomicBoolean();
     private final Runnable connectionChanged = () -> { if (active) { render(); } };
-    private final Runnable refresh = new Runnable() {
-        public void run() { if (active) { render(); handler.postDelayed(this, 1_000L); } }
+    private final Runnable usageChanged = () -> {
+        if (!usageQueued.compareAndSet(false, true)) { return; }
+        handler.post(() -> {
+            usageQueued.set(false);
+            if (active && usageExpanded) { paintUsage(); }
+        });
     };
 
     @Override protected void onCreate(Bundle saved) {
@@ -153,10 +159,12 @@ public final class ConnectionActivity extends StationActivity {
     @Override protected void onResume() {
         super.onResume(); if (isFinishing()) { return; }
         active = true; StationConnectionEvents.add(connectionChanged);
-        render(); handler.postDelayed(refresh, 1_000L);
+        UsageCounters.shared.listen(usageChanged);
+        render();
     }
     @Override protected void onPause() {
-        active = false; StationConnectionEvents.remove(connectionChanged); handler.removeCallbacks(refresh);
+        active = false; StationConnectionEvents.remove(connectionChanged);
+        UsageCounters.shared.unlisten(usageChanged);
         super.onPause();
     }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy(); }

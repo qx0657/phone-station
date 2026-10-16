@@ -14,7 +14,6 @@ import java.util.Set;
 final class PhoneNotifications {
     private static NotificationSyncState state;
     private static final Handler expiry = new Handler(Looper.getMainLooper());
-    private static Runnable expire;
     private static Runnable contentExpire;
     private static long contentExpiryAt = -1;
     private PhoneNotifications() {}
@@ -69,10 +68,10 @@ final class PhoneNotifications {
     }
     static synchronized boolean lease(Context context, String id) {
         NotificationSyncState current = state(context);
-        boolean active = current.lease(id, SystemClock.elapsedRealtime());
-        if (expire != null) { expiry.removeCallbacks(expire); }
-        expire = () -> current.status(SystemClock.elapsedRealtime());
-        expiry.postDelayed(expire, active ? 45_000L : NotificationSyncState.ONLINE_MS);
+        long now = SystemClock.elapsedRealtime();
+        boolean was = current.status(now).get("macOnline").boolValue();
+        boolean active = current.lease(id, now);
+        noteMac(was, current.status(now).get("macOnline").boolValue());
         return active;
     }
     static Json status(Context context) { return state(context).status(SystemClock.elapsedRealtime()).put("enabled", enabled(context)).put("stationEnabled", StationFeatures.master(context)); }
@@ -80,11 +79,20 @@ final class PhoneNotifications {
         Json id = args.get("clientId");
         Json cursor = args.get("cursor");
         NotificationSyncState current = state(context);
+        long now = SystemClock.elapsedRealtime();
+        boolean was = current.status(now).get("macOnline").boolValue();
         Json result = current.poll(id == null ? null : id.string(),
-                cursor == null || cursor.isNull() ? null : cursor.string(), SystemClock.elapsedRealtime());
-        if (expire != null) { expiry.removeCallbacks(expire); }
-        expire = () -> current.status(SystemClock.elapsedRealtime());
-        expiry.postDelayed(expire, NotificationSyncState.ONLINE_MS);
+                cursor == null || cursor.isNull() ? null : cursor.string(), now);
+        noteMac(was, result.get("macOnline").boolValue());
         return result;
+    }
+    static long untilOffline(long now) {
+        NotificationSyncState current;
+        synchronized (PhoneNotifications.class) { current = state; }
+        return current == null ? -1L : current.untilOffline(now);
+    }
+    private static void noteMac(boolean was, boolean now) {
+        if (was != now) { StationNotifications.connectionChanged(); }
+        else { StationNotifications.touchFreshness(); }
     }
 }

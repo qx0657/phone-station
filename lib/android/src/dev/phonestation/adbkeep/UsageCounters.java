@@ -25,6 +25,7 @@ final class UsageCounters {
     private final ConcurrentHashMap<String, AtomicLong> helperStops = new ConcurrentHashMap<>();
     private final AtomicLong settingsWrites = new AtomicLong();
     private final AtomicLong reconnects = new AtomicLong();
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /** 工具调用按能力归类；协议方法单独计入「协议」。 */
     static String category(String tool) {
@@ -52,20 +53,23 @@ final class UsageCounters {
         return "other";
     }
 
+    void listen(Runnable listener) { listeners.add(listener); }
+    void unlisten(Runnable listener) { listeners.remove(listener); }
+
     void rpc(String method, String tool) {
         if ("tools/call".equals(method)) {
             add(requests, category(tool));
-            return;
-        }
-        if ("initialize".equals(method) || "tools/list".equals(method) || "ping".equals(method)) {
+        } else if ("initialize".equals(method) || "tools/list".equals(method) || "ping".equals(method)) {
             add(requests, "protocol");
-            return;
+        } else {
+            add(requests, "other");
         }
-        add(requests, "other");
+        changed();
     }
 
     void settingsWrite() {
         settingsWrites.incrementAndGet();
+        changed();
     }
 
     /** 只在写入返回成功时计数。拒绝或抛错的尝试不算落地。 */
@@ -78,14 +82,21 @@ final class UsageCounters {
 
     void helperStart(String name) {
         add(helperStarts, name);
+        changed();
     }
 
     void helperStop(String name) {
         add(helperStops, name);
+        changed();
     }
 
     void reconnect() {
         reconnects.incrementAndGet();
+        changed();
+    }
+
+    private void changed() {
+        for (Runnable listener : listeners) { listener.run(); }
     }
 
     Line[] lines() {

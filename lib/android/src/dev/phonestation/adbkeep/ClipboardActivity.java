@@ -26,12 +26,11 @@ public final class ClipboardActivity extends StationActivity {
     private boolean painting;
     private boolean active;
     private boolean loading;
+    private boolean loadAgain;
     private boolean saving;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final Runnable refresh = new Runnable() {
-        public void run() { if (active) { load(); handler.postDelayed(this, 1_000); } }
-    };
+    private final Runnable connectionChanged = () -> { if (active) { load(); } };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         ui = new StationChrome(this);
@@ -82,18 +81,25 @@ public final class ClipboardActivity extends StationActivity {
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("help_expanded", help.expanded); super.onSaveInstanceState(state);
     }
-    @Override protected void onResume() { super.onResume(); active = true; handler.post(refresh); }
-    @Override protected void onPause() { active = false; handler.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onResume() {
+        super.onResume(); active = true; StationConnectionEvents.add(connectionChanged); load();
+    }
+    @Override protected void onPause() {
+        active = false; StationConnectionEvents.remove(connectionChanged); super.onPause();
+    }
     @Override protected void onDestroy() { worker.shutdownNow(); super.onDestroy(); }
     private void load() {
-        if (loading || saving || !active) { return; }
+        if (saving || !active) { return; }
+        if (loading) { loadAgain = true; return; }
         loading = true;
+        loadAgain = false;
         worker.execute(() -> {
             // Display session metadata already held in memory; opening this page never reads clipboard text.
             Json state = SharedClipboard.status(this);
             handler.post(() -> {
                 loading = false;
-                if (!active || isFinishing() || saving) { return; }
+                if (!active || isFinishing()) { loadAgain = false; return; }
+                if (saving) { return; }
                 boolean enabled = state.get("shared").boolValue();
                 boolean automatic = state.get("automatic").boolValue();
                 painting = true;
@@ -116,6 +122,7 @@ public final class ClipboardActivity extends StationActivity {
                 resolve.setText(StationText.translate("master".equals(resolution) ? "前往首页恢复使用" : "remotePermissions".equals(resolution) ? "去授权剪贴板与通知"
                         : "mcp".equals(resolution) ? "查看 MCP 服务" : "查看 Shizuku 权限"));
                 resume.setVisibility(enabled && !automatic ? View.VISIBLE : View.GONE);
+                if (loadAgain) { load(); }
             });
         });
     }

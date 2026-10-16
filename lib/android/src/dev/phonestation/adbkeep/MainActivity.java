@@ -39,9 +39,6 @@ public final class MainActivity extends StationActivity {
     private String shownHealth;
     private boolean active;
     private final Runnable connectionChanged = () -> { if (active) { render(); } };
-    private final Runnable refresh = new Runnable() {
-        public void run() { if (active) { render(); handler.postDelayed(this, 1_000L); } }
-    };
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -173,10 +170,10 @@ public final class MainActivity extends StationActivity {
         if (KeeperStore.isEnabled(this)) { KeeperService.start(this); }
         if (KeeperStore.mcpEnabled(this) || RemoteStore.enabled(this)) { FileMcpService.start(this); }
         StationNotifications.restore(this);
-        render(); handler.postDelayed(refresh, 1_000L);
+        render();
     }
     @Override protected void onPause() {
-        active = false; StationConnectionEvents.remove(connectionChanged); handler.removeCallbacks(refresh);
+        active = false; StationConnectionEvents.remove(connectionChanged);
         super.onPause();
     }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy(); }

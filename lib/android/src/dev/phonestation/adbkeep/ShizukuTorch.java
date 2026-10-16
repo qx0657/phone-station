@@ -1,73 +1,115 @@
 package dev.phonestation.adbkeep;
 
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import rikka.shizuku.Shizuku;
 
-/** 灯的生命周期独立于单次 shell；进程停止、升级或撤销授权后不自动重开灯。 */
+/** 灯留在共享特权进程里。状态查询不启动进程；没开灯且进程不在时直接报告未开。 */
 final class ShizukuTorch {
-    private static Connection connection;
-    private static Shizuku.UserServiceArgs serviceArgs;
+    private ShizukuTorch() {}
 
     static synchronized Json status(Context context) {
-        try { return call(context, TorchUserService.STATUS, false, () -> {}); }
-        catch (FileFailure error) { return Json.obj().put("available", false).put("on", Json.nul()).put("reason", error.getMessage()); }
+        try {
+            IBinder binder = PrivilegedHelper.binder();
+            if (binder == null) {
+                return unavailableOrOff(context);
+            }
+            return transact(context, binder, TorchUserService.STATUS, false, () -> {});
+        } catch (FileFailure error) {
+            return Json.obj().put("available", false).put("on", Json.nul()).put("reason", error.getMessage());
+        }
     }
 
-    static synchronized Json set(Context context, boolean on) { return set(context, on, () -> {}); }
+    static synchronized Json set(Context context, boolean on) {
+        return set(context, on, () -> {});
+    }
 
-    static synchronized Json set(Context context, boolean on, Runnable authorize) { return call(context, TorchUserService.SET, on, authorize); }
-
-    private static Json call(Context context, int code, boolean on, Runnable authorize) {
-        authorize.run();
-        Json status = ShizukuShell.status(context);
-        if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
-        if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
-            close();
-            serviceArgs = new Shizuku.UserServiceArgs(new ComponentName(context, TorchUserService.class))
-                    .tag("station-torch").processNameSuffix("torch").daemon(false).version(58);
-            connection = new Connection();
-            try {
-                UsageCounters.shared.helperStart("torch");
-                Shizuku.bindUserService(serviceArgs, connection);
-                if (!connection.ready.await(5, TimeUnit.SECONDS) || connection.binder == null) {
-                    close(); throw new FileFailure("手电筒服务未连接，请检查手机上的 Shizuku");
-                }
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt(); close(); throw new FileFailure("手电筒连接被中断");
-            } catch (RuntimeException error) { close(); throw new FileFailure("手电筒服务未连接，请检查手机上的 Shizuku"); }
-        }
-        Parcel input = Parcel.obtain(), output = Parcel.obtain();
+    static synchronized Json set(Context context, boolean on, Runnable authorize) {
+        boolean addedTorch = false;
         try {
-            authorize.run();
-            input.writeInterfaceToken(TorchUserService.DESCRIPTOR);
-            if (code == TorchUserService.SET) { input.writeInt(on ? 1 : 0); }
-            if (!connection.binder.transact(code, input, output, 0)) { throw new FileFailure("请更新手机端手电筒服务"); }
-            output.readException();
-            Json result = Json.parse(output.readString());
-            if (result.get("error") != null) { throw new FileFailure(result.get("error").string()); }
+            if (!on && PrivilegedHelper.binder() == null) {
+                return unavailableOrOff(context);
+            }
+            Json shell = ShizukuShell.status(context);
+            if (!shell.get("available").boolValue()) {
+                throw new FileFailure(shell.get("reason").string());
+            }
+            IBinder binder;
+            if (on) {
+                addedTorch = !PrivilegedHelper.holds(HelperPins.TORCH);
+                binder = PrivilegedHelper.acquire(context, HelperPins.TORCH);
+            } else {
+                binder = PrivilegedHelper.binder();
+            }
+            if (binder == null) {
+                throw new FileFailure("手电筒服务未连接，请检查手机上的 Shizuku");
+            }
+            Json result = transact(context, binder, TorchUserService.SET, on, authorize);
+            if (!on) {
+                PrivilegedHelper.release(HelperPins.TORCH);
+            }
             return result;
-        } catch (android.os.RemoteException | SecurityException error) {
-            close(); throw new FileFailure("手电筒连接中断；请核实结果，不要自动重做");
-        } finally { input.recycle(); output.recycle(); }
+        } catch (RuntimeException error) {
+            if (!on || addedTorch) {
+                PrivilegedHelper.release(HelperPins.TORCH);
+            }
+            if (error instanceof FileFailure) {
+                throw error;
+            }
+            throw new FileFailure("手电筒连接中断；请核实结果，不要自动重做");
+        }
     }
 
     static synchronized void close() {
-        if (connection != null && serviceArgs != null) {
-            UsageCounters.shared.helperStop("torch");
-            try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
+        IBinder binder = PrivilegedHelper.binder();
+        if (binder != null) {
+            try {
+                transact(null, binder, TorchUserService.SET, false, () -> {});
+            } catch (RuntimeException ignored) {
+                // 进程退出时系统也会关掉本进程持有的灯。
+            }
         }
-        connection = null; serviceArgs = null;
+        PrivilegedHelper.release(HelperPins.TORCH);
     }
-    private static final class Connection implements ServiceConnection {
-        final CountDownLatch ready = new CountDownLatch(1);
-        volatile IBinder binder;
-        public void onServiceConnected(ComponentName name, IBinder service) { binder = service; ready.countDown(); }
-        public void onServiceDisconnected(ComponentName name) { binder = null; ready.countDown(); }
+
+    private static Json unavailableOrOff(Context context) {
+        Json shell = ShizukuShell.status(context);
+        if (!shell.get("available").boolValue()) {
+            return Json.obj().put("available", false).put("on", Json.nul()).put("reason", shell.get("reason").string());
+        }
+        return Json.obj().put("available", true).put("on", false).put("reason", "");
+    }
+
+    private static Json transact(Context context, IBinder binder, int code, boolean on, Runnable authorize) {
+        authorize.run();
+        if (context != null) {
+            Json shell = ShizukuShell.status(context);
+            if (!shell.get("available").boolValue()) {
+                throw new FileFailure(shell.get("reason").string());
+            }
+        }
+        Parcel input = Parcel.obtain();
+        Parcel output = Parcel.obtain();
+        try {
+            authorize.run();
+            input.writeInterfaceToken(TorchUserService.DESCRIPTOR);
+            if (code == TorchUserService.SET) {
+                input.writeInt(on ? 1 : 0);
+            }
+            if (!binder.transact(code, input, output, 0)) {
+                throw new FileFailure("请更新手机端手电筒服务");
+            }
+            output.readException();
+            Json result = Json.parse(output.readString());
+            if (result.get("error") != null) {
+                throw new FileFailure(result.get("error").string());
+            }
+            return result;
+        } catch (android.os.RemoteException | SecurityException error) {
+            throw new FileFailure("手电筒连接中断；请核实结果，不要自动重做");
+        } finally {
+            input.recycle();
+            output.recycle();
+        }
     }
 }
