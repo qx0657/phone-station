@@ -8,8 +8,8 @@ import android.os.Process;
 import android.os.RemoteException;
 
 /**
- * 剪贴板、shell 和手电共用的 Shizuku 进程。按调用方写入的接口名分给原来的实现。
- * 不是导出的 Android Service。终端和投屏仍使用各自的会话进程。
+ * 剪贴板、shell、手电、终端和投屏共用的 Shizuku 进程。按调用方写入的接口名分给原来的实现。
+ * 不是导出的 Android Service。终端或投屏失败只停自己的子进程；整个进程退出时灯和剪贴板一起结束。
  */
 public final class HelperUserService extends Binder {
     private static final int DESTROY = 16_777_115;
@@ -17,12 +17,16 @@ public final class HelperUserService extends Binder {
     private final ClipboardUserService clipboard;
     private final ShellUserService shell;
     private final TorchUserService torch;
+    private final TerminalUserService terminal;
+    private final ScreenUserService screen;
 
     public HelperUserService(Context context) {
         ownerUid = context.getApplicationInfo().uid;
         clipboard = new ClipboardUserService(context);
         shell = new ShellUserService(context);
         torch = new TorchUserService(context);
+        terminal = new TerminalUserService(context, false);
+        screen = new ScreenUserService(context, false);
     }
 
     @Override
@@ -32,6 +36,8 @@ public final class HelperUserService extends Binder {
             if (caller != ownerUid && caller != Process.myUid()) {
                 throw new SecurityException("只允许手机工位或 Shizuku 停止助手");
             }
+            terminal.releaseChild();
+            screen.releaseChild();
             System.exit(0);
             return true;
         }
@@ -42,6 +48,12 @@ public final class HelperUserService extends Binder {
             return true;
         }
         if (forward(torch, TorchUserService.DESCRIPTOR, code, data, reply, flags)) {
+            return true;
+        }
+        if (forward(terminal, TerminalUserService.DESCRIPTOR, code, data, reply, flags)) {
+            return true;
+        }
+        if (forward(screen, ScreenUserService.DESCRIPTOR, code, data, reply, flags)) {
             return true;
         }
         return super.onTransact(code, data, reply, flags);

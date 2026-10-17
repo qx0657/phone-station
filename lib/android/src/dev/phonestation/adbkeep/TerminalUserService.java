@@ -23,13 +23,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipFile;
 
-/** Shizuku-owned PTY helper. Only the owning application can call this binder. */
+/** PTY helper inside the shared privileged process. RELEASE stops the PTY and leaves the process up. */
 public final class TerminalUserService extends Binder {
     static final String DESCRIPTOR = "dev.phonestation.adbkeep.TerminalUserService";
     static final int CALL = IBinder.FIRST_CALL_TRANSACTION;
+    static final int RELEASE = CALL + 1;
     static final int DESTROY = 16_777_115;
     private final Context context;
     private final int ownerUid;
+    private final boolean exitOnDestroy;
     private final ExecutorService io = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "station-terminal-io"); thread.setDaemon(true); return thread;
     });
@@ -37,15 +39,24 @@ public final class TerminalUserService extends Binder {
     private BufferedReader reader;
     private OutputStreamWriter writer;
 
-    public TerminalUserService(Context context) {
-        this.context = context; ownerUid = context.getApplicationInfo().uid;
+    public TerminalUserService(Context context) { this(context, true); }
+
+    TerminalUserService(Context context, boolean exitOnDestroy) {
+        this.context = context; ownerUid = context.getApplicationInfo().uid; this.exitOnDestroy = exitOnDestroy;
         attachInterface(null, DESCRIPTOR);
     }
+
+    synchronized void releaseChild() { stop(); }
 
     @Override protected synchronized boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
         if (code == DESTROY) {
             if (Binder.getCallingUid() != ownerUid && Binder.getCallingUid() != Process.myUid()) { throw new SecurityException("只允许手机工位或 Shizuku 停止服务"); }
-            stop(); System.exit(0); return true;
+            stop(); if (exitOnDestroy) { System.exit(0); } return true;
+        }
+        if (code == RELEASE) {
+            data.enforceInterface(DESCRIPTOR);
+            if (Binder.getCallingUid() != ownerUid) { throw new SecurityException("只允许手机工位调用"); }
+            stop(); reply.writeNoException(); return true;
         }
         if (code != CALL) { return super.onTransact(code, data, reply, flags); }
         data.enforceInterface(DESCRIPTOR);

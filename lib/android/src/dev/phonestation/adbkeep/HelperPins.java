@@ -10,6 +10,8 @@ final class HelperPins {
     static final String CLIPBOARD = "clipboard";
     static final String TORCH = "torch";
     static final String SHELL = "shell";
+    static final String TERMINAL = "terminal";
+    static final String SCREEN = "screen";
 
     private final LinkedHashSet<String> pins = new LinkedHashSet<>();
     private boolean up;

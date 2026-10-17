@@ -1,18 +1,14 @@
 package dev.phonestation.adbkeep;
 
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import rikka.shizuku.Shizuku;
+import java.util.HashSet;
+import java.util.Set;
 
-/** A dedicated non-daemon UserService, bound only after an explicit open. */
+/** 终端会话走共用的特权助手。这一路失败只停 PTY，不退出仍被灯或剪贴板持有的进程。 */
 final class ShizukuTerminal {
-    private static Connection connection;
-    private static Shizuku.UserServiceArgs serviceArgs;
+    private static final Set<String> sessions = new HashSet<>();
 
     static synchronized Json call(Context context, Json request, boolean start) {
         return call(context, request, start, () -> {});
@@ -22,55 +18,73 @@ final class ShizukuTerminal {
         authorize.run();
         String id = request.get("sessionId").string();
         Json status = ShizukuShell.status(context);
-        if (!status.get("available").boolValue()) { close(); throw new FileFailure(status.get("reason").string()); }
-        if (connection == null || connection.binder == null || !connection.binder.isBinderAlive()) {
-            close();
+        if (!status.get("available").boolValue()) { dropRole(); throw new FileFailure(status.get("reason").string()); }
+        IBinder binder = liveBinder();
+        if (binder == null) {
+            sessions.remove(id);
             if (!start) { return TerminalJobs.ended(id, "lost", "原会话已结束，不会重新创建"); }
-            serviceArgs = new Shizuku.UserServiceArgs(new ComponentName(context, TerminalUserService.class))
-                    .tag("station-terminal").processNameSuffix("terminal").daemon(false).version(61);
-            connection = new Connection();
-            try {
-                UsageCounters.shared.helperStart("terminal");
-                Shizuku.bindUserService(serviceArgs, connection);
-                if (!connection.ready.await(5, TimeUnit.SECONDS) || connection.binder == null) {
-                    close(); throw new FileFailure("远程终端服务没有连上");
-                }
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt(); close(); throw new FileFailure("终端创建结果未确认，请查询原编号");
-            } catch (RuntimeException error) { close(); throw new FileFailure("终端创建结果未确认，请查询原编号"); }
+            try { binder = PrivilegedHelper.acquire(context, HelperPins.TERMINAL); }
+            catch (RuntimeException error) {
+                sessions.clear();
+                PrivilegedHelper.release(HelperPins.TERMINAL);
+                if (error instanceof FileFailure) { throw error; }
+                throw new FileFailure("终端创建结果未确认，请查询原编号");
+            }
         }
         Parcel input = Parcel.obtain(), output = Parcel.obtain();
         try {
             authorize.run();
             input.writeInterfaceToken(TerminalUserService.DESCRIPTOR);
             input.writeString(request.emit());
-            if (!connection.binder.transact(TerminalUserService.CALL, input, output, 0)) { throw new FileFailure("请更新手机工位以支持远程终端"); }
+            if (!binder.transact(TerminalUserService.CALL, input, output, 0)) { dropRole(); throw new FileFailure("请更新手机工位以支持远程终端"); }
             output.readException();
             Json result = Json.parse(output.readString());
-            if (result.get("error") != null) { throw new FileFailure(result.get("error").string()); }
+            if (result.get("error") != null) { dropRole(); throw new FileFailure(result.get("error").string()); }
+            track(id, request.get("op").string(), result);
             return result;
         } catch (android.os.RemoteException | SecurityException error) {
-            close(); throw new FileFailure("终端连接中断；查询原会话，不重发输入");
+            dropRole(); throw new FileFailure("终端连接中断；查询原会话，不重发输入");
         } finally { input.recycle(); output.recycle(); }
     }
-    static synchronized void close() {
-        if (connection != null && serviceArgs != null) {
-            UsageCounters.shared.helperStop("terminal");
-            try { Shizuku.unbindUserService(serviceArgs, connection, true); } catch (RuntimeException ignored) {}
-        }
-        connection = null; serviceArgs = null;
-    }
-    static synchronized void closeSessions(Context context, java.util.Set<String> ids) {
-        if (connection == null) { return; }
+
+    static synchronized void close() { dropRole(); }
+
+    static synchronized void closeSessions(Context context, Set<String> ids) {
+        if (liveBinder() == null) { sessions.clear(); return; }
         for (String id : ids) {
             try { call(context, TerminalJobs.request("close", id), false); }
-            catch (FileFailure ignored) { /* Never bind a service during revocation. */ }
+            catch (FileFailure ignored) { /* 撤销时不重新绑定。 */ }
         }
     }
-    private static final class Connection implements ServiceConnection {
-        final CountDownLatch ready = new CountDownLatch(1);
-        volatile IBinder binder;
-        public void onServiceConnected(ComponentName name, IBinder service) { binder = service; ready.countDown(); }
-        public void onServiceDisconnected(ComponentName name) { binder = null; ready.countDown(); }
+
+    private static IBinder liveBinder() {
+        IBinder binder = PrivilegedHelper.binder();
+        return PrivilegedHelper.holds(HelperPins.TERMINAL) && binder != null ? binder : null;
+    }
+
+    private static void track(String id, String op, Json result) {
+        String state = result.get("state") == null ? "" : result.get("state").string();
+        if ("open".equals(op) && "running".equals(state)) { sessions.add(id); }
+        if ("closed".equals(state) || "exited".equals(state) || "expired".equals(state) || "lost".equals(state)) { sessions.remove(id); }
+        if (sessions.isEmpty() && PrivilegedHelper.holds(HelperPins.TERMINAL)) { releaseBinder(); }
+    }
+
+    private static void dropRole() {
+        sessions.clear();
+        releaseBinder();
+    }
+
+    private static void releaseBinder() {
+        IBinder binder = PrivilegedHelper.binder();
+        if (binder != null && PrivilegedHelper.holds(HelperPins.TERMINAL)) {
+            Parcel input = Parcel.obtain(), output = Parcel.obtain();
+            try {
+                input.writeInterfaceToken(TerminalUserService.DESCRIPTOR);
+                if (binder.transact(TerminalUserService.RELEASE, input, output, 0)) { output.readException(); }
+            } catch (RuntimeException | android.os.RemoteException ignored) {
+                // 进程已经退出时，放开持有者即可。
+            } finally { input.recycle(); output.recycle(); }
+        }
+        PrivilegedHelper.release(HelperPins.TERMINAL);
     }
 }

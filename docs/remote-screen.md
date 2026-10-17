@@ -18,7 +18,7 @@ Android 64 起必须在手机远程中继页开启「投屏与操控」，默认
 
 ## 实现与生命周期
 
-手机非 daemon Shizuku UserService 从 APK 提取已固定摘要的 scrcpy-server 4.1 和 Android/arm64 视频桥到 shell 所有的 0700 目录。Jar 只读，辅助程序校验摘要后执行；角色令牌经 Binder 和 stdin 传入内存，不进命令参数或临时文件。DNS 在 Android 应用中解析，避免纯 Go 在 Android 上没有系统 DNS 配置的问题。辅助程序 stderr 用单独线程排空，不使用桌面 JDK 的 `ProcessBuilder.Redirect.DISCARD`；Android 15 没有该字段，桌面 `javac --release 17` 的编译通过不能证明 ART 支持它。
+手机从 APK 提取已固定摘要的 scrcpy-server 4.1 和 Android/arm64 视频桥到 shell 所有的 0700 目录。采集走剪贴板、shell、手电共用的助手进程。Android 72 已装上，没有单独的投屏进程，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。Jar 只读，辅助程序校验摘要后执行；角色令牌经 Binder 和 stdin 传入内存，不进命令参数或临时文件。DNS 在 Android 应用中解析，避免纯 Go 在 Android 上没有系统 DNS 配置的问题。辅助程序 stderr 用单独线程排空，不使用桌面 JDK 的 `ProcessBuilder.Redirect.DISCARD`；Android 15 没有该字段，桌面 `javac --release 17` 的编译通过不能证明 ART 支持它。
 
 打开会话时唤醒手机，息屏时间继续使用既有设置。scrcpy 用 MediaCodec 编码 H.264 与 AAC，默认最长边 1600、30 fps、视频 2 Mbps、音频 128 kbps。独立连接传输完整编码帧；单个消息最多 4 MiB，写入阻塞超过 5 秒时结束，避免堆积旧画面或丢失参考帧。手机每 5 秒验证视频连接，最长会话为 1 小时。输入只接受按键、文字、触摸、滚动和返回消息，不转发 scrcpy 的剪贴板同步或文件操作。
 

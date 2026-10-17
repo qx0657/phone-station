@@ -19,8 +19,11 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1330,6 +1333,227 @@ func failureCount(s *Server, ip string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.failures[ip])
+}
+
+func TestReverseProxyPassesUpgradeAndMediaFrame(t *testing.T) {
+	server, directClient, base, _ := startTLS(t)
+	proxyBase, proxyClient, proxyIP := startReverseProxy(t, base)
+
+	direct := dial(t, directClient, wsURL(base))
+	helloParts(t, direct)
+	if got := unauthKeys(server); len(got) != 1 || got[0] != "127.0.0.1" {
+		t.Fatalf("direct address %v", got)
+	}
+	direct.CloseNow()
+	waitUnauth(t, server, 0)
+
+	proxied := dial(t, proxyClient, wsURL(proxyBase))
+	helloParts(t, proxied)
+	if got := unauthKeys(server); len(got) != 1 || got[0] != proxyIP {
+		t.Fatalf("proxy address %v, want %s", got, proxyIP)
+	}
+	proxied.CloseNow()
+	waitUnauth(t, server, 0)
+
+	server.SetTrustedProxies([]string{proxyIP})
+	trusted := dial(t, proxyClient, wsURL(proxyBase))
+	helloParts(t, trusted)
+	if got := unauthKeys(server); len(got) != 1 || got[0] != "127.0.0.1" {
+		t.Fatalf("forwarded address %v", got)
+	}
+	trusted.CloseNow()
+	waitUnauth(t, server, 0)
+	server.SetTrustedProxies(nil)
+
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	enrollMac(t, proxyClient, proxyBase, code, mac)
+	code, err = server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone := newIdentity(t)
+	enrollDevices(t, proxyClient, proxyBase, code, phone, 2)
+	phoneMedia := authMedia(t, proxyClient, proxyBase, phone)
+	macMedia := authMedia(t, proxyClient, proxyBase, mac)
+	if got := readJSON(t, phoneMedia); got.Type != "presence" || got.Purpose != "media" {
+		t.Fatalf("presence %#v", got)
+	}
+	payload := bytes.Repeat([]byte{0x5a}, link.MediaPayload)
+	raw, err := link.Encode(link.Frame{Kind: link.KindMessage, Peer: phone.id, Payload: payload}, link.MediaPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != link.HeaderSize+link.MediaPayload {
+		t.Fatalf("frame bytes %d", len(raw))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := macMedia.Write(ctx, websocket.MessageBinary, raw); err != nil {
+		t.Fatal(err)
+	}
+	phoneMedia.SetReadLimit(int64(link.HeaderSize + link.MediaPayload))
+	frame, err := readFrame(ctx, phoneMedia, link.MediaPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Kind != link.KindMessage || frame.Peer != mac.id || !bytes.Equal(frame.Payload, payload) {
+		t.Fatalf("delivered kind=%d peer=%x bytes=%d", frame.Kind, frame.Peer, len(frame.Payload))
+	}
+}
+
+func startReverseProxy(t *testing.T, backend string) (string, *http.Client, string) {
+	t.Helper()
+	target, err := url.Parse(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyIP := outboundIPv4(t)
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(req *httputil.ProxyRequest) {
+			req.SetURL(target)
+			req.SetXForwarded()
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(proxyIP)}}
+				return dialer.DialContext(ctx, network, addr)
+			},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12},
+		},
+		ErrorLog: log.New(io.Discard, "", 0),
+	}
+	cert, pool := proxyCert(t)
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := &http.Server{Handler: proxy, ReadHeaderTimeout: 5 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
+	go httpServer.Serve(listener)
+	t.Cleanup(func() { httpServer.Close() })
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs: pool, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12,
+	}}}
+	return "https://" + listener.Addr().String(), client, proxyIP
+}
+
+func outboundIPv4(t *testing.T) string {
+	t.Helper()
+	conn, err := net.Dial("udp", "192.168.0.1:9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ip, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err != nil || net.ParseIP(ip) == nil || net.ParseIP(ip).To4() == nil || ip == "127.0.0.1" {
+		t.Fatalf("source %s", conn.LocalAddr())
+	}
+	return ip
+}
+
+func proxyCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: mustPKCS8(t, key)}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})) {
+		t.Fatal("pool")
+	}
+	return cert, pool
+}
+
+func enrollDevices(t *testing.T, client *http.Client, base, code string, who identity, devices int) *websocket.Conn {
+	t.Helper()
+	conn := dial(t, client, wsURL(base))
+	_, station, nonce := helloParts(t, conn)
+	rawCode, err := hex.DecodeString(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := link.EnrollMessage(station, nonce, who.id[:], rawCode, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, message{
+		Type: "enroll", Code: code, PublicKey: base64.StdEncoding.EncodeToString(who.spki),
+		Name: "办公室", Kind: "mac", Purpose: "main", Sig: sign(t, who.key, transcript),
+	})
+	ready := readJSON(t, conn)
+	if ready.Type != "ready" || ready.RegistryVersion == 0 {
+		t.Fatalf("ready %#v", ready)
+	}
+	registry := readJSON(t, conn)
+	if registry.Type != "registry" || len(registry.Devices) != devices {
+		t.Fatalf("registry %#v", registry)
+	}
+	return conn
+}
+
+func authMedia(t *testing.T, client *http.Client, base string, who identity) *websocket.Conn {
+	t.Helper()
+	conn := dial(t, client, wsURL(base))
+	_, station, nonce := helloParts(t, conn)
+	body, err := link.RelayAuthMessage(station, nonce, who.id[:], "media")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, message{
+		Type: "auth", DeviceID: hex.EncodeToString(who.id[:]), Purpose: "media", App: "test",
+		Sig: sign(t, who.key, body),
+	})
+	if got := readJSON(t, conn); got.Type != "ready" {
+		t.Fatalf("media %#v", got)
+	}
+	return conn
+}
+
+func unauthKeys(server *Server) []string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	keys := make([]string, 0, len(server.unauth))
+	for key := range server.unauth {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func waitUnauth(t *testing.T, server *Server, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(unauthKeys(server)) == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unauth %v", unauthKeys(server))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func mustHex(t *testing.T, value string) []byte {

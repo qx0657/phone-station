@@ -390,7 +390,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 ## 实施步骤
 
-去掉轮询与多余特权进程的整改（[改造路线](roadmap.md)的 P1）不依赖本设计：L0–L3 可以与它并行，L4 切换网关之前须完成 P1。
+去掉轮询与多余特权进程的整改（[改造路线](roadmap.md)的 P1）不依赖本设计。L0–L3 已经与它并行写进源码。约 24 小时 `procstats` 不再挡住后续，见[不再等待运行时长](history/validation.md#2026-10-17-不再等待运行时长)。Android 71 / Mac 37 上复采 Mac 35 / Android 70 那组行为已经通过，见[复采](history/validation.md#2026-10-17-android-71--mac-37-复采常驻助手与-wi-fi-短断)。共用助手已装到 Android 72，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。L4 这次没有开始，切换现有网关和手机 MCP 仍走[切换与回滚](#切换与回滚)。
 
 | 步骤 | 内容 | 本机验收 | 真机验收 |
 | --- | --- | --- | --- |
@@ -421,7 +421,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥：不能。2026-10-16 本机自检，没有钥匙串访问组 entitlement 的临时签名程序，以及 `codesign --sign -` 的临时 App，创建 Secure Enclave P-256 都返回 -34018。两者改用登录钥匙串中的软件 P-256，签名和校验成功，名称以 `phone-station-selftest-` 开头的测试密钥已删除。没有系统授权弹窗。`scripts/build-mac-app.sh` 同样是临时签名，仓库没有 entitlement。正在使用的 App 没有替换，也没有拿它做这次自检。P2 接入通道前走这条软件密钥回退。
 2. PGT-AN20 上 Keystore P-256 是否走 StrongBox，以及签名耗时。诊断行已在受 DUMP 权限保护的服务 dump 里，形如 `deviceKey strongBox=true signMs=0`，不包含密钥或签名。别名 `phone-station-device-p256` 不存在时，打开密钥时会创建它，生成时间不算进 `signMs`。StrongBox 生成失败回退普通 Keystore，本机有这条路径的用例。API 31 以下无法从 KeyInfo 区分 StrongBox，已有密钥会记成 false。2026-10-16 在 PGT-AN20 / Android 70 上读到 `strongBox=false`：密钥在普通 Keystore；签名第一次 22 ms，之后四次中位数 16.5 ms，后台签名可行。
-3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。
-4. 手机上 Java-WebSocket 服务端模式的线程与内存，与现有 `McpHttp` 对比。
-5. 个人部署的反向代理能否透传 `/v2/link` 的 WebSocket 升级和 256 KiB 的二进制帧，以及中继看到的来源地址是不是代理自己。是的话，加入限流要配置可信代理，否则所有人共用一个计数。
+3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。体积已在本机量过，拍照解码这次没做。临时加入 Maven 上的 ZXing `core` 3.5.3（SHA-256 `8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82`），只含解码，没有相机类。打包方式与 `lib/android/build.sh` 相同：当前资源、应用类、Shizuku 与 Java-WebSocket，再用 `d8` 和 `zipalign -f 4`。没有 ZXing 时对齐后的未签名包是 424549 字节，加入后是 684917 字节，增加 260368 字节，两边都只有一个 `classes.dex`。测完已删掉 jar 和临时包，仓库没有留下这条依赖，也没有安装。荣耀系统相机这次没有在手机上拍，`ACTION_IMAGE_CAPTURE` 的真机解码还没做。2026-10-17 安装 Android 72 时仍没有做。
+4. 手机上 Java-WebSocket 服务端模式的线程与内存，与现有 `McpHttp` 对比。只在测试进程里比过，没有换成 `McpHttp`，也没有装进手机。`WebSocketServerCostTest` 用的是已经在 `RelaySocket` 里的 Java-WebSocket 1.6.0。这台电脑 12 个处理器，JVM 默认线程栈 2048 KiB。`McpHttp` 空闲时多 1 条 `station-mcp`；一次 POST 之后是这条加上 1 条 `station-mcp-request`，共 2 条。Java-WebSocket 服务端空闲是 14 条：1 条 `WebSocketSelector`、12 条 `WebSocketWorker`（等于处理器数）、1 条 `connectionLostChecker`。一次 WebSocket 升级没有再加线程。三次 GC 后的堆增量，`McpHttp` 是 304432 字节，服务端是 224416 字节；连跑两次数字相同。堆本身服务端更小，线程数多，每条线程最多可用 2048 KiB 栈，栈不会一开始全部提交。服务端空闲线程数是 2 加处理器数，手机上会随核数变化，这次没有在手机上数。结论是不把 `McpHttp` 换成这个服务端模式。
+5. 个人部署的反向代理能否透传 `/v2/link` 的 WebSocket 升级和 256 KiB 的二进制帧，以及中继看到的来源地址是不是代理自己。能透传。来源在不信任代理时是代理自己，不是真实客户端。本机 `TestReverseProxyPassesUpgradeAndMediaFrame` 用 `go test -race` 通过。测试服务器只听 `127.0.0.1`，反向代理也只听 `127.0.0.1`，再从本机出口 IPv4 拨进去，让中继看见的不是回环地址。未配置可信代理时，未认证来源记成这个出口地址。只在这个测试进程里把该地址交给 `SetTrustedProxies` 后，来源改为 `X-Forwarded-For` 里的 `127.0.0.1`。随后清掉可信代理。两边都完成 media 认证后，载荷正好 256 KiB 的二进制帧可以送达，整帧是 32 字节头加这段载荷。未认证读上限仍是 8192，这种帧不能在 media 认证前通过。`PHONE_RELAY_TRUSTED_PROXIES` 没有配到正在运行的中继 5，公网没有动，这个测试服务器也没有对着手机或公网。部署中继 6 时如果前面有代理，要把代理地址配进可信代理，否则同一来源共用未认证限额。
 6. adb 能否把本地转发绑定到权限 0600 的 Unix 套接字（`localfilesystem:`），避免其他本机用户连接转发端口。2026-10-16 实测能建立，但 adb 创建的套接字是 0755，不能直接当作访问控制；要么放进 0700 的私有目录，要么仍靠链路的双向设备签名。

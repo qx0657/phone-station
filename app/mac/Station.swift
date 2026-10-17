@@ -329,7 +329,9 @@ final class Station: ObservableObject {
     }
 
     private func syncLocalMcp() {
-        link.noteLocalMcp((mcp.requestAvailable ? controlPreferences?.localMcp : nil) ?? link.connectionPreferences?.localMcp)
+        let enabled = (mcp.requestAvailable ? controlPreferences?.localMcp : nil) ?? link.connectionPreferences?.localMcp
+        link.noteLocalMcp(enabled)
+        mcp.noteLocalMcp(enabled)
     }
 
     /// MCP 读不到开关、adb 仍在线时，连上和打开面板各读一次，不恢复每秒轮询。

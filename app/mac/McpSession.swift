@@ -37,6 +37,7 @@ final class McpSession: ObservableObject {
     private var routeDirty = false
     private var lastRouteRefresh = Date.distantPast
     private var lastSerial: String?
+    private var localMcpOn: Bool?
     private var routeRetry: Task<Void, Never>?
     private var routeRetryStep = 0
     private var copyFeedback: Task<Void, Never>?
@@ -98,6 +99,23 @@ final class McpSession: ObservableObject {
             refreshRoute()
         }
         refreshStatus()
+    }
+
+    /// 本机 MCP 从关到开、序列号还在、本地仍不在线时才补一次转发刷新。
+    /// 关着的时候退避不会启动，重新打开也不会再走「从在线变成离线」那条边。
+    nonisolated static func shouldRefreshAfterLocalMcp(previous: Bool?, enabled: Bool?, serial: String?, localOnline: Bool) -> Bool {
+        previous == false && enabled == true && serial?.isEmpty == false && !localOnline
+    }
+
+    /// 记下本机 MCP 开关。只有从关到开且本地仍不在线时刷新转发。
+    func noteLocalMcp(_ enabled: Bool?) {
+        let previous = localMcpOn
+        if let enabled {
+            localMcpOn = enabled
+        }
+        guard Self.shouldRefreshAfterLocalMcp(previous: previous, enabled: enabled,
+                                               serial: lastSerial, localOnline: localOnline) else { return }
+        refreshRoute()
     }
 
     /// 刷新转发后本地仍不在线时的下一次间隔。手机刚恢复时读令牌可能超过 2 秒上限。

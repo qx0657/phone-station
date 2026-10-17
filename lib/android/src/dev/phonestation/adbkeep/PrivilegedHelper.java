@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 import rikka.shizuku.Shizuku;
 
-/** 剪贴板、手电和 shell 共用一个非 daemon 进程。没有持有者时解除绑定，进程退出。 */
+/** 剪贴板、手电、shell、终端和投屏共用一个非 daemon 进程。没有持有者时解除绑定，进程退出。 */
 final class PrivilegedHelper {
     static final long SHELL_IDLE_MS = 30_000L;
     private static final Object LOCK = new Object();
@@ -45,7 +45,7 @@ final class PrivilegedHelper {
             }
             binding = true;
             pendingArgs = new Shizuku.UserServiceArgs(new ComponentName(context, HelperUserService.class))
-                    .tag("station-helper").processNameSuffix("helper").daemon(false).version(70);
+                    .tag("station-helper").processNameSuffix("helper").daemon(false).version(71);
             args = pendingArgs;
             pending = new Connection();
             connection = pending;

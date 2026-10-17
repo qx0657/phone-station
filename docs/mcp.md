@@ -143,7 +143,7 @@ appops set --uid dev.phonestation.adbkeep MANAGE_EXTERNAL_STORAGE allow
 
 ### 交互式 PTY
 
-手机 61 起新增 `station_terminal_open/read/input/resize/close`。创建前保存唯一 `sessionId`，open 返回后台创建回执，用 read 查询原会话；input 用连续序号与十六进制字节，read 返回不消耗的输出游标、遗漏字节数和已接收序号。输入应答丢失后只查原序号，不重发。独立 Shizuku UserService 只允许应用 UID 调用，PTY 辅助程序运行身份为 shell/root。查询不启动或重新绑定执行服务，关闭、服务停止与租期到期会清理原会话。
+手机 61 起新增 `station_terminal_open/read/input/resize/close`。创建前保存唯一 `sessionId`，open 返回后台创建回执，用 read 查询原会话；input 用连续序号与十六进制字节，read 返回不消耗的输出游标、遗漏字节数和已接收序号。输入应答丢失后只查原序号，不重发。PTY 辅助程序只允许应用 UID 调用，运行身份为 shell/root。它和剪贴板、shell、手电、投屏在同一个助手进程里。Android 72 已装上，没有单独的终端进程，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。查询不启动或重新绑定执行服务，关闭、服务停止与租期到期会清理原会话。
 
 界面、CLI、租期、输出范围与恢复方法见 [远程交互终端](remote-ops.md#远程交互终端)。单次 `station_shell_*` 的标准输入关闭与进程组清理语义独立保留。只有 `station_terminal_read` 加入网关的只读重放白名单，其他 terminal 操作不自动重放；全部 terminal 工具要求 `shell` 客户端权限。
 

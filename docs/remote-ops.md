@@ -53,7 +53,7 @@ Android 64 起需在手机开启「Shell 与安装」，APK 上传和核验还�
 ./scripts/terminal.sh --close <32位会话编号>
 ```
 
-手机使用独立 Shizuku UserService 和 PTY，保留当前目录、环境变量与交互输入，支持方向键、Tab、Ctrl-C、持续日志和窗口缩放。初始目录 `/`，`TERM=xterm-256color`。Ctrl-]、关闭终端窗口或输入 `exit` 结束会话；关闭会清理同一终端会话的前台与后台进程，主动用 `setsid` 脱离会话的进程不在清理范围内。没有 Shizuku 授权时拒绝操作，不启动 Shizuku、不请求权限、不回退应用 UID 或 adb。
+手机使用 PTY，保留当前目录、环境变量与交互输入，支持方向键、Tab、Ctrl-C、持续日志和窗口缩放。PTY 放在剪贴板、shell、手电共用的助手进程中。Android 72 已装上，没有单独的终端进程，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。初始目录 `/`，`TERM=xterm-256color`。Ctrl-]、关闭终端窗口或输入 `exit` 结束会话；关闭会清理同一终端会话的前台与后台进程，主动用 `setsid` 脱离会话的进程不在清理范围内。没有 Shizuku 授权时拒绝操作，不启动 Shizuku、不请求权限、不回退应用 UID 或 adb。
 
 创建前将唯一编号保存到 Mac `~/.phonestation/terminals/`，目录 0700、回执 0600，不保存令牌、输入正文或输出。手机复用私有的后台任务回执去重创建；`station_terminal_read` 查询原编号，不绑定或创建服务。短暂网络中断时持续查询同一会话，Mac 重启后可 `--resume`；手机应用或 Shizuku 重启后会话终止，不重新创建或重发命令。`missing` 或 `lost` 不能证明之前的输入没有执行。
 

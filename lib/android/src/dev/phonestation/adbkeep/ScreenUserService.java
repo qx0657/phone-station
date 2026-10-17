@@ -7,22 +7,34 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
-/** Privileged capture is owned by a non-daemon Shizuku service, not a shell job. */
+/** Capture inside the shared privileged process. RELEASE stops capture and leaves the process up. */
 public final class ScreenUserService extends Binder {
     static final String DESCRIPTOR = "dev.phonestation.adbkeep.ScreenUserService";
     static final int CALL = IBinder.FIRST_CALL_TRANSACTION;
+    static final int RELEASE = CALL + 1;
     private final Context context;
     private final int ownerUid;
+    private final boolean exitOnDestroy;
     private java.lang.Process helper;
     private OutputStream lease;
     private String id = "";
     private volatile String state = "idle";
     private volatile long frames;
-    public ScreenUserService(Context context) { this.context = context; ownerUid = context.getApplicationInfo().uid; attachInterface(null, DESCRIPTOR); }
+    public ScreenUserService(Context context) { this(context, true); }
+    ScreenUserService(Context context, boolean exitOnDestroy) {
+        this.context = context; ownerUid = context.getApplicationInfo().uid; this.exitOnDestroy = exitOnDestroy;
+        attachInterface(null, DESCRIPTOR);
+    }
+    synchronized void releaseChild() { stop(); }
     @Override protected synchronized boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
         if (code == 16_777_115) {
             if (Binder.getCallingUid() != ownerUid && Binder.getCallingUid() != Process.myUid()) { throw new SecurityException("owner"); }
-            stop(); System.exit(0); return true;
+            stop(); if (exitOnDestroy) { System.exit(0); } return true;
+        }
+        if (code == RELEASE) {
+            data.enforceInterface(DESCRIPTOR);
+            if (Binder.getCallingUid() != ownerUid) { throw new SecurityException("owner"); }
+            stop(); reply.writeNoException(); return true;
         }
         if (code != CALL) { return super.onTransact(code, data, reply, flags); }
         data.enforceInterface(DESCRIPTOR);

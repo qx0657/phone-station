@@ -35,7 +35,7 @@ websocket_jars=("${(@f)$(python3 "$here/websocket_deps.py")}")
 websocket_cp=${(j.:.)websocket_jars}
 
 print -r -- "检查打开时机…"
-javac --release 17 -d "$work/policy" \
+javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/KeeperPolicy.java" \
   "$here/src/dev/phonestation/adbkeep/WirelessControl.java" \
   "$here/src/dev/phonestation/adbkeep/InstallRecovery.java" \
@@ -122,6 +122,7 @@ javac --release 17 -d "$work/policy" \
   "$here/test/ScreenCaptureTest.java" \
   "$here/test/McpProtocolTest.java" \
   "$here/test/McpHttpTest.java" \
+  "$here/test/WebSocketServerCostTest.java" \
   "$here/test/McpLoopbackTest.java" \
   "$here/test/OperationJobsTest.java" \
   "$here/test/TerminalJobsTest.java" \
@@ -164,6 +165,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.StayAwakeTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ScreenCaptureTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpProtocolTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpHttpTest
+java -cp "$work/policy:$websocket_cp" dev.phonestation.adbkeep.WebSocketServerCostTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpLoopbackTest
 java -cp "$work/policy" dev.phonestation.adbkeep.OperationJobsTest
 java -cp "$work/policy" dev.phonestation.adbkeep.TerminalJobsTest

@@ -6,8 +6,8 @@
 
 | 组件 | 当前源码目标 | 状态与证据 |
 |---|---|---|
-| Android | 71 | 2026-10-17 用 `362e30d` 同版本再装，保留数据，远程 MCP 返回 71，见 [同版本再装](#android-71-同版本再装2026-10-17) |
-| Mac / 本机网关 | 0.1.0 (36) | 已替换并从正式安装目录运行；USB 调试重新打开后本地与远程都在线 |
+| Android | 72 | 2026-10-17 从未提交工作区保留数据装上共用助手，远程 MCP 返回 72，见 [共用助手](#android-72-共用助手2026-10-17) |
+| Mac / 本机网关 | 0.1.0 (37) | 2026-10-17 已替换并从正式安装目录运行；重新打开本地 MCP 后菜单栏自己刷新，本地与远程都在线，见 [Mac 37](#mac-37-重新打开本地-mcp2026-10-17) |
 | 公网中继 | 5 / durable-epochs-v1 | 已部署，持久状态保留；控制 WSS、事件握手与心跳核实 |
 
 上一轮部署记录为 Android 68、Mac 30、中继 4，本轮切换前实测已安装 Mac 31，并保留其完整备份。Android 安装与自动恢复结果见 [68 版记录](history/adb-keep.md#68-版常驻通知分层)，新版通知视觉与点击仍待验收；Mac 当时已核对签名、安装目录摘要与运行进程，两条连接保留；中继 4 当时已核对运行摘要、持久目录、TLS 和请求隔离。
@@ -45,6 +45,28 @@ P1 降耗与第二批审阅的三处修复：僵死探测后能复原、本地�
 - 构建：`android.sh --remote` 先跑 `lib/android/build.sh`，Java 测试通过。APK SHA-256 `ec57b2dce09bf40e2c96a960c40d7ca1655c63f3f3b1eefe18249911a760d01e`。
 - 安装任务 `1a703c401a8449cb8655c6183fae8304`，保留数据，`verified: true`、`completed: true`。先前主进程 365，装完后 12374，前台服务和主页都起来了，远程版本 71。
 - 装完后仍是 `192.168.0.108:39347` 这一条 `device`。本地与远程都在线。Shizuku 13 仍是 granted。没有卸载，没有把 `adb_wifi_enabled` 写成 0，公网中继没有改。
+
+## Mac 37 重新打开本地 MCP（2026-10-17）
+
+把「本机 MCP 从关到开且本地仍不在线时刷新转发」装进正在使用的 Mac。Android 仍是 71，中继仍是 5。源码在 `b2c674a` 之上的未提交工作区，构建清单 `dirtyWorkingTree: true`。构建前 `scripts/check.sh` 通过，含 22 个 Swift 测试和 Mac 全量源码编译。然后才把 `CFBundleVersion` 从 36 改为 37，`CFBundleShortVersionString` 仍是 0.1.0。
+
+- 构建：`scripts/build-mac-app.sh`。整包清单 SHA-256 `dc41eac9ddebce8de66373d19c4441df9904355f96a353641a4869e7071d3ce0`。深层严格签名通过。钥匙串助手字节与 Mac 36 相同（SHA-256 `b4992b25…`）。网关程序随包重新编译。这个脚本会在电脑上编进随包 APK，没有安装到手机。
+- 安装：先退出 Mac 36 和它的网关，归档到 `~/Library/Application Support/Phone Station/Backups/手机工位-20261017-021745-53150ae7.zip`，再换上 Mac 37。安装目录清单与构建一致，深层严格签名通过。App 与网关都从 `/Applications/手机工位.app` 运行。换上之后、拨开关之前，本地与远程都已在线，转发是 `tcp:18766 tcp:8765`。
+- 验收：同一条无线 adb `192.168.0.108:39347`。只关掉再打开「本地 MCP 接入」。关掉后本地离线、远程仍在，菜单栏是「运行中 · 远程」，没有写成暂停。打开后约 5.7 秒菜单栏自己跑了 `mcp.sh status`，本地恢复。见[重新打开后的刷新](history/validation.md#2026-10-17-重新打开本地-mcp-后菜单栏自己刷新转发)。
+- 手机主进程仍是 12374，`:helper` 仍是 12872。没有重装手机，没有关远程，没有关 USB 调试，没有把 `adb_wifi_enabled` 写成 0，公网中继没有改。
+
+当时工具调用的 HTTP 401 和只丢包而 TCP 仍挂着仍未覆盖，24 小时 `procstats` 也未到期。随后这两项记为这台机器上的限制，运行时长不再挡住后续，见[不再等待运行时长](history/validation.md#2026-10-17-不再等待运行时长)。这次没有提交，也没有推送。
+
+## Android 72 共用助手（2026-10-17）
+
+把剪贴板、shell、手电、终端和投屏共用的助手装到正在使用的手机。Mac 仍是 0.1.0 (37)，中继仍是 5。源码在 `b2c674a` 之上的未提交工作区，构建清单 `dirtyWorkingTree: true`。安装前 `scripts/check.sh` 通过，含 43 个 Java 测试、22 个 Swift 测试和 Mac 全量源码编译。然后才把 `versionCode` 和 `versionName` 从 71 改为 72。`UserServiceArgs.version` 源码里仍是 71；正在运行的上一份是 70，所以装上 72 时 Shizuku 会换进程。没有改 Mac 版本，没有重打包 Mac。
+
+- 构建：`android.sh --remote` 先跑 `lib/android/build.sh`，Java 测试通过。APK SHA-256 `55cb81109a1537864f2599054c8f42edc9781230fecbc6c3e5d4ead0f96a7fac`，5296426 字节。
+- 安装任务 `4affab5329a346b294df1581ca880c43`，保留数据，`verified: true`、`completed: true`。先前主进程 12374、`:helper` 30882；装完后主进程 21407、`:helper` 21685。前台服务和主页都起来了，远程版本 72。`firstInstallTime` 仍是 2026-10-17 00:24:17。
+- 装完后仍是 `192.168.0.108:43333` 这一条 `device`。本地与远程都在线，远程已确认。没有卸载，没有把 `adb_wifi_enabled` 写成 0，公网中继没有改。
+- 验收：短开终端和投屏再关掉。没有单独的 `:terminal` 或 `:screen`，PTY 和采集都是 21685 的子进程。剪贴板共享开着，关掉后助手留下。手电保持关闭。见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。荣耀相机 `ACTION_IMAGE_CAPTURE` 这次没有做。L4 没有开始。
+
+这次没有提交，也没有推送。
 
 ## Mac 33 进程生命周期与备份整理（2026-10-06）
 
