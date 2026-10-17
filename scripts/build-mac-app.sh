@@ -80,11 +80,13 @@ CLIPBOARD_TEST="$ROOT/build/.phone-station/clipboard-sync-policy-test"
 CLIPBOARD_SESSION_TEST="$ROOT/build/.phone-station/clipboard-session-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
+  "$ROOT/app/mac/UsageCounters.swift" \
   "$ROOT/app/mac/ClipboardSessionTest.swift" -o "$CLIPBOARD_SESSION_TEST"
 "$CLIPBOARD_SESSION_TEST"
 CLIPBOARD_TRANSPORT_TEST="$ROOT/build/.phone-station/clipboard-transport-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" -target "$TARGET" -sdk "$SDK" \
   "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/ClipboardSession.swift" \
+  "$ROOT/app/mac/UsageCounters.swift" \
   "$ROOT/app/mac/ClipboardTransportTest.swift" -o "$CLIPBOARD_TRANSPORT_TEST"
 "$CLIPBOARD_TRANSPORT_TEST"
 HEALTH_TEST="$ROOT/build/.phone-station/device-health-session-test"
@@ -126,7 +128,8 @@ python3 "$ROOT/lib/test_remote_ops.py"
   -o "$ROOT/build/.phone-station/pairing-prompt-test"
 "$ROOT/build/.phone-station/pairing-prompt-test"
 "$SWIFTC" -parse-as-library -swift-version 5 -target "$TARGET" -sdk "$SDK" \
-  "$ROOT/app/mac/UsageCounters.swift" "$ROOT/app/mac/UsageCountersTest.swift" \
+  "$ROOT/app/mac/ClipboardProtocol.swift" "$ROOT/app/mac/UsageCounters.swift" \
+  "$ROOT/app/mac/UsageCountersTest.swift" \
   -o "$ROOT/build/.phone-station/usage-counters-test"
 "$ROOT/build/.phone-station/usage-counters-test"
 "$ROOT/lib/android/build.sh"
