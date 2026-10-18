@@ -75,6 +75,25 @@ class FeatureScriptsTest(unittest.TestCase):
             self.assertIn("请检查录像文件是否完整", result.stderr)
             with self.assertRaises(ProcessLookupError): os.kill(int((base / "pid").read_text()), 0)
 
+    def test_lib_dir_keeps_non_ascii_app_path_without_utf8_locale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lib = Path(directory) / "手机工位.app" / "Contents" / "Resources" / "phone-station" / "lib"
+            lib.mkdir(parents=True)
+            script = lib / "common.sh"
+            script.write_bytes((ROOT / "lib" / "common.sh").read_bytes())
+            marker = lib / "marker.py"
+            marker.write_text("print('ok')\n")
+            env = {key: value for key, value in os.environ.items()
+                   if key not in {"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE"}}
+            command = 'source "$1"; print -r -- "$PHONE_STATION_LIB_DIR"; python3 "$PHONE_STATION_LIB_DIR/marker.py"'
+            result = subprocess.run(["zsh", "-f", "-c", command, "test", str(script)],
+                                    env=env, text=True, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            reported, printed = result.stdout.splitlines()
+            self.assertEqual(Path(reported), lib.resolve())
+            self.assertEqual(printed, "ok")
+            self.assertNotIn("\\M-", reported)
+
     def test_frame_uses_native_and_missing_frame_uses_scrcpy(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

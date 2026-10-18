@@ -1,10 +1,17 @@
 # 被 scripts/ 里的脚本 source。不要直接执行。
+# 取本文件目录。不用 %x：提示符展开在 POSIX 区域设置下会把 0x80–0x9F
+# 写成 \M- 转义。菜单栏进程没有 LANG，应用名「手机工位」会被改坏，Python 就打不开脚本。
+phone_station_lib_dir() {
+  local caller=${funcfiletrace[1]%:*}
+  PHONE_STATION_LIB_DIR=${caller:A:h}
+}
+phone_station_lib_dir
+unset -f phone_station_lib_dir
+
 # online_serial 接受任意 state=device 的序列号，USB 和无线都可以。
 # 无线调试页面上的 172.19.0.1 经常是 VPN 地址，
 # 本机 Clash Verge 的 utun 会把这个网段吃掉，adb pair / adb connect 会 protocol fault。
 # 可用的无线地址是 mDNS 解析到、并且路由不走 utun 的局域网地址。
-PHONE_STATION_LIB_DIR=${${(%):-%x}:A:h}
-
 # adb 服务启动时才读这两个变量，空值都不会关闭。
 # ADB_MDNS 默认开启时，实例名带空格和 (2) 会让 adb 37 的 mDNS 线程 abort，
 # 服务退出后菜单栏重连，手机就弹出「无线调试已连接」。发现改走 dns-sd。
