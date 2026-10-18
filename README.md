@@ -49,7 +49,7 @@ open "/Applications/手机工位.app"
 
 ### 主页
 
-首页上方是手机连接概览和电量，点击概览进入连接设置；右上角齿轮「设置」集中放置配置与高级工具。投屏、截图、录屏保留为直接操作。亮屏、手电筒和灯光跟随声音归入可展开的「手机控制」，正在使用时显示当前状态。仅远程连接时的实时投屏与录屏见 [远程屏幕](docs/remote-screen.md)。
+首页上方是手机连接概览和电量，点击概览进入连接设置；右上角齿轮「设置」集中放置配置与高级工具。投屏、截图、录屏保留为直接操作。亮屏、手电筒和灯光跟随声音归入可展开的「手机控制」，正在使用时显示当前状态。仅远程连接时的实时投屏与录屏见 [远程屏幕](docs/history/remote-screen.md)。
 
 「MCP 服务」「共享剪贴板」「手机通知」「最近文件」保留首页入口。MCP 服务可查看文件、命令与安装、屏幕与手机控制的选择和权限，并进入命令与终端、应用安装。最近文件仍支持缩略图、悬停预览、复制与在 Finder 中显示。设置集中管理手机功能、权限、应用更新和 Mac 偏好。MCP 地址与 Authorization 在「MCP 服务 → MCP 接入信息与服务操作」中展开后复制。录屏或灯光跟随声音时，收起面板不会结束任务。
 
@@ -75,9 +75,9 @@ open "/Applications/手机工位.app"
 ./scripts/android.sh --remove
 ```
 
-不带参数时，先检查远程中继与 Shizuku；可用就编译并远程更新，沿用现有权限和配对。上传前检查远程不可用时才转到 adb，首次安装也走这条路径：安装、授予写系统设置、通知和所有文件访问，打开应用并配置提醒横幅。`--remote` 强制远程，`--adb` 强制本地并补权限；已提交的远程安装不会因断线再次走 adb 安装。`status` 与 `--remove` 仍要求 adb 在线，远程安装结果用 `install-apk.sh --status <任务编号>` 查询。
+不带参数时，adb 已经连着手机就走本地安装。没有这条连接时，才检查远程中继与 Shizuku；可用就编译并远程更新，沿用现有权限和配对。上传前检查远程不可用时才转到 adb。本地安装会授予写系统设置、通知和所有文件访问，打开应用并配置提醒横幅。`--remote` 强制远程，`--adb` 强制本地并补权限；已提交的远程安装不会因断线再次走 adb 安装。`status` 与 `--remove` 仍要求 adb 在线，远程安装结果用 `install-apk.sh --status <任务编号>` 查询。
 
-菜单栏「设置」里的「安装或更新手机应用」跑的是同一个脚本。从菜单栏装时，用的是构建 App 时放进包里的安装包。
+菜单栏「设置」里的「安装或更新手机应用」跑的是同一个脚本。adb 已经连着手机时走本地安装；没有本地连接时才远程更新。从菜单栏装时，用的是构建 App 时放进包里的安装包。
 
 ### 首页
 
@@ -220,11 +220,11 @@ Mac 默认显示带手机应用图标的自定义横幅，6 秒后收起；鼠�
 ./scripts/android.sh --remote
 ```
 
-`install-apk.sh` 支持新装、保留数据升级及 base + split APK；先上传和校验，再提交安装，最后核对已安装 APK 的 SHA-256。更新手机工位自身会自动拉起后台服务、打开主页并核对远程连接恢复；仅需后台时用 `./scripts/install-apk.sh --no-open <APK>`。`verified` 表示 APK 一致，`completed` 才表示整个安装与恢复流程完成。签名不同或版本回退时返回错误，不自动卸载。默认 `android.sh` 优先远程更新；`--adb` 指定原有本地安装。完整用法与结果查询见 [remote-ops.md](docs/remote-ops.md)。
+`install-apk.sh` 支持新装、保留数据升级及 base + split APK；先上传和校验，再提交安装，最后核对已安装 APK 的 SHA-256。更新手机工位自身会自动拉起后台服务、打开主页并核对远程连接恢复；仅需后台时用 `./scripts/install-apk.sh --no-open <APK>`。`verified` 表示 APK 一致，`completed` 才表示整个安装与恢复流程完成。签名不同或版本回退时返回错误，不自动卸载。adb 已经连着手机时，默认 `android.sh` 走本地安装；没有本地连接时才远程更新。`--adb` 指定本地安装，`--remote` 只走远程。完整用法与结果查询见 [remote-ops.md](docs/remote-ops.md)。
 
 ## 文件
 
-读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，打开固定的本机网关地址并给出 `Authorization` 头。网关优先走 adb，无线断开时切到已配置的中继；完整 adb 与本地投屏、录屏脚本仍需本地 adb，Mac 的远程实时投屏与录屏见 [远程屏幕](docs/remote-screen.md)，远程 shell 和安装升级见 [远程命令与安装](#远程命令与安装)。远程通道转发手机工位已有的 MCP 工具。Android 69 / Mac 32 / 中继 5 增加控制长连接及通知、剪贴板变化订阅，旧版兼容与部署状态见 [远程控制与事件](docs/remote-control.md)。手机与 Mac 可各自配置；通过 adb 同时配置或清除两端资料时才需要 adb 在线。
+读改内部存储里的普通文件，走手机上「手机工位」的 MCP。菜单栏的「MCP服务」，或 `./scripts/mcp.sh`，打开固定的本机网关地址并给出 `Authorization` 头。网关优先走 adb，无线断开时切到已配置的中继；完整 adb 与本地投屏、录屏脚本仍需本地 adb，Mac 的远程实时投屏与录屏见 [远程屏幕](docs/history/remote-screen.md)，远程 shell 和安装升级见 [远程命令与安装](#远程命令与安装)。远程通道转发手机工位已有的 MCP 工具。Android 69 / Mac 32 / 中继 5 增加控制长连接及通知、剪贴板变化订阅，旧版兼容与部署状态见 [远程控制与事件](docs/history/remote-control.md)。手机与 Mac 可各自配置；通过 adb 同时配置或清除两端资料时才需要 adb 在线。
 
 Mac 19 起，`./scripts/mcp.sh clients create '资料读取' status,files.read` 可生成独立客户端令牌，按需授予状态、文件读写或 shell 权限；`clients list` 查看，`clients revoke <编号>` 撤销。创建时只显示一次令牌，详细范围见 [客户端权限](docs/mcp-clients.md)。
 
@@ -272,7 +272,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 ## 屏幕
 
-本地投屏和录屏用 [scrcpy](https://github.com/Genymobile/scrcpy)，截屏脚本用 adb 的 `screencap`。菜单栏主页上有同样的入口。这三个脚本都会先走 `connect.sh`；投屏与录屏的额外参数原样传给 scrcpy。Mac App 在只有远程连接时，也可实时投屏并录屏（Mac 25、手机 63、中继 3），见 [远程屏幕](docs/remote-screen.md)；截屏、保持亮屏和手电筒见 [远程控件](docs/remote-controls.md)。
+本地投屏和录屏用 [scrcpy](https://github.com/Genymobile/scrcpy)，截屏脚本用 adb 的 `screencap`。菜单栏主页上有同样的入口。这三个脚本都会先走 `connect.sh`；投屏与录屏的额外参数原样传给 scrcpy。Mac App 在只有远程连接时，也可实时投屏并录屏（Mac 25、手机 63、中继 3），见 [远程屏幕](docs/history/remote-screen.md)；截屏、保持亮屏和手电筒见 [远程控件](docs/remote-controls.md)。
 
 窗口开着时，scrcpy 的 `--stay-awake` 会让充电中的手机暂时不熄屏。关掉窗口之后，息屏仍按系统设置。要一直亮着，用 [保持亮屏](#保持亮屏)。
 
@@ -334,7 +334,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 
 ## 连接
 
-这一节是本地 adb 的连接与配对。闪光灯、屏幕和首次安装需要一台 adb 在线设备；文件、剪贴板、默认会话提醒和远程 shell/安装也可经已配置的远程中继访问。走 adb 时，`adb devices` 里要有一行状态是 `device`。多台在线时，脚本会停下来，要求只留一台。无线调试的配对和连接是两步。配对端口和连接端口不是同一个；重启无线调试后，连接端口会变。系统说明见 [adb：通过 WLAN 连接](https://developer.android.com/tools/adb#wireless)。
+这一节是本地 adb 的连接与配对。闪光灯、屏幕和首次安装需要一台 adb 在线设备；文件、剪贴板、默认会话提醒和远程 shell/安装也可经已配置的远程中继访问。走 adb 时，`adb devices` 里要有一行状态是 `device`。多台不同手机在线时，脚本使用菜单栏记住的那一台；没有选择就停下来。无线调试的配对和连接是两步。配对端口和连接端口不是同一个；重启无线调试后，连接端口会变。系统说明见 [adb：通过 WLAN 连接](https://developer.android.com/tools/adb#wireless)。
 
 ### 查看状态
 
@@ -342,7 +342,7 @@ python3 .agents/skills/screenshot-cleanup/scripts/cleanup.py dupes
 ./scripts/status.sh
 ```
 
-USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出当前的局域网地址和端口，以它为准。
+USB 在线时，序列号不带端口。无线在线时，`status.sh` 会印出当前的局域网地址和端口，以它为准。`scripts/diagnose.sh <空目录>` 只写本机说明和网关日志尾部的脱敏副本，不连接手机，也不把内容打到终端。
 
 ### 接上
 
@@ -398,7 +398,7 @@ PGT-AN20 上也验证过：手机开着 VPN、页面显示 `172.19.0.1` 时，�
 ./scripts/build-relay.sh
 ```
 
-该入口运行服务端回归并生成 Linux/amd64 程序和发布回执，不部署。Mac 20 支持中继 2 的持久会话编号；先升级 Mac，再升级中继，保留原配对。协议、隔离验收与回滚限制见 [中继合约](docs/relay-contract.md) 和 [发布记录](docs/releases.md)。
+该入口运行服务端回归并生成 Linux/amd64 程序和发布回执，不部署。Mac 20 支持中继 2 的持久会话编号；先升级 Mac，再升级中继，保留原配对。协议、隔离验收与回滚限制见 [中继合约](docs/history/relay-contract.md) 和 [发布记录](docs/releases.md)。
 
 ## 本机检查
 

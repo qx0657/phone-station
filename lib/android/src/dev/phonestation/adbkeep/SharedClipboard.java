@@ -75,7 +75,7 @@ final class SharedClipboard {
     static Json health(Context context) {
         if (!StationFeatures.master(context)) { return Json.obj().put("shared", shared(context)).put("automatic", automatic(context)).put("ready", false).put("status", "手机工位已暂停").put("reason", "请在首页开启总开关，子开关选择已保留").put("action", "master"); }
         long now = SystemClock.elapsedRealtime();
-        Json state = ClipboardAvailability.present(shared(context), automatic(context), (FileMcpService.listening() || PhoneRelayClient.connected()),
+        Json state = ClipboardAvailability.present(shared(context), automatic(context), (FileMcpService.listening() || RemoteStatus.connected(context)),
                 HostProbe.current(context).linked, ShizukuShell.status(context),
                 (macContact >= 0 && now >= macContact && now - macContact < 10_000L) || (leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L), lastFailure,
                 HostProbe.remoteOnly(context) && !RemoteStore.permission(context, "personal"));

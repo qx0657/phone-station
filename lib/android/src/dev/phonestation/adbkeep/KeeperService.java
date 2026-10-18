@@ -86,6 +86,7 @@ public final class KeeperService extends Service {
         handler.removeCallbacks(tickTask);
         handler.postDelayed(tickTask, next);
         StationNotifications.update(this);
+        LinkDeviceNote.now(this);
     }
 
     private void shutdown() {

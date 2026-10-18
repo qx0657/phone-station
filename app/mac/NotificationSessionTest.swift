@@ -24,14 +24,14 @@ enum NotificationSessionTest {
         }
         func call(_ name: String, _ args: [String: Any]) async throws -> Data {
             calls.append((name, args))
-            if name == "station_notification_icon" {
+            if name == "notification.icon" {
                 if iconFailure { throw ClipboardRPC.Failure(message: "icon unavailable") }
                 if holdIcon { return try await withCheckedThrowingContinuation { iconWaiting = $0 } }
                 return try JSONSerialization.data(withJSONObject: ["available": true, "packageName": "chat",
                     "app": "Chat", "mimeType": "image/png", "base64": "iVBORw0KGgo="])
             }
             if fail { fail = false; throw ClipboardRPC.Failure(message: "offline") }
-            if hold && name == "station_notification_poll" {
+            if hold && name == "notification.poll" {
                 return try await withCheckedThrowingContinuation { waiting = $0 }
             }
             return data()
@@ -61,11 +61,11 @@ enum NotificationSessionTest {
         await tick(guardedSession); await tick(guardedSession)
         guardedSession.configurePhone(true)
         await Task.yield()
-        expect(guarded.calls.allSatisfy { $0.0 == "station_notification_status" }, "ungranted notifications only read content-free status")
+        expect(guarded.calls.allSatisfy { $0.0 == "notification.status" }, "ungranted notifications only read content-free status")
         expect(guardedSession.remoteBlocker?.scopes == ["personal"], "notification denial provides a resolvable scope")
         granted = true
         await tick(guardedSession)
-        expect(guarded.calls.last?.0 == "station_notification_poll" && guarded.delivered.isEmpty, "grant establishes a new baseline")
+        expect(guarded.calls.last?.0 == "notification.poll" && guarded.delivered.isEmpty, "grant establishes a new baseline")
         guarded.event(); guarded.holdIcon = true
         guardedSession.refresh()
         try? await Task.sleep(nanoseconds: 20_000_000)
@@ -76,17 +76,17 @@ enum NotificationSessionTest {
         let fake = Fake()
         let session = fake.session()
         await tick(session) // status
-        expect(fake.calls.last?.0 == "station_notification_status", "discover phone settings first")
+        expect(fake.calls.last?.0 == "notification.status", "discover phone settings first")
         fake.event()
         await tick(session) // baseline, even a malformed reply must not replay old notifications
         expect(fake.delivered.isEmpty, "first contact is a baseline")
         fake.event("session:2")
         await tick(session)
         expect(fake.delivered.count == 1, "new event delivered")
-        expect(fake.delivered.first?.iconPNG != nil && fake.calls.last?.0 == "station_notification_icon", "selected app icon accompanies the notification")
+        expect(fake.delivered.first?.iconPNG != nil && fake.calls.last?.0 == "notification.icon", "selected app icon accompanies the notification")
         await tick(session)
         expect(fake.delivered.count == 1, "duplicate event not delivered twice")
-        expect(fake.calls.filter { $0.0 == "station_notification_icon" }.count == 1, "icons are cached instead of fetched on every poll")
+        expect(fake.calls.filter { $0.0 == "notification.icon" }.count == 1, "icons are cached instead of fetched on every poll")
         fake.fail = true
         await tick(session)
         fake.event("session:3")
@@ -107,7 +107,7 @@ enum NotificationSessionTest {
         expect(fake.delivered.count == 1, "pause suppresses in-flight notifications")
         fake.hold = false
         await tick(session)
-        expect(fake.calls.last?.0 == "station_notification_status", "paused Mac never consumes")
+        expect(fake.calls.last?.0 == "notification.status", "paused Mac never consumes")
         session.setReceiving(true)
         try? await Task.sleep(nanoseconds: 20_000_000)
         fake.hold = true
@@ -123,7 +123,7 @@ enum NotificationSessionTest {
         let pending = unapproved.session()
         await tick(pending)
         await tick(pending)
-        expect(unapproved.requests == 0 && unapproved.calls.allSatisfy { $0.0 == "station_notification_status" }, "permission is only requested by user action")
+        expect(unapproved.requests == 0 && unapproved.calls.allSatisfy { $0.0 == "notification.status" }, "permission is only requested by user action")
         pending.setReceiving(false)
         pending.setReceiving(true)
         try? await Task.sleep(nanoseconds: 30_000_000)

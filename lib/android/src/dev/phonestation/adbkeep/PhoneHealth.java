@@ -8,8 +8,8 @@ final class PhoneHealth {
         PermissionProbe facts = PermissionProbe.read(context);
         PermissionCopy.Board permissions = FeatureReadiness.board(context, "");
         return HealthStatus.present(permissions, ShizukuShell.status(context), SharedClipboard.health(context),
-                PhoneNotifications.status(context).put("remoteBlocked", HostProbe.remoteOnly(context) && !RemoteStore.permission(context, "personal")), KeeperStore.mcpEnabled(context), FileMcpService.listening() || PhoneRelayClient.connected(),
-                RemoteStore.enabled(context), PhoneRelayClient.connected(), PhoneRelayClient.checking(),
-                PhoneRelayClient.connectionLabel(context));
+                PhoneNotifications.status(context).put("remoteBlocked", HostProbe.remoteOnly(context) && !RemoteStore.permission(context, "personal")), KeeperStore.mcpEnabled(context), FileMcpService.listening() || RemoteStatus.connected(context),
+                RemoteStore.enabled(context), RemoteStatus.connected(context), RemoteStatus.checking(context),
+                RemoteStatus.label(context));
     }
 }

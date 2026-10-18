@@ -13,12 +13,12 @@
 | [history/](history/README.md) | 历史证据 | 日期与版本限定的测试、界面、安装和部署记录 |
 | [validation.md](validation.md) | `scripts/check.sh`、CI | 统一本机回归、依赖、Android 打包与真机验证的区别，以及三端联合检查与剩余实机边界 |
 | [mac-app.md](mac-app.md) | `scripts/build-mac-app.sh` | 菜单栏 App 的构建、脚本打包、面板上的亮屏和闪光灯，以及录屏、跟随声音的结束方式。图标不在菜单栏上时，看 Hidden Bar 记下的位置，以及控制中心是否把它算进已禁用的 App |
-| [mcp.md](mcp.md) | `scripts/mcp.sh` | 手机工位 MCP、Mac 统一网关、可配置远程中继、两端配置界面、鉴权与路径边界，以及 PGT-AN20 上读到和读不到的地方 |
+| [mcp.md](mcp.md) | `scripts/mcp.sh` | 当前入口：网关 `18765`、本地 `/v2/link`、令牌与 Shizuku 边界。2026-10-18 前的完整服务说明在 [history/mcp-service.md](history/mcp-service.md) |
 | [mcp-clients.md](mcp-clients.md) | `mcp.sh clients` | 独立令牌、文件读写与 shell 权限、撤销和隔离边界 |
-| [relay-contract.md](relay-contract.md) | `scripts/check-relay.sh` | 共用协议、会话编号、持久回执、仓库内联合检查与公网隔离验收 |
+| [relay-contract.md](history/relay-contract.md) | 历史，中继 5 | 2026-10-18 转入。当时的会话编号、持久回执和联合检查；当前协议见 [link-v2.md](link-v2.md) |
 | [remote-ops.md](remote-ops.md) | `scripts/shell.sh`、`scripts/terminal.sh`、`scripts/install-apk.sh`、`scripts/android.sh` | 无需 adb 连接的 Shizuku 单次命令与交互终端、APK 上传校验、单包与 split 安装、手机工位自身更新及断线后查询 |
-| [remote-control.md](remote-control.md) | Android 69 / Mac 32 / 中继 5 | 控制长连接、通知与剪贴板事件订阅、心跳租约、断线恢复与旧版兼容 |
-| [remote-screen.md](remote-screen.md) | Mac 远程实时投屏与录屏 | 独立 WSS、H.264/AAC、原生播放与 MP4、控制输入、权限和断线清理 |
+| [remote-control.md](history/remote-control.md) | 历史，Android 69 / Mac 32 / 中继 5 | 2026-10-18 转入。当时的控制长连接、通知与剪贴板订阅、心跳租约 |
+| [remote-screen.md](history/remote-screen.md) | 历史，Mac 远程实时投屏与录屏 | 2026-10-18 转入。当时的独立 WSS、H.264/AAC、原生播放与输入 |
 | [remote-controls.md](remote-controls.md) | Mac 首页远程截屏、亮屏和手电筒 | 三项控件的权限与机型判断、截图下载校验及清理、Shizuku 持续持灯、断线后只核实状态 |
 | [clipboard.md](clipboard.md) | 两端「共享剪贴板」页与 `station_clipboard_*` | Shizuku 后台读取、双向交换、回传和冲突处理、重连基线、敏感内容及文字范围 |
 | [notify.md](notify.md) | 两端通知设置与 `scripts/notify.sh` | 手机所选应用的新通知同步到 Mac：系统通知使用权、白名单、短期接收队列与断线基线。电脑提醒发到手机：下拉通知与铃声、媒体音量、`--agent` 图标、`--shell` PCM 及全局 hook |
@@ -26,7 +26,7 @@
 | [screenshot-cleanup.md](screenshot-cleanup.md) | 图库截图 | 哪些截图可以删。界面类和重复张的像素阈值。张数是 2026-09-29 这台 PGT-AN20 上的 |
 | [adb-keep.md](adb-keep.md) | `lib/android/`、`scripts/android.sh` | 手机上的「手机工位」。为什么无线调试会自己关，以及何时写回去。界面上的已连接合并 adb 心跳和远程通道；adb 断开后靠写成 0 或 15 秒过期复位，远程在线时仍显示已连接。权限页列出读得到的授权，其中 Shizuku 要服务在跑才能授权；自启动读不到。Shizuku 启动后活到重启，重启后要无线调试开着才能再拉起。开机自启还要在荣耀的应用启动管理里允许 |
 | [android-cli.md](android-cli.md) | `android` | 建工程、查文档、装 APK、看布局。不参与 `scripts/` 里的手机操作，安装命令写在这里 |
-| [roadmap.md](roadmap.md) | 实施中 | 架构改造路线。P0 计数器已部署；P1 已装到 Android 71 与 Mac 36，尚未完成；P2 的 L0–L3 已进入源码、未接入通道。P3–P6 还没开始。空闲轮询与结构性问题、目标架构、多手机与多 Mac、MCP v2 工具集、P0–P6、资源目标与未核实项 |
-| [link-v2.md](link-v2.md) | 设计稿；L0、L1、L2 与 L3 已进源码 | 统一链路与设备身份：帧格式、并发操作与手机回执、事件推送、设备密钥与配对、按 Mac 分项授权、可选端到端加密、中继 6 与切换回滚。L0 至 L3 未接入现有通道 |
+| [roadmap.md](roadmap.md) | 实施中 | 架构改造路线。公网进程已是中继 6。手机包和 Mac 包里的 `phone-app.apk` 都是 `b0c76783…`。18765 上的网关是已安装应用包里的这次构建，主令牌 `tools/list` 为 18 个名称。设置窗口的浅色、深色和大字号已点过。版本名仍是 0.1.0 (37)，临时签名。Claude Code 未登录，P5 双机矩阵和 Developer ID 还没做 |
+| [link-v2.md](link-v2.md) | 实施中；公网进程已是中继 6 | 统一链路与设备身份。手机已 join。两个方向的文件各传过一次。必须加密没打开。真机拍照解码还没做 |
 
 功能选择、系统权限和远程访问的关系见 [功能开关](features.md)。

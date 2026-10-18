@@ -19,4 +19,4 @@ SERIAL=$(online_serial "$ADB")
 require_station_feature "$ADB" "$SERIAL" screen
 print -r -- "投屏 $SERIAL"
 export ADB
-run_station_screen "$SCRCPY" --serial="$SERIAL" --stay-awake "$@"
+launch_screen "$SCRCPY" --serial="$SERIAL" --stay-awake "$@"

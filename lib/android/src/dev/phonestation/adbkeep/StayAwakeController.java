@@ -2,7 +2,6 @@ package dev.phonestation.adbkeep;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.provider.Settings;
 
 final class StayAwakeController {
@@ -13,7 +12,7 @@ final class StayAwakeController {
     }
 
     static void set(Context context, boolean on) {
-        if (!"PGT-AN20".equals(Build.MODEL.replace('_', '-'))) { throw new FileFailure("此机型尚未验证，未改亮屏设置"); }
+        if (!VerifiedDevice.current()) { throw new FileFailure("此机型尚未验证，未改亮屏设置"); }
         SharedPreferences prefs = context.getSharedPreferences("stay-awake", Context.MODE_PRIVATE);
         StayAwake.Settings settings = new StayAwake.Settings() {
             public String timeout() { return Settings.System.getString(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT); }

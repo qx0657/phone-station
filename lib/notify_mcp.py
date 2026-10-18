@@ -71,7 +71,8 @@ def send(title: str, text: str, _legacy_mode: str, agent: str, sound: str) -> in
             "clientInfo": {"name": "phone-notify", "version": "1"},
         })
         tools = rpc(endpoint, auth, 2, "tools/list", {}).get("tools", [])
-        tool = next((item for item in tools if item.get("name") == "station_notify"), None)
+        listed = {item.get("name"): item for item in tools}
+        tool = listed.get("phone_alert") or listed.get("station_notify")
         if tool is None:
             return UNAVAILABLE
         if sound and "sound" not in tool.get("inputSchema", {}).get("properties", {}):
@@ -84,7 +85,7 @@ def send(title: str, text: str, _legacy_mode: str, agent: str, sound: str) -> in
     if sound:
         args["sound"] = sound
     try:
-        result = rpc(endpoint, auth, 3, "tools/call", {"name": "station_notify", "arguments": args})
+        result = rpc(endpoint, auth, 3, "tools/call", {"name": tool["name"], "arguments": args})
         content = result.get("content", [])
         payload = next(item["text"] for item in content if item.get("type") == "text")
         detail = json.loads(payload)

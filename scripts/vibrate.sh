@@ -25,9 +25,23 @@ fi
 "$DIR/connect.sh"
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
+station=""
+for candidate in "$DIR/../build/.phone-station/station" "$DIR/../lib/station"; do
+  if [[ -x $candidate ]]; then
+    station=$candidate
+    break
+  fi
+done
+phone_shell() {
+  if [[ -n $station ]]; then
+    "$station" shell "$SERIAL" "$@"
+  else
+    "$ADB" -s "$SERIAL" shell "$@"
+  fi
+}
 
 if [[ "${1:-}" == "stop" || "${1:-}" == "off" || "${1:-}" == "cancel" ]]; then
-  "$ADB" -s "$SERIAL" shell cmd vibrator_manager cancel
+  phone_shell cmd vibrator_manager cancel
   print -r -- "已停止震动"
   exit 0
 fi
@@ -47,7 +61,7 @@ if [[ ! "$amp" =~ '^[0-9]+$' || "$amp" -lt 1 || "$amp" -gt 255 ]]; then
   exit 1
 fi
 if [[ -z "$gap" ]]; then
-  "$ADB" -s "$SERIAL" shell cmd vibrator_manager synced -f -B oneshot -a "$ms" "$amp"
+  phone_shell cmd vibrator_manager synced -f -B oneshot -a "$ms" "$amp"
   print -r -- "震动 ${ms} 毫秒，力度 ${amp}"
   exit 0
 fi
@@ -58,7 +72,7 @@ if [[ ! "$gap" =~ '^[0-9]+$' || "$gap" -lt 1 || "$gap" -gt 60000 ]]; then
 fi
 
 if [[ -z "$times" || "$times" == "0" ]]; then
-  "$ADB" -s "$SERIAL" shell cmd vibrator_manager synced -f -B waveform -r 0 -a "$ms" "$amp" "$gap" 0
+  phone_shell cmd vibrator_manager synced -f -B waveform -r 0 -a "$ms" "$amp" "$gap" 0
   print -r -- "震动 ${ms} 毫秒，力度 ${amp}，间隔 ${gap} 毫秒，一直重复。停下: vibrate.sh stop"
   exit 0
 fi
@@ -76,5 +90,5 @@ for ((i = 1; i <= times; i++)); do
     steps+=("$gap" 0)
   fi
 done
-"$ADB" -s "$SERIAL" shell cmd vibrator_manager synced -f -B "${steps[@]}"
+phone_shell cmd vibrator_manager synced -f -B "${steps[@]}"
 print -r -- "震动 ${ms} 毫秒，力度 ${amp}，间隔 ${gap} 毫秒，共 ${times} 次"

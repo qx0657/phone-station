@@ -6,4 +6,7 @@ PHONE_RELAY_PHONE_TOKEN=
 PHONE_RELAY_DESKTOP_TOKEN=
 PHONE_RELAY_CERT=/etc/phone-station-relay/server.crt
 PHONE_RELAY_KEY=/etc/phone-station-relay/server.key
+# Relay 5 uses the directory below. Relay 6 refuses that directory once it contains
+# those files; point a relay 6 process at an empty directory such as
+# /var/lib/phone-station-relay-v6 and leave the old directory in place.
 PHONE_RELAY_STATE_DIR=/var/lib/phone-station-relay

@@ -55,6 +55,21 @@ final class TerminalJobsTest {
         expect(starts.get() == 1);
         // The saved ID stays consumed after permissions are restored.
         allowed.set(true); terminals.open(revoked, 80, 24); expect(starts.get() == 1);
+        String direct = "f".repeat(32);
+        AtomicInteger directStarts = new AtomicInteger();
+        TerminalJobs linked = new TerminalJobs(jobs, (request, start) -> {
+            if (start) { directStarts.incrementAndGet(); }
+            return TerminalJobs.ended(request.get("sessionId").string(), "running", "");
+        });
+        expect(linked.openNow(direct, 80, 24, () -> {}).get("state").string().equals("running"));
+        expect(jobs.status(direct).get("state").string().equals("missing"));
+        expect(directStarts.get() == 1);
+        expect(linked.readNow(direct, 0).get("state").string().equals("running"));
+        expect(linked.inputNow(direct, 1, "03").get("state").string().equals("running"));
+        TerminalJobs afterRestart = new TerminalJobs(jobs, (request, start) -> { throw new AssertionError("restarted"); });
+        expect(afterRestart.readNow(direct, 0).get("state").string().equals("lost"));
+        expect(linked.closeNow(direct).get("state").string().equals("running"));
+        expect(linked.readNow(direct, 0).get("state").string().equals("lost"));
         jobs.close();
         System.out.println("TerminalJobsTest ok");
     }

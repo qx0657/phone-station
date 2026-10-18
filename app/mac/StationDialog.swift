@@ -35,12 +35,12 @@ struct StationDialogSurface: View {
                     .background(accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityHidden(true)
                 Text(StationL10n.text(title))
-                    .font(.system(size: 17, weight: .semibold))
+                    .stationFont(size: 17, weight: .semibold)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
             }
             if let message {
-                Text(StationL10n.text(message)).font(.system(size: 13))
+                Text(StationL10n.text(message)).stationFont(size: 13)
                     .foregroundStyle(.primary).lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -53,7 +53,7 @@ struct StationDialogSurface: View {
                                     .foregroundStyle(selected == choice.id ? accent : Color.secondary)
                                     .accessibilityHidden(true)
                                 Text(StationL10n.text(choice.title))
-                                    .font(.system(size: 14, weight: selected == choice.id ? .medium : .regular))
+                                    .stationFont(size: 14, weight: selected == choice.id ? .medium : .regular)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Spacer(minLength: 8)
                                 Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold))
@@ -91,7 +91,7 @@ struct StationDialogSurface: View {
                         .overlay { HoverWash(radius: 10) }
                 }.buttonStyle(PressFadeStyle()).focused($focused, equals: "cancel")
                     .overlay { focusOutline("cancel") }.keyboardShortcut(.cancelAction)
-            }.font(.system(size: 13, weight: .medium))
+            }.stationFont(size: 13, weight: .medium)
         }
         .foregroundStyle(.primary)
         .padding(20)

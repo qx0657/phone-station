@@ -1,6 +1,6 @@
 # Phone Station 公网中继
 
-本目录是手机工位公网中继的唯一通用源码。Mac 本机网关在 `../../lib/remote-gateway/`，不能替代本服务。迁移来源和工作区摘要见 [MIGRATION.md](MIGRATION.md)，完整协议见 [中继合约](../../docs/relay-contract.md)。
+本目录是手机工位公网中继的唯一通用源码。Mac 本机网关在 `../../lib/remote-gateway/`，不能替代本服务。迁移来源和工作区摘要见 [MIGRATION.md](MIGRATION.md)，完整协议见 [中继合约](../../docs/history/relay-contract.md)。
 
 ## 构建与验收
 
@@ -11,7 +11,7 @@
 ./scripts/build-relay.sh
 ```
 
-构建默认生成 Linux/amd64 发布包和来源回执；`--host` 生成本机隔离实例程序。WebSocket 使用已固定版本的 coder/websocket。全量检查包含真实服务端的持久回执、TLS 联合协议、重启、强杀与存储失败测试；不连接生产实例或手机。公网隔离实例另用 [check-relay.sh](../../docs/relay-contract.md#隔离实例检查)。
+构建默认生成 Linux/amd64 发布包和来源回执；`--host` 生成本机隔离实例程序。WebSocket 使用已固定版本的 coder/websocket。全量检查包含真实服务端的持久回执、TLS 联合协议、重启、强杀与存储失败测试；不连接生产实例或手机。公网隔离实例另用 [check-relay.sh](../../docs/history/relay-contract.md#隔离实例检查)。
 
 ## 配置
 
@@ -27,6 +27,8 @@
 | `PHONE_RELAY_STATE_DIR` | 持久回执目录，默认 `/var/lib/phone-station-relay` |
 
 服务端必须通过 TLS 监听，最低 TLS 1.2；两端仍验证相同 SPKI 公钥指纹。[systemd 模板](deploy/phone-station-relay.service) 为状态目录提供写权限，其余系统目录只读，配置仍在 `/etc/phone-station-relay/config`。现有 root-only 配置沿用；没有自动扩大端口或修改其他服务。
+
+上表里的角色令牌是中继 5 的配置。2026-10-17 公网进程已换成中继 6，状态目录是新的 `/var/lib/phone-station-relay-v6`，旧目录只归档、没有删除。中继 6 不读取角色令牌和 `PHONE_RELAY_DEVICE_ID`。它另读 `PHONE_RELAY_TRUSTED_PROXIES`（逗号分隔的 IP，空着则忽略 `X-Forwarded-For`）。状态目录必须是空的，或已经是中继 6 的 `registry.json`；里面如果还有中继 5 的文件，启动和 `enroll` 都会拒绝。
 
 ## 操作状态与清理
 
@@ -44,16 +46,16 @@
 
 ## 中继 3 的独立屏幕连接
 
-中继 3 保留中继 2 的持久 MCP 状态格式与回执，增加已鉴权的 `/v1/screen/phone/<sessionId>` 和 `/v1/screen/desktop/<sessionId>` WSS。只在双方配对完成后开始视频，消息不占 MCP 队列、不持久缓存；角色隔离、时限、关闭与兼容顺序见 [远程屏幕](../../docs/remote-screen.md)。已有反向代理须透传 WebSocket Upgrade，直连 TLS 不改端口。第三方许可位于 [docs/licenses](../../docs/remote-screen.md#发布与验证边界)。
+中继 3 保留中继 2 的持久 MCP 状态格式与回执，增加已鉴权的 `/v1/screen/phone/<sessionId>` 和 `/v1/screen/desktop/<sessionId>` WSS。只在双方配对完成后开始视频，消息不占 MCP 队列、不持久缓存；角色隔离、时限、关闭与兼容顺序见 [远程屏幕](../../docs/history/remote-screen.md)。已有反向代理须透传 WebSocket Upgrade，直连 TLS 不改端口。第三方许可位于 [docs/licenses](../../docs/history/remote-screen.md#发布与验证边界)。
 
 中继 4 继续使用上述协议与持久状态，收紧浏览器来源、重复认证头、URL 参数和歧义 JSON，不增加公网端口。手机端权限在 Android 64 执行，与中继请求校验分别部署，见 [远程安全与授权](../../docs/security.md)。
 
 ## 中继 5 的控制与事件连接
 
-新增手机 `/v1/phone/control` 与电脑 `/v1/desktop/events` WSS，减少手机空闲短请求与 MCP 健康探测。控制派发和 HTTP 共用 durable-epochs-v1 回执，旧轮询保留兼容；通知和剪贴板仅发送变化信号，授权后的正文仍经原 MCP 接口读取。心跳、租约、版本顺序及验证边界见 [远程控制与事件](../../docs/remote-control.md)。代理须为新增路径透传 Upgrade。
+新增手机 `/v1/phone/control` 与电脑 `/v1/desktop/events` WSS，减少手机空闲短请求与 MCP 健康探测。控制派发和 HTTP 共用 durable-epochs-v1 回执，旧轮询保留兼容；通知和剪贴板仅发送变化信号，授权后的正文仍经原 MCP 接口读取。心跳、租约、版本顺序及验证边界见 [远程控制与事件](../../docs/history/remote-control.md)。代理须为新增路径透传 Upgrade。
 
 ## 中继 6
 
-`internal/v6` 是下一版中继的注册表和 `GET /v2/link`。测试进程在临时目录上用真实 TLS 启动它，随本模块的 `go test` 进入 `scripts/check.sh`。`cmd/phone-relay` 不引用这个包，所以 `scripts/build-relay.sh` 打出的发布包仍是中继 5，不会在公网上提供 `/v2/link`。协议字节、邀请和注册表规则见 [中继 6](../../docs/link-v2.md#中继-6)。隔离实例和 `phone-relay enroll` 留到切换部署。
+`internal/v6` 是中继 6 的注册表和 `GET /v2/link`。`cmd/phone-relay` 已经引用它：`--version` 打印 `phone-station-relay 6`，`enroll` 把加入码只打到标准输出，无参数时用 TLS 提供这条路径。状态目录里已有其他文件时拒绝新建注册表，所以不能对着中继 5 的旧目录启动。测试只在 `127.0.0.1` 上监听。`scripts/build-relay.sh` 已打出 Linux/amd64 产物，没有启动，也没有部署。正在运行的公网进程仍是中继 5。协议字节见 [中继 6](../../docs/link-v2.md#中继-6)。
 
-可信代理默认关闭。`ParseTrustedProxies` 解析逗号分隔的 IP，准备给 `PHONE_RELAY_TRUSTED_PROXIES`。当前 `phone-relay` 是中继 5，不读这个变量；上表里的环境变量也不包含它。部署中继 6 时由那个进程接上。
+可信代理默认关闭。`ParseTrustedProxies` 解析逗号分隔的 IP，环境变量是 `PHONE_RELAY_TRUSTED_PROXIES`。源码里的 `phone-relay` 会读它。正在运行的中继 5 进程还不读。

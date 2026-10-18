@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"phone-station/link"
 )
 
 const (
@@ -84,6 +86,18 @@ type gateway struct {
 	statusProfile              string
 	probeProfile, probeSession string
 	probeAt                    time.Time
+	linkLocal                  bool
+	linkCall                   func(context.Context, string, string, []byte) (string, []byte, error)
+	sharePut                   func(string, []byte) error
+	linkMu                     sync.Mutex
+	linkSession                *link.LocalSession
+	eventsReady                bool
+	live                       *liveEvents
+	relayLink                  bool
+	relayCall                  func(context.Context, string, string, []byte) (string, []byte, error)
+	relayMu                    sync.Mutex
+	relaySession               *link.LocalSession
+	relayKey                   string
 }
 
 // One bounded queue shared by App, CLI, and health probes. FIFO within each priority.
@@ -227,6 +241,18 @@ func main() {
 		err = updateLocalTokenValue("")
 	case "unpair":
 		err = clearRemote()
+	case "invite-phone":
+		err = invitePhone()
+	case "link-call":
+		err = linkProbeCall()
+	case "link-exchange":
+		err = linkExchange()
+	case "link-query":
+		if len(os.Args) != 3 {
+			err = errors.New("query")
+		} else {
+			err = linkProbeQuery(os.Args[2])
+		}
 	case "start":
 		err = startDaemon()
 	case "serve":
@@ -285,7 +311,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "phone-relay-gateway clients <create|list|revoke> | configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|start|serve|status|status-json|status-safe|credentials|call|remote-call")
+	fmt.Fprintln(os.Stderr, "phone-relay-gateway clients <create|list|revoke> | configure|profile|validate-endpoint <https-address>|local-token|clear-local|unpair|invite-phone|link-call|link-query <op>|start|serve|status|status-json|status-safe|credentials|call|remote-call")
 }
 
 // Uses the daemon's remote-only route, without opening adb or printing credentials.
@@ -682,6 +708,29 @@ func clearRemote() error {
 	})
 }
 
+const gatewayLogMax = 1 << 20
+
+// rotateGatewayLog keeps one previous file once the active log reaches 1 MiB.
+// It runs before a new daemon opens the file, so the running process is not renamed underneath.
+func rotateGatewayLog(dir string) error {
+	path := filepath.Join(dir, "remote-gateway.log")
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() < gatewayLogMax {
+		return nil
+	}
+	previous := path + ".1"
+	if err := os.Remove(previous); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(path, previous)
+}
+
 func startDaemon() error {
 	if _, err := ensureConfig(); err != nil {
 		return err
@@ -699,6 +748,9 @@ func startDaemon() error {
 	}
 	logDir := filepath.Join(cache, "Phone Station")
 	if err := os.MkdirAll(logDir, 0700); err != nil {
+		return err
+	}
+	if err := rotateGatewayLog(logDir); err != nil {
 		return err
 	}
 	logFile, err := os.OpenFile(filepath.Join(logDir, "remote-gateway.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -730,7 +782,7 @@ func serve() error {
 	if _, err := ensureConfig(); err != nil {
 		return err
 	}
-	g := &gateway{}
+	g := &gateway{linkLocal: true, relayLink: true}
 	server := &http.Server{
 		Addr:              listenAddress,
 		Handler:           g,
@@ -741,6 +793,7 @@ func serve() error {
 		MaxHeaderBytes:    16 << 10,
 	}
 	go g.monitor()
+	go g.keepShareSession()
 	listener, err := net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return err
@@ -818,6 +871,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Allow", "POST")
 		writeMCPError(w, nil, http.StatusMethodNotAllowed, "本服务不提供 MCP SSE 流，请使用 POST")
+		return
+	}
+	if r.URL.Path == "/v2/share" {
+		g.shareUpload(w, r, value)
 		return
 	}
 	if r.Method != http.MethodPost || (r.URL.Path != "/mcp" && r.URL.Path != "/__remote-call") {
@@ -1096,6 +1153,16 @@ type probeResult struct {
 }
 
 func (g *gateway) probeLocal(token string) probeResult {
+	if g.linkLocal {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
+		defer cancel()
+		state, _, err := g.callLink(ctx, "00000000000000000000000000000001", "meta.ping", []byte("{}"))
+		if err != nil || state != "complete" {
+			return probeResult{}
+		}
+		return probeResult{ok: true, rtt: time.Since(start)}
+	}
 	if token == "" {
 		return probeResult{}
 	}
@@ -1141,6 +1208,16 @@ func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 	if value.RemoteURL == "" || value.RemotePin == "" {
 		return probeResult{}, true
 	}
+	if g.relayLink {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		response, err := g.invokeRemote(ctx, value, []byte(`{"jsonrpc":"2.0","id":"remote-probe","method":"ping"}`), "remoteProbe")
+		if err != nil || response.Status != http.StatusOK || !validMCPReply(response.Body) {
+			return probeResult{}, true
+		}
+		return probeResult{ok: true, rtt: time.Since(start)}, true
+	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -1173,6 +1250,10 @@ func (g *gateway) probeRemote(value config) (result probeResult, sampled bool) {
 }
 
 func (g *gateway) proxyLocal(parent context.Context, w http.ResponseWriter, body []byte, value config) {
+	if g.linkLocal {
+		g.proxyLink(parent, w, body)
+		return
+	}
 	token := value.LocalToken
 	if token == "" {
 		writeMCPError(w, requestID(body), http.StatusServiceUnavailable, "adb 通道还没就绪")
@@ -1278,7 +1359,8 @@ func safeToReplay(body []byte) bool {
 		case "station_operation_status", "station_controls_status", "station_screen_capture_status", "station_terminal_read", "station_screen_status",
 			"station_file_access_policy", "station_storage_summary", "station_device_status", "station_shell_status", "station_notification_status", "station_notification_icon",
 			"station_file_list", "station_file_stat", "station_file_read_text", "station_file_read_bytes",
-			"station_file_search", "station_file_search_text":
+			"station_file_search", "station_file_search_text",
+			"device_list", "device_status", "files_list", "files_stat", "files_read", "files_grep", "clipboard_read", "task_status":
 			return true
 		}
 	}
@@ -1328,6 +1410,9 @@ func (g *gateway) remoteCall(ctx context.Context, value config, payload []byte) 
 // starts the keychain helper only when the revision is not already cached.
 func (g *gateway) invokeRemote(ctx context.Context, value config, payload []byte, kind string) (relayResponse, error) {
 	g.usage.request(kind)
+	if g.relayLink {
+		return g.relayPayload(ctx, payload)
+	}
 	if g.callRemote != nil {
 		return g.callRemote(ctx, value, payload)
 	}

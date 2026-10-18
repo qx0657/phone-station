@@ -36,21 +36,21 @@ final class RemotePolicyTest {
         String list = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}";
         Json all = Json.parse(handle(files, null, list).body).get("result").get("tools");
         RemotePolicy full = new RemotePolicy(new HashSet<>(Arrays.asList(RemotePolicy.SCOPES)));
-        for (Json tool : all.array()) { expect(full.allows(tool.get("name").string())); }
+        for (Json tool : all.array()) { expect(full.allows(McpCatalog.gate(tool.get("name").string()))); }
         expect(!full.allows("station_file_future") && !full.allows("station_remote_grant"));
         Json limited = Json.parse(handle(files, host(none), list).body).get("result").get("tools");
-        for (Json tool : limited.array()) { expect(none.allows(tool.get("name").string())); }
-        expect(limited.array().size() == 6); // four status tools and two ways to end a session.
+        for (Json tool : limited.array()) { expect(none.allows(McpCatalog.gate(tool.get("name").string()))); }
+        expect(limited.array().size() == 2);
 
-        String mutation = call(2, "station_file_write_text", Json.obj().put("path", "blocked.txt").put("text", "private"));
+        String mutation = call(2, "files_write", Json.obj().put("path", "blocked.txt").put("text", "private"));
         expect(handle(files, host(none), mutation).body.contains("isError"));
         expect(!Files.exists(root.resolve("blocked.txt")));
         // A permitted mutation followed by a forbidden command must do nothing.
-        String attack = call(3, "station_shell_exec", Json.obj().put("command", "untrusted command"));
+        String attack = call(3, "shell_run", Json.obj().put("command", "untrusted command"));
         expect(handle(files, host(write), "[" + mutation + "," + attack + "]").status == 403);
         expect(!Files.exists(root.resolve("blocked.txt")));
         // Escaped field aliases cannot change what the permission check sees.
-        String duplicate = mutation.replace("\"station_file_write_text\"", "\"station_device_status\",\"na\\u006de\":\"station_shell_exec\"");
+        String duplicate = mutation.replace("\"files_write\"", "\"device_status\",\"na\\u006de\":\"shell_run\"");
         expect(handle(files, host(none), duplicate).body.contains("-32700"));
         expect(handle(files, host(write), mutation).status == 200);
         expect(Files.readString(root.resolve("blocked.txt")).equals("private"));

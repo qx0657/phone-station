@@ -7,6 +7,8 @@ import argparse
 from collections.abc import Callable
 import fcntl
 import os
+from pathlib import Path
+import plistlib
 import pty
 import re
 import select
@@ -401,15 +403,46 @@ def online_groups(adb: str) -> list[list[Device]]:
     return list(groups.values())
 
 
+def serial_token(value: str) -> bool:
+    return 1 <= len(value) <= 128 and value.isascii() and not any(char.isspace() for char in value)
+
+
+def choose_group(groups: list[list[Device]], preferred: str | None) -> list[Device] | None:
+    if not groups:
+        return None
+    if len(groups) == 1:
+        return groups[0]
+    if preferred:
+        for group in groups:
+            if any(device.serial == preferred for device in group):
+                return group
+    return None
+
+
+def selected_phone() -> str | None:
+    override = os.environ.get("PHONE_STATION_SERIAL", "").strip()
+    if override:
+        return override if serial_token(override) else None
+    path = Path.home() / "Library/Preferences/com.qx0657.phonestation.plist"
+    try:
+        with path.open("rb") as handle:
+            data = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return None
+    value = data.get("phone-station.selected-phone") if isinstance(data, dict) else None
+    return value if isinstance(value, str) and serial_token(value) else None
+
+
 def unique_serial(adb: str) -> int:
     groups = online_groups(adb)
     if not groups:
         print("没有在线设备。USB 接上并允许调试，或打开无线调试后运行 scripts/connect.sh。", file=sys.stderr)
         return 1
-    if len(groups) != 1:
-        print("有多台在线设备。只留一台：多余的无线连接用 scripts/disconnect.sh 断开，多余的 USB 拔掉。", file=sys.stderr)
+    chosen = choose_group(groups, selected_phone() if len(groups) != 1 else None)
+    if chosen is None:
+        print("有多台在线设备。在菜单栏右键选择一台，或断开多余连接。", file=sys.stderr)
         return 1
-    print(prefer(groups[0]).serial)
+    print(prefer(chosen).serial)
     return 0
 
 
@@ -518,6 +551,15 @@ def main(argv: list[str]) -> int:
         assert read_pick_records("adb-phone (2)\t192.168.0.101\t37547\n") == [
             ("adb-phone (2)", "192.168.0.101", 37547),
         ]
+        phone_a = [Device("usb-a", "device", {}), Device("10.0.0.2:5555", "device", {})]
+        phone_b = [Device("usb-b", "device", {})]
+        assert choose_group([phone_a], None) == phone_a
+        assert choose_group([phone_a, phone_b], None) is None
+        assert choose_group([phone_a, phone_b], "usb-b") == phone_b
+        assert choose_group([phone_a, phone_b], "10.0.0.2:5555") == phone_a
+        assert choose_group([phone_a, phone_b], "missing") is None
+        assert not serial_token("bad serial")
+        assert serial_token("usb-b")
         if _mdns_was_unset:
             assert os.environ["ADB_MDNS"] == "0"
         if _auto_connect_was_unset:

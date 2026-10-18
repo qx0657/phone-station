@@ -54,6 +54,9 @@ interface StationHost {
     default Json screenStatus(String id) { throw new FileFailure("请更新手机工位以支持远程投屏"); }
     default Json screenClose(String id) { throw new FileFailure("请更新手机工位以支持远程投屏"); }
     default Json terminalOpen(String id, int columns, int rows) { throw new FileFailure("请更新手机工位以支持远程终端"); }
+    /** 链路调用。回执由 LinkReceipts 保存，实现不应再写 OperationJobs。 */
+    default Json linkTerminal(String method, byte[] params) { throw new FileFailure("没有这个方法"); }
+    default Json linkWork(String method, byte[] params) { throw new FileFailure("没有这个方法"); }
     default Json terminalRead(String id, long offset) { throw new FileFailure("请更新手机工位以支持远程终端"); }
     default Json terminalInput(String id, long sequence, String hex) { throw new FileFailure("请更新手机工位以支持远程终端"); }
     default Json terminalResize(String id, int columns, int rows) { throw new FileFailure("请更新手机工位以支持远程终端"); }

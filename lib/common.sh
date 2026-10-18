@@ -47,7 +47,8 @@ scrcpy_bin() {
   return 1
 }
 
-# 只接受唯一一台物理设备。同一手机自动重现的 mDNS 别名按 ro.serialno 归并。
+# 一台物理设备时返回它。同一手机的多条连接按 ro.serialno 归并。
+# 多台不同手机时，用菜单栏记住的序列号；没有选择就失败。
 online_serial() {
   python3 "$PHONE_STATION_LIB_DIR/adb_mdns.py" --adb "$1" serial
 }
@@ -66,6 +67,31 @@ require_station_feature() {
     print -u2 -- "手机工位总开关或对应功能已关闭，请在手机首页「功能开关」中开启。"
     return 1
   fi
+}
+
+# frame 表示已经有画面输入，走原生解码。否则仍用 scrcpy。
+screen_route() {
+  if [[ "${1:-}" == "frame" ]]; then
+    print -r -- native
+  else
+    print -r -- scrcpy
+  fi
+}
+
+# 本地投屏和录屏的入口。STATION_SCREEN_FRAME=frame 时执行 STATION_BIN screen，不再拉起 scrcpy。
+launch_screen() {
+  local backend station_bin
+  backend=$(screen_route "${STATION_SCREEN_FRAME:-}")
+  if [[ $backend == native ]]; then
+    station_bin=${STATION_BIN:-}
+    if [[ -z $station_bin || ! -x $station_bin ]]; then
+      print -u2 -- "本地画面桥还没有接到手机"
+      return 2
+    fi
+    "$station_bin" screen
+    return
+  fi
+  run_station_screen "$@"
 }
 
 # Keep recording finalization intact when a phone-owned switch is revoked.

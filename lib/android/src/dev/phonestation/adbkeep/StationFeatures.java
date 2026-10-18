@@ -82,10 +82,22 @@ final class StationFeatures {
             if (KeeperStore.mcpEnabled(context) || RemoteStore.enabled(context)) { FileMcpService.start(context); }
         }
         StationNotifications.connectionChanged();
+        noteCapabilities(context);
         return true;
+    }
+
+    private static void noteCapabilities(Context context) {
+        try {
+            boolean shizuku = ShizukuLink.read(context) == PermissionCopy.ShizukuState.GRANTED;
+            LinkLiveEvents.state("capabilities", null, LinkSnapshots.capabilities(
+                    shizuku, VerifiedDevice.current(), selections(context)));
+        } catch (RuntimeException ignored) {
+            // 状态推送失败不影响开关本身。
+        }
     }
     static void changed(Context context, String key) {
         publish(context); RemoteStore.invalidate(context);
+        noteCapabilities(context);
         if ("clipboard".equals(key)) { SharedClipboard.close(); }
         if ("notifications".equals(key)) { PhoneNotifications.state(context); }
         if (!selected(context, key)) {

@@ -243,11 +243,11 @@ public final class MainActivity extends StationActivity {
 
     private void paintConnections(HostProbe host) {
         boolean usb = "usb".equals(host.localTransport);
-        boolean unknown = host.localConnected && !usb && !"wireless".equals(host.localTransport);
-        String local = usb ? "USB" : unknown ? "本地" : "无线";
+        boolean wireless = "wireless".equals(host.localTransport);
+        String local = HostLink.localName(host.localTransport);
         int localIcon = usb ? (host.localConnected ? R.drawable.ic_status_usb : R.drawable.ic_status_usb_off)
-                : unknown ? R.drawable.ic_status_computer
-                : host.localConnected ? R.drawable.ic_status_wifi : R.drawable.ic_status_wifi_off;
+                : wireless ? (host.localConnected ? R.drawable.ic_status_wifi : R.drawable.ic_status_wifi_off)
+                : R.drawable.ic_status_computer;
         paintSignal(localIndicator, localIcon, local, local + "连接" + (host.localConnected ? "已连接" : "未连接"),
                 host.localConnected ? ui.held() : ui.muted(), host.localConnected ? ui.held() : ui.muted());
         boolean checking = !host.remoteConnected && host.remoteChecking;
@@ -300,7 +300,7 @@ public final class MainActivity extends StationActivity {
         int count = (int) state.get("selectedCount").longValue();
         boolean listener = state.get("listenerConnected").boolValue();
         boolean mac = state.get("macOnline").boolValue();
-        boolean mcpRunning = FileMcpService.listening() || PhoneRelayClient.connected();
+        boolean mcpRunning = FileMcpService.listening() || RemoteStatus.connected(this);
         boolean remoteBlocked = HostProbe.remoteOnly(this) && !RemoteStore.permission(this, "personal");
         boolean ready = on && granted && count > 0 && listener && mac && mcpRunning && !remoteBlocked;
         boolean alerts = StationFeatures.selected(this, "alerts");

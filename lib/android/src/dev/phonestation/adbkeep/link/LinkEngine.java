@@ -39,6 +39,13 @@ public final class LinkEngine {
     private int inboxBytes;
     private boolean writeBlocked;
     private int writable;
+    private Codec codec;
+
+    public interface Codec {
+        Frame seal(Frame frame);
+
+        Frame open(Frame frame);
+    }
     private volatile boolean stopped;
     private volatile Thread reader;
     private volatile Thread writer;
@@ -59,6 +66,16 @@ public final class LinkEngine {
         this.maxMessage = maxMessage;
         this.lastIn = startMs;
         this.lastOut = startMs;
+    }
+
+    public void useSeal(Codec codec) {
+        synchronized (lock) {
+            this.codec = codec;
+        }
+    }
+
+    public Exception failed() {
+        return failure.get();
     }
 
     public void setPeer(byte[] id) {
@@ -193,6 +210,9 @@ public final class LinkEngine {
                 throw new IllegalArgumentException("limit");
             }
             int limit = frameLimit <= 0 ? LinkFrame.MAIN_PAYLOAD : frameLimit;
+            if (codec != null && limit > 16) {
+                limit -= 16;
+            }
             java.util.ArrayList<byte[]> parts = new java.util.ArrayList<>();
             java.util.ArrayList<Integer> flags = new java.util.ArrayList<>();
             if (body.length == 0) {
@@ -270,6 +290,9 @@ public final class LinkEngine {
                 throw new IllegalArgumentException("seq");
             }
             inSeq++;
+            if (codec != null && (frame.kind == LinkFrame.KIND_MESSAGE || frame.kind == LinkFrame.KIND_DATA)) {
+                frame = codec.open(frame);
+            }
             if (frame.channel == 0) {
                 if (frame.kind == LinkFrame.KIND_MESSAGE || frame.kind == LinkFrame.KIND_HANDSHAKE) {
                     finishControl(frame);
@@ -524,7 +547,17 @@ public final class LinkEngine {
                 seq = outSeq++;
                 id = peer;
             }
-            return new Frame(frame.kind, frame.flags, id, frame.channel, seq, frame.payload);
+            Frame built = new Frame(frame.kind, frame.flags, id, frame.channel, seq, frame.payload);
+            if (codec != null && (built.kind == LinkFrame.KIND_MESSAGE || built.kind == LinkFrame.KIND_DATA)) {
+                try {
+                    return codec.seal(built);
+                } catch (IllegalArgumentException error) {
+                    broken = true;
+                    failure.compareAndSet(null, error);
+                    return null;
+                }
+            }
+            return built;
         }
         return null;
     }

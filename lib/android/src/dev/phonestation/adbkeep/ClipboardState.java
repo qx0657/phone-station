@@ -1,5 +1,7 @@
 package dev.phonestation.adbkeep;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.Base64;
@@ -44,6 +46,7 @@ final class ClipboardState {
     private Clip mac;
     private String client;
     private String macVersion;
+    private final Map<String, String> clientVersions = new HashMap<>();
     private long macSeen;
     private String subscriber = "";
     private long leaseAt = -1;
@@ -79,7 +82,8 @@ final class ClipboardState {
                 throw new IllegalArgumentException("需要有效的 clientId、macVersion、macKind");
             }
             Clip incoming = new Clip(kind, value(args, "macText"));
-            boolean changed = incomingClient.equals(client) && !incomingVersion.equals(macVersion);
+            boolean changed = clientVersions.containsKey(incomingClient)
+                    && !incomingVersion.equals(clientVersions.get(incomingClient));
             boolean current = revision.equals(value(args, "phoneVersion"));
             // Resume only a newer Mac event after a fresh read; the phone version must still match.
             boolean resume = args.get("resume") != null && args.get("resume").boolValue();
@@ -118,6 +122,7 @@ final class ClipboardState {
             }
             client = incomingClient;
             macVersion = incomingVersion;
+            clientVersions.put(incomingClient, incomingVersion);
             mac = incoming;
             macSeen = now;
         }
@@ -163,6 +168,7 @@ final class ClipboardState {
     synchronized void clear() {
         subscriber = ""; leaseAt = -1;
         phone = null; mac = null; client = null; macVersion = null; macSeen = 0;
+        clientVersions.clear();
         revision = UUID.randomUUID().toString();
         sessionId = UUID.randomUUID().toString();
     }

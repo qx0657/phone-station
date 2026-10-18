@@ -27,21 +27,23 @@ final class HostProbe {
     }
 
     static HostProbe current(Context context) {
-        boolean remoteConnected = RemoteStore.enabled(context) && PhoneRelayClient.connected();
-        boolean remoteChecking = RemoteStore.enabled(context) && PhoneRelayClient.checking();
+        boolean remoteConnected = RemoteStatus.connected(context);
+        boolean remoteChecking = RemoteStatus.checking(context);
         boolean local = HostPresence.fresh()
                 && Settings.Global.getInt(context.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1;
+        boolean adbWifi = Settings.Global.getInt(context.getContentResolver(), "adb_wifi_enabled", 0) == 1;
+        String transport = HostLink.localTransport(local, HostPresence.transport(), adbWifi);
         long now = System.currentTimeMillis();
         long marked = local ? now : 0L;
         boolean linked = HostLink.linked(marked, now, remoteConnected);
-        String connectionType = HostLink.connectionType(marked, now, "", remoteConnected);
+        String connectionType = HostLink.connectionType(marked, now, transport, remoteConnected);
         String headline = !linked && remoteChecking ? "确认连接中" : HostLink.headline(linked);
         if (!linked && remoteChecking) { connectionType = "远程连接待确认"; }
         if (!headline.equals(lastHeadline)) {
             Log.i(KeeperEngine.TAG, "host " + headline);
             lastHeadline = headline;
         }
-        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking, local, "");
+        return new HostProbe(headline, linked, remoteConnected, connectionType, remoteChecking, local, transport);
     }
 
     static boolean remoteOnly(Context context) {

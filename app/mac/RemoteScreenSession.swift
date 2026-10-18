@@ -2,6 +2,7 @@ import AppKit
 @preconcurrency import AVFoundation
 import AudioToolbox
 import Foundation
+import Network
 
 @MainActor
 final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDelegate {
@@ -38,6 +39,7 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
     private var inputQueue: [Data] = []
     private var sendingInput = false
     private var pendingKey = "remoteScreen.pending.v1"
+    private var localConnection: NWConnection?
 
     func start(endpoint: String, token: String, recording: URL?) {
         guard task == nil else { return }
@@ -56,7 +58,7 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
             guard let self else { return }
             do {
                 // Recover only cleanup from an interrupted App; never reopen old capture.
-                if let previous { _ = try? await Self.call(endpoint: endpoint, token: token, name: "station_screen_close", arguments: ["sessionId": previous]) }
+                if let previous { _ = try? await Self.call(endpoint: endpoint, token: token, name: "screen.close", arguments: ["sessionId": previous]) }
                 guard !Task.isCancelled else { return }
                 let urlString = endpoint.replacingOccurrences(of: "http://", with: "ws://").replacingOccurrences(of: "/mcp", with: "/__screen/\(id)")
                 guard let url = URL(string: urlString), url.host == "127.0.0.1", url.scheme == "ws" else { throw ScreenProtocolError.invalid }
@@ -66,7 +68,7 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
                 let socket = transport.webSocketTask(with: request); socket.maximumMessageSize = 4 * 1024 * 1024
                 self.socket = socket; socket.resume()
                 // Start exactly once; loss of this response is resolved by querying its job.
-                do { _ = try await Self.call(endpoint: endpoint, token: token, name: "station_screen_open", arguments: ["sessionId": id]) }
+                do { _ = try await Self.call(endpoint: endpoint, token: token, name: "screen.open", arguments: ["sessionId": id]) }
                 catch {
                     let job = try await Self.call(endpoint: endpoint, token: token, name: "station_operation_status", arguments: ["jobId": id])
                     let state = job["state"] as? String ?? "missing"
@@ -244,14 +246,71 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
             self?.onRecordingEnded(saved != nil ? message : "录屏保存失败。", saved); completion?()
         }
     }
+    func startLocal(port: UInt16) {
+        guard task == nil, port > 0 else { return }
+        route = nil; id = nil; ended = false
+        inputQueue.removeAll(); sendingInput = false
+        recordURL = nil; awaitingRecording = false; audioKnown = false; requestedRecordingAt = nil
+        videoFormat = nil; audioFormat = nil; sps = nil; pps = nil; origin = nil; receivedVideo = false
+        display = AVSampleBufferDisplayLayer(); audio = AVSampleBufferAudioRenderer()
+        synchronizer = AVSampleBufferRenderSynchronizer()
+        synchronizer.addRenderer(display); synchronizer.addRenderer(audio)
+        let connection = NWConnection(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        localConnection = connection
+        task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await Self.waitReady(connection)
+                guard !Task.isCancelled else { connection.cancel(); return }
+                self.showWindow()
+                var buffer = ScreenFrameBuffer()
+                while !Task.isCancelled {
+                    let chunk = try await Self.readChunk(connection)
+                    if chunk.isEmpty { break }
+                    for packet in try buffer.append(chunk) { try self.receive(ScreenPacket(packet)) }
+                }
+                if !self.ended { self.stop(reason: "本地投屏已结束。") }
+            } catch {
+                if !self.ended { self.stop(reason: "本地投屏已结束：\(error.localizedDescription)") }
+            }
+        }
+    }
+
+    private static func waitReady(_ connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnce()
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready: once.finish { cont.resume() }
+                case .failed(let error): once.finish { cont.resume(throwing: error) }
+                case .cancelled: once.finish { cont.resume(throwing: ScreenProtocolError.invalid) }
+                default: break
+                }
+            }
+            connection.start(queue: .global())
+        }
+    }
+
+    private static func readChunk(_ connection: NWConnection) async throws -> Data {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+                if let error { cont.resume(throwing: error); return }
+                if let data, !data.isEmpty { cont.resume(returning: data); return }
+                if isComplete { cont.resume(returning: Data()); return }
+                cont.resume(returning: Data())
+            }
+        }
+    }
+
     func stop(reason: String = "远程投屏已关闭。") {
         guard !ended else { return }; ended = true
+        localConnection?.cancel(); localConnection = nil
         task?.cancel(); task = nil; socket?.cancel(with: .normalClosure, reason: nil); socket = nil
         transport?.invalidateAndCancel(); transport = nil
         synchronizer.rate = 0; display.flushAndRemoveImage(); audio.flush()
         window?.delegate = nil; window?.close(); window = nil; view = nil
         if let id, let (endpoint, token) = route {
-            Task { _ = try? await Self.call(endpoint: endpoint, token: token, name: "station_screen_close", arguments: ["sessionId": id]) }
+            Task { _ = try? await Self.call(endpoint: endpoint, token: token, name: "screen.close", arguments: ["sessionId": id]) }
         }
         let report: () -> Void = { [weak self] in self?.onEnded(reason, nil) }
         if writer != nil || awaitingRecording { finishRecording(message: "录屏已保存。", completion: report) } else { report() }
@@ -288,6 +347,18 @@ final class RemoteScreenSession: NSObject, NSWindowDelegate, URLSessionTaskDeleg
     private func sendText(_ text: String) {
         let bytes = Data(text.utf8); guard !bytes.isEmpty, bytes.count <= 4091 else { return }
         var b = Data([1]); b.append(ScreenPacket.bigEndian(UInt64(bytes.count), bytes: 4)); b.append(bytes); send(b)
+    }
+}
+
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func finish(_ body: () -> Void) {
+        lock.lock()
+        let first = !done
+        done = true
+        lock.unlock()
+        if first { body() }
     }
 }
 

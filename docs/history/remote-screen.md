@@ -1,3 +1,5 @@
+> 2026-10-18 从当时的现行文档转入。中继 5 的合约、控制长连接、独立屏幕 WSS 和手机上的 `/mcp` 不再是当前协议。 当前链路见 [link-v2](../link-v2.md)。下文保持转入时的原文。
+
 # 远程实时投屏与录屏
 
 Android 63、Mac 0.1.0 (25)、公网中继 3 配合使用时，Mac 首页的「打开投屏」「开始录屏」可在只有远程连接时使用。需要已经配置的远程中继、已运行并授权的 Shizuku 13+，以及 PGT-AN20 / Android 15。旧手机不会启用远程投屏；旧中继返回明确的通道不可用错误。构建与本机回归通过不代表已完成设备安装或真机验收。
@@ -8,7 +10,7 @@ Android 63、Mac 0.1.0 (25)、公网中继 3 配合使用时，Mac 首页的「�
 
 ## 通道与权限
 
-Android 64 起必须在手机远程中继页开启「投屏与操控」，默认关闭；即使 open 经本地 MCP 提交，公网屏幕会话也检查此开关。改变权限或资料会结束旧会话并阻止旧排队创建。详见 [远程安全与授权](security.md)。
+Android 64 起必须在手机远程中继页开启「投屏与操控」，默认关闭；即使 open 经本地 MCP 提交，公网屏幕会话也检查此开关。改变权限或资料会结束旧会话并阻止旧排队创建。详见 [远程安全与授权](../security.md)。
 
 控制会话的三个工具是 `station_screen_open`、`station_screen_status`、`station_screen_close`，参数是提前保存的 32 位小写十六进制 `sessionId`。open 返回编号相同的后台任务，使用 `station_operation_status` 查询创建结果；status 返回原会话状态与视频帧数，不重新采集。丢失创建应答后只查询原任务，不再次提交。close 关闭原会话，可重复调用。
 
@@ -18,7 +20,7 @@ Android 64 起必须在手机远程中继页开启「投屏与操控」，默认
 
 ## 实现与生命周期
 
-手机从 APK 提取已固定摘要的 scrcpy-server 4.1 和 Android/arm64 视频桥到 shell 所有的 0700 目录。采集走剪贴板、shell、手电共用的助手进程。Android 72 已装上，没有单独的投屏进程，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。Jar 只读，辅助程序校验摘要后执行；角色令牌经 Binder 和 stdin 传入内存，不进命令参数或临时文件。DNS 在 Android 应用中解析，避免纯 Go 在 Android 上没有系统 DNS 配置的问题。辅助程序 stderr 用单独线程排空，不使用桌面 JDK 的 `ProcessBuilder.Redirect.DISCARD`；Android 15 没有该字段，桌面 `javac --release 17` 的编译通过不能证明 ART 支持它。
+手机从 APK 提取已固定摘要的 scrcpy-server 4.1 和 Android/arm64 视频桥到 shell 所有的 0700 目录。采集走剪贴板、shell、手电共用的助手进程。Android 72 已装上，没有单独的投屏进程，见[共用助手](validation.md#2026-10-17-android-72-共用助手)。Jar 只读，辅助程序校验摘要后执行；角色令牌经 Binder 和 stdin 传入内存，不进命令参数或临时文件。DNS 在 Android 应用中解析，避免纯 Go 在 Android 上没有系统 DNS 配置的问题。辅助程序 stderr 用单独线程排空，不使用桌面 JDK 的 `ProcessBuilder.Redirect.DISCARD`；Android 15 没有该字段，桌面 `javac --release 17` 的编译通过不能证明 ART 支持它。
 
 打开会话时唤醒手机，息屏时间继续使用既有设置。scrcpy 用 MediaCodec 编码 H.264 与 AAC，默认最长边 1600、30 fps、视频 2 Mbps、音频 128 kbps。独立连接传输完整编码帧；单个消息最多 4 MiB，写入阻塞超过 5 秒时结束，避免堆积旧画面或丢失参考帧。手机每 5 秒验证视频连接，最长会话为 1 小时。输入只接受按键、文字、触摸、滚动和返回消息，不转发 scrcpy 的剪贴板同步或文件操作。
 
@@ -28,8 +30,8 @@ Mac 使用 AVSampleBufferDisplayLayer 和 AVSampleBufferAudioRenderer 同步播�
 
 ## 发布与验证边界
 
-先准备并验证中继 3、Android 63、Mac 25 的产物。公网中继升级保留原配置、证书、角色令牌及完整持久状态目录；MCP 状态格式仍为 durable-epochs-v1，与中继 2 兼容。实际切换遵循 [发布与回滚](releases.md) 的停机授权和回执规则。已有反向代理须透传 WebSocket Upgrade；直连既有 TLS 中继无需增加端口。
+先准备并验证中继 3、Android 63、Mac 25 的产物。公网中继升级保留原配置、证书、角色令牌及完整持久状态目录；MCP 状态格式仍为 durable-epochs-v1，与中继 2 兼容。实际切换遵循 [发布与回滚](../releases.md) 的停机授权和回执规则。已有反向代理须透传 WebSocket Upgrade；直连既有 TLS 中继无需增加端口。
 
 本机验证包含真实 WebSocket 双向转发、角色隔离、重复连接与旧编号拒绝、关服清理、scrcpy 4.1 session 元数据与帧边界、输入白名单，以及原生 H.264/AAC 写入 MP4 后再解码。真机延迟、蜂窝切换、声音和点击效果应在部署回执中单独登记。
 
-第三方许可随包附带：[scrcpy Apache-2.0](licenses/scrcpy.txt)、[coder/websocket ISC](licenses/coder-websocket.txt)。
+第三方许可随包附带：[scrcpy Apache-2.0](../licenses/scrcpy.txt)、[coder/websocket ISC](../licenses/coder-websocket.txt)。

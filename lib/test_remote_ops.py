@@ -105,6 +105,42 @@ class RemoteOpsTest(unittest.TestCase):
         self.assertEqual([name for name, _ in calls], ["station_shell_start", "station_operation_status"])
         self.assertEqual(calls[0][1]["jobId"], calls[1][1]["jobId"])
 
+    def test_link_shell_output_does_not_stop_on_missing_receipt(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        client.async_shell = True
+        client.names = {"shell_run", "task_status", "device_status"}
+        calls = []
+
+        def tool(name, args):
+            calls.append((name, args))
+            if name == "shell_run":
+                return {"stdout": "", "stderr": "", "exitCode": 0, "timedOut": False}
+            raise AssertionError("missing receipt must not be queried when the link already returned the output")
+
+        client.tool = tool
+        result = client.shell("test ! -e /data/local/tmp/none")
+        self.assertEqual(result["exitCode"], 0)
+        self.assertEqual([name for name, _ in calls], ["shell_run"])
+
+    def test_missing_receipt_still_stops_without_resubmit(self):
+        with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
+            client = ops.Client()
+        client.async_shell = True
+        client.names = {"shell_run", "task_status"}
+        calls = []
+
+        def tool(name, args):
+            calls.append(name)
+            if name == "shell_run":
+                raise ops.RemoteError("response lost")
+            return {"jobId": args["jobId"], "state": "missing"}
+
+        client.tool = tool
+        with self.assertRaisesRegex(ops.RemoteError, "shell 任务编号"):
+            client.shell("test ! -e /data/local/tmp/none")
+        self.assertEqual(calls, ["shell_run", "task_status"])
+
     def test_async_shell_unknown_job_reports_queryable_id(self):
         with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
             client = ops.Client()

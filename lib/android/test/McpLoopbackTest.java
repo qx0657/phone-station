@@ -100,7 +100,11 @@ final class McpLoopbackTest {
                 throw new FileFailure("在手机工位的权限页允许使用 Shizuku");
             }
         };
-        McpHttp http = McpHttp.open(0, "TOKEN", new FileOps(home), host, "6");
+        files = new FileOps(home);
+        serviceHost = host;
+        McpHttp http = McpHttp.open(0, "TOKEN", files, host, "6");
+        String[] removed = postHttp(http.port());
+        expect("404", removed[0]);
         try {
             String[] denied = post(http.port(), "NOPE", initialize());
             expect("401", denied[0]);
@@ -116,43 +120,30 @@ final class McpLoopbackTest {
 
             String[] tools = post(http.port(), "TOKEN",
                     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
-            expect(true, tools[1].contains("station_file_delete_directory"));
-            expect(true, tools[1].contains("station_device_status"));
-            expect(true, tools[1].contains("station_storage_summary"));
-            expect(true, tools[1].contains("station_stay_awake"));
-            expect(true, tools[1].contains("station_controls_status"));
-            expect(true, tools[1].contains("station_screen_capture"));
-            expect(true, tools[1].contains("station_screen_capture_release"));
-            expect(true, tools[1].contains("station_torch"));
-            expect(true, tools[1].contains("station_notify"));
-            expect(true, tools[1].contains("station_clipboard_set"));
-            expect(true, tools[1].contains("station_clipboard_get"));
-            expect(true, tools[1].contains("station_clipboard_state"));
-            expect(true, tools[1].contains("station_clipboard_configure"));
-            expect(true, tools[1].contains("station_clipboard_exchange"));
-            expect(true, tools[1].contains("station_notification_status"));
-            expect(true, tools[1].contains("station_notification_icon"));
-            expect(true, tools[1].contains("station_notification_configure"));
-            expect(true, tools[1].contains("station_notification_poll"));
-            expect(true, tools[1].contains("station_file_open"));
+            expect(true, tools[1].contains("\"files_manage\""));
+            expect(true, tools[1].contains("\"device_status\""));
+            expect(true, tools[1].contains("\"screenshot\""));
+            expect(true, tools[1].contains("\"phone_alert\""));
+            expect(true, tools[1].contains("\"clipboard_read\""));
+            expect(true, tools[1].contains("\"shell_run\""));
+            expect(false, tools[1].contains("station_clipboard_exchange"));
+            expect(false, tools[1].contains("station_notification_poll"));
+            expect(false, tools[1].contains("station_terminal_open"));
+            expect(false, tools[1].contains("station_screen_open"));
             Json listed = Json.parse(tools[1]).get("result").get("tools");
+            expect(18, listed.array().size());
             for (Json tool : listed.array()) {
                 String toolName = tool.get("name").string();
-                if (toolName.equals("station_screen_capture") || toolName.equals("station_torch")) {
+                if (toolName.equals("screenshot") || toolName.equals("device_control")) {
                     expect(false, tool.get("annotations").get("readOnlyHint").boolValue());
                 }
-                if ("station_notify".equals(tool.get("name").string())) {
+                if ("phone_alert".equals(toolName)) {
                     expect(false, tool.get("inputSchema").get("properties").has("mode"));
                 }
-                if ("station_shell_exec".equals(tool.get("name").string())) {
+                if ("shell_run".equals(toolName)) {
                     expect(false, tool.get("annotations").get("readOnlyHint").boolValue());
                     expect(true, tool.get("annotations").get("destructiveHint").boolValue());
                 }
-            }
-            expect(true, tools[1].contains("station_shell_exec"));
-            expect(true, tools[1].contains("station_shell_status"));
-            for (String operation : new String[] {"open", "read", "input", "resize", "close"}) {
-                expect(true, tools[1].contains("station_terminal_" + operation));
             }
             String terminalId = "d".repeat(32);
             expect(true, call(http.port(), "station_terminal_read", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("lost"));
@@ -164,9 +155,9 @@ final class McpLoopbackTest {
             expect(true, call(http.port(), "station_terminal_resize", "{\"sessionId\":\"" + terminalId + "\",\"columns\":100,\"rows\":30}")[1].contains("running"));
             expect(true, call(http.port(), "station_terminal_close", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("closed"));
             expect(true, tools[1].contains("destructiveHint"));
-            expect(true, call(http.port(), "station_controls_status", "{}")[1].contains("verified"));
-            expect(true, call(http.port(), "station_torch", "{\"on\":true}")[1].contains("true"));
-            expect(true, call(http.port(), "station_torch", "{}")[1].contains("isError"));
+            expect(true, call(http.port(), "device_status", "{}")[1].contains("verified"));
+            expect(true, call(http.port(), "device_control", "{\"action\":\"torch\",\"on\":true}")[1].contains("true"));
+            expect(true, call(http.port(), "device_control", "{\"action\":\"torch\"}")[1].contains("isError"));
 
             expect(true, call(http.port(), "station_notification_status", "{}")[1].contains("enabled"));
             expect(true, call(http.port(), "station_notification_icon", "{\"packageName\":\"chat\"}")[1].contains("chat"));
@@ -174,61 +165,62 @@ final class McpLoopbackTest {
             expect(true, call(http.port(), "station_notification_configure", "{}")[1].contains("isError"));
             expect(false, call(http.port(), "station_notification_configure", "{\"enabled\":true}")[1].contains("isError"));
 
-            String[] wrote = call(http.port(), "station_file_write_text",
+            String[] wrote = call(http.port(), "files_write",
                     "{\"path\":\"note.txt\",\"text\":\"手机\\n\"}");
             expect(false, wrote[1].contains("isError"));
-            String[] read = call(http.port(), "station_file_read_text", "{\"path\":\"note.txt\"}");
+            String[] read = call(http.port(), "files_read", "{\"path\":\"note.txt\"}");
             expect(true, read[1].contains("手机"));
-            String[] missing = call(http.port(), "station_file_delete", "{\"path\":\"nope.txt\"}");
+            String[] missing = call(http.port(), "files_manage", "{\"path\":\"nope.txt\",\"action\":\"delete\"}");
             expect(true, missing[1].contains("isError"));
             expect(true, missing[1].contains("没有这个文件"));
-            call(http.port(), "station_file_delete", "{\"path\":\"note.txt\"}");
+            call(http.port(), "files_manage", "{\"path\":\"note.txt\",\"action\":\"delete\"}");
 
-            String[] awake = call(http.port(), "station_stay_awake", "{\"on\":true}");
+            String[] awake = call(http.port(), "device_control", "{\"action\":\"awake\",\"on\":true}");
             expect(true, awake[1].contains("stayAwake"));
             expect(true, stayed[0]);
-            String[] clip = call(http.port(), "station_clipboard_set", "{\"text\":\"\"}");
+            String[] clip = call(http.port(), "clipboard_write", "{\"text\":\"\"}");
             expect(true, clip[1].contains("isError"));
-            expect(true, call(http.port(), "station_clipboard_get", "{}")[1].contains("phone"));
+            expect(true, call(http.port(), "clipboard_read", "{}")[1].contains("phone"));
             expect(true, call(http.port(), "station_clipboard_state", "{}")[1].contains("automatic"));
             expect(true, call(http.port(), "station_clipboard_configure", "{\"shared\":true}")[1].contains("shared"));
             expect(true, call(http.port(), "station_clipboard_exchange", "{}")[1].contains("phoneVersion"));
-            String[] reminded = call(http.port(), "station_notify",
+            String[] reminded = call(http.port(), "phone_alert",
                     "{\"title\":\"标题\",\"text\":\"内容\",\"agent\":\"Grok\"}");
             expect(true, reminded[1].contains("标题"));
             expect(true, reminded[1].contains("replace"));
             stackPreference[0] = true;
-            String[] legacyReplace = call(http.port(), "station_notify",
+            String[] legacyReplace = call(http.port(), "phone_alert",
                     "{\"title\":\"标题\",\"text\":\"内容\",\"mode\":\"replace\"}");
             expect(true, legacyReplace[1].contains("stack"));
             stackPreference[0] = false;
-            String[] customSound = call(http.port(), "station_notify",
+            String[] customSound = call(http.port(), "phone_alert",
                     "{\"title\":\"标题\",\"text\":\"内容\",\"mode\":\"stack\",\"sound\":\"/system/media/Bell.ogg\"}");
             expect(true, customSound[1].contains("/system/media/Bell.ogg"));
             expect(true, customSound[1].contains("replace"));
             expect(false, customSound[1].contains("stack"));
-            String[] status = call(http.port(), "station_device_status", "{}");
+            String[] status = call(http.port(), "device_status", "{}");
             expect(true, status[1].contains("batteryPercent"));
+            expect(true, call(http.port(), "station_device_status", "{}")[1].contains("unknown_tool"));
 
-            String[] shellStatus = call(http.port(), "station_shell_status", "{}");
+            String[] shellStatus = call(http.port(), "shell_run", "{\"action\":\"status\"}");
             expect(true, shellStatus[1].contains("denied"));
-            String[] shellDenied = call(http.port(), "station_shell_exec", "{\"command\":\"id\"}");
+            String[] shellDenied = call(http.port(), "shell_run", "{\"command\":\"id\"}");
             expect(true, shellDenied[1].contains("isError"));
             expect(true, shellDenied[1].contains("允许使用 Shizuku"));
             expect(1, shellCalls[0]);
-            String[] invalidShell = call(http.port(), "station_shell_exec",
+            String[] invalidShell = call(http.port(), "shell_run",
                     "{\"command\":\"id\",\"timeoutMs\":60001}");
             expect(true, invalidShell[1].contains("isError"));
             expect(1, shellCalls[0]);
             String[] deniedShell = post(http.port(), "NOPE",
                     "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\","
-                            + "\"params\":{\"name\":\"station_shell_exec\",\"arguments\":{\"command\":\"id\"}}}");
+                            + "\"params\":{\"name\":\"shell_run\",\"arguments\":{\"command\":\"id\"}}}");
             expect("401", deniedShell[0]);
             expect(1, shellCalls[0]);
 
             CompletableFuture<String[]> busyShell = CompletableFuture.supplyAsync(() -> {
                 try {
-                    return call(http.port(), "station_shell_exec", "{\"command\":\"wait\"}");
+                    return call(http.port(), "shell_run", "{\"command\":\"wait\"}");
                 } catch (Exception error) {
                     throw new RuntimeException(error);
                 }
@@ -247,16 +239,16 @@ final class McpLoopbackTest {
             String[] bad = post(http.port(), "TOKEN", "{");
             expect(true, bad[1].contains("-32700"));
             String jobID = "a".repeat(32);
-            String arguments = "{\"jobId\":\"" + jobID + "\",\"command\":\"job-wait\"}";
-            expect("200", call(http.port(), "station_shell_start", arguments)[0]);
+            String arguments = "{\"action\":\"start\",\"jobId\":\"" + jobID + "\",\"command\":\"job-wait\"}";
+            expect("200", call(http.port(), "shell_run", arguments)[0]);
             expect(true, jobEntered.await(1, TimeUnit.SECONDS));
             long quickStarted = System.nanoTime();
-            expect(true, call(http.port(), "station_device_status", "{}")[1].contains("batteryPercent"));
+            expect(true, call(http.port(), "device_status", "{}")[1].contains("batteryPercent"));
             expect(true, call(http.port(), "station_notification_status", "{}")[1].contains("enabled"));
             expect(true, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - quickStarted) < 500);
-            expect(true, call(http.port(), "station_operation_status", "{\"jobId\":\"" + jobID + "\"}")[1].contains("running"));
+            expect(true, call(http.port(), "task_status", "{\"jobId\":\"" + jobID + "\"}")[1].contains("running"));
             int beforeDuplicate = shellCalls[0];
-            call(http.port(), "station_shell_start", arguments);
+            call(http.port(), "shell_run", arguments);
             expect(true, beforeDuplicate == shellCalls[0]);
             jobRelease.countDown();
             // Status is serialized with the durable receipt write. Wait for it
@@ -299,42 +291,31 @@ final class McpLoopbackTest {
         return post(port, "TOKEN", json);
     }
 
-    private static String[] post(int port, String token, String json) throws Exception {
+    private static FileOps files;
+    private static StationHost serviceHost;
+
+    private static String[] post(int port, String token, String json) {
+        McpProtocol.Reply reply = McpProtocol.handle(json, "Bearer " + token, "TOKEN", files, serviceHost, "6");
+        return new String[] {Integer.toString(reply.status), reply.body};
+    }
+
+    private static String[] postHttp(int port) throws Exception {
         Socket socket = new Socket("127.0.0.1", port);
-        socket.setSoTimeout(5000);
-        byte[] payload = json.getBytes(StandardCharsets.UTF_8);
-        String request = "POST /mcp HTTP/1.1\r\n"
-                + "Host: 127.0.0.1\r\n"
-                + "Content-Type: application/json\r\n"
-                + "Accept: application/json, text/event-stream\r\n"
-                + "Authorization: Bearer " + token + "\r\n"
-                + "Content-Length: " + payload.length + "\r\n"
-                + "Connection: close\r\n\r\n";
+        socket.setSoTimeout(2000);
         OutputStream out = socket.getOutputStream();
-        out.write(request.getBytes(StandardCharsets.US_ASCII));
-        out.write(payload);
+        out.write("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
         out.flush();
         ByteArrayOutputStream all = new ByteArrayOutputStream();
         InputStream in = socket.getInputStream();
-        while (!all.toString("US-ASCII").endsWith("\r\n\r\n")) {
-            int value = in.read();
-            if (value < 0) { throw new AssertionError("incomplete headers"); }
+        int value;
+        while ((value = in.read()) >= 0) {
             all.write(value);
         }
-        int length = Integer.parseInt(all.toString("US-ASCII").split("Content-Length: ")[1].split("\r\n")[0]);
-        byte[] response = in.readNBytes(length);
-        if (response.length != length) { throw new AssertionError("incomplete body"); }
-        all.write(response);
         socket.close();
-        String text = all.toString("UTF-8");
-        int split = text.indexOf("\r\n\r\n");
-        if (split < 0) {
-            throw new AssertionError(text);
-        }
-        String head = text.substring(0, split);
-        int firstSpace = head.indexOf(' ');
-        int secondSpace = head.indexOf(' ', firstSpace + 1);
-        return new String[] {head.substring(firstSpace + 1, secondSpace), text.substring(split + 4)};
+        String text = all.toString(StandardCharsets.US_ASCII);
+        int split = text.indexOf(' ');
+        int end = text.indexOf(' ', split + 1);
+        return new String[] {text.substring(split + 1, end), ""};
     }
 
     private static void expect(String want, String got) {

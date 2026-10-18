@@ -50,8 +50,14 @@ struct ConnectionPage: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         StationRows.sectionTitle(StationL10n.text("远程连接"))
-                        StationRows.navigationRow(StationL10n.text("远程接入"), symbol: "network", detail: station.mcp.remoteStatusLabel) {
-                            station.page = .remoteRelay
+                        VStack(spacing: 0) {
+                            StationRows.navigationRow(StationL10n.text("远程接入"), symbol: "network", detail: station.mcp.remoteStatusLabel) {
+                                station.page = .remoteRelay
+                            }
+                            StationRows.groupDivider.padding(.horizontal, 10)
+                            StationRows.navigationRow(StationL10n.text("工位配对"), symbol: "person.2", detail: StationL10n.text("本地链路、拍照或手动输入")) {
+                                station.page = .stationPair
+                            }
                         }.elevatedGroup()
                     }
                     StationOperationFeedback(station: station)
@@ -77,11 +83,12 @@ struct ConnectionPage: View {
         .onAppear { refreshPairing() }
         .onDisappear { station.pairing.stop() }
         .onChange(of: station.panelVisible, perform: { _ in refreshPairing() })
+        .onChange(of: station.settingsOpen, perform: { _ in refreshPairing() })
         .onChange(of: station.link.needsWirelessPairing, perform: { _ in refreshPairing() })
     }
 
     private func refreshPairing() {
-        guard station.panelVisible, station.link.needsWirelessPairing else {
+        guard station.surfaceVisible, station.link.needsWirelessPairing else {
             if !station.link.needsWirelessPairing, case .waiting = station.pairing.phase {
                 station.pairing.stop()
             }

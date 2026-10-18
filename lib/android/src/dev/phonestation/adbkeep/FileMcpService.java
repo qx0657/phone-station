@@ -10,6 +10,9 @@ import android.os.IBinder;
 import android.provider.Settings;
 import android.util.Log;
 
+import dev.phonestation.adbkeep.link.LinkReceipts;
+import dev.phonestation.adbkeep.link.LocalLink;
+
 import java.io.IOException;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -29,6 +32,8 @@ public final class FileMcpService extends Service {
     private static volatile boolean listening;
 
     private McpHttp server;
+    private LinkPort linkPort;
+    private static volatile LinkPort currentLink;
     private String token;
     private String serverRevision;
     private PhoneRelayClient remoteClient;
@@ -39,10 +44,20 @@ public final class FileMcpService extends Service {
         return listening;
     }
 
+    static boolean linkRemoteActive() {
+        LinkPort port = currentLink;
+        return port != null && port.hasRemote();
+    }
+
+    static boolean linkRemoteOnline() {
+        LinkPort port = currentLink;
+        return port != null && port.remoteOnline();
+    }
+
     static Json status(Context context) {
         return McpStatus.present(StationFeatures.master(context), KeeperStore.mcpEnabled(context), listening(),
-                RemoteStore.enabled(context), RemoteStore.configured(context), PhoneRelayClient.connected(),
-                PhoneRelayClient.checking(), PhoneRelayClient.connectionLabel(context));
+                RemoteStore.enabled(context), RemoteStore.configured(context), RemoteStatus.connected(context),
+                RemoteStatus.checking(context), RemoteStatus.label(context));
     }
 
     static void start(Context context) {
@@ -87,16 +102,30 @@ public final class FileMcpService extends Service {
         }
         if (server != null && (!KeeperStore.mcpEnabled(this)
                 || !RemoteStore.permissionRevision(this).equals(serverRevision))) {
-            server.close(); server = null; token = null; listening = false; publishListening(false);
+            server.close(); server = null; closeLink(); token = null; listening = false; publishListening(false);
         }
         if (server == null && KeeperStore.mcpEnabled(this)) {
             token = newToken();
             try {
                 FileOps files = FileOps.device();
                 files.setMediaNotice(new MediaScan(this));
-                server = McpHttp.open(PORT, token, files, new StationBridge(this, files), versionName());
+                StationBridge bridge = new StationBridge(this, files);
+                LinkPort port = openLink(files, bridge);
+                linkPort = port;
+                if (port != null) {
+                    port.watchRemote(StationNotifications::connectionChanged);
+                    port.setJoined((endpoint, pin) -> {
+                        if (RemoteStore.rememberLink(this, endpoint, pin)) {
+                            port.replaceRemote(endpoint, pinBytes(pin));
+                        }
+                    });
+                }
+                currentLink = linkPort;
+                openRemote();
+                server = McpHttp.open(PORT, token, files, bridge, versionName(), linkPort);
                 serverRevision = RemoteStore.permissionRevision(this);
             } catch (IOException error) {
+                closeLink();
                 Log.e(TAG, "mcp listen failed", error);
                 listening = false;
                 publishListening(false);
@@ -150,6 +179,7 @@ public final class FileMcpService extends Service {
         if (running != null) {
             running.close();
         }
+        closeLink();
         PhoneRelayClient remote = remoteClient;
         remoteClient = null;
         if (remote != null) {
@@ -179,6 +209,58 @@ public final class FileMcpService extends Service {
             writer.println("mcp token " + token);
         }
         writer.println(PhoneDeviceKey.diagnostic());
+    }
+
+    private LinkPort openLink(FileOps files, StationHost host) {
+        try {
+            java.nio.file.Path dir = getFilesDir().toPath();
+            LinkGrants grants = LinkGrants.open(dir.resolve("link-grants"));
+            LinkReceipts receipts = new LinkReceipts(dir.resolve("link-receipts"));
+            LocalLink.Device identity = PhoneDeviceKey.identity();
+            LinkPort port = new LinkPort(identity, grants::devices, receipts, files, host, versionName(), dir);
+            LinkPairing.install(new LinkPairDesk(port.phoneSpki(), grants, port::closePeer));
+            return port;
+        } catch (Exception error) {
+            Log.w(TAG, "link unavailable");
+            return null;
+        }
+    }
+
+    private void openRemote() {
+        if (linkPort == null) {
+            return;
+        }
+        try {
+            linkPort.openRemote(RemoteStore.endpoint(this), pinBytes(RemoteStore.pin(this)));
+        } catch (RuntimeException error) {
+            Log.w(TAG, "remote link unavailable");
+        }
+    }
+
+    private static byte[] pinBytes(String pin) {
+        if (pin == null || !pin.matches("[0-9a-fA-F]{64}")) {
+            return null;
+        }
+        byte[] out = new byte[32];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(pin.substring(i * 2, i * 2 + 2), 16);
+        }
+        return out;
+    }
+
+    static boolean offerToMac(String name, byte[] body) {
+        LinkPort port = currentLink;
+        return port != null && port.offer(name, body);
+    }
+
+    private void closeLink() {
+        LinkPort port = linkPort;
+        linkPort = null;
+        currentLink = null;
+        LinkPairing.install(null);
+        if (port != null) {
+            port.close();
+        }
     }
 
     private String versionName() {

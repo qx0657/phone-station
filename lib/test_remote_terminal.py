@@ -23,6 +23,7 @@ class Phone:
         self.drop_before_input = False
         self.wrong_id = False
         self.model = "PGT-AN20"
+        self.verified = True
         self.permissions = None
 
     def rpc(self, method, args):
@@ -34,7 +35,7 @@ class Phone:
     def tool(self, name, args=None):
         self.calls.append((name, args))
         if name == "station_controls_status":
-            return {"model": self.model, "verified": True, "remotePermissions": self.permissions}
+            return {"model": self.model, "verified": self.verified, "remotePermissions": self.permissions}
         if name == "station_shell_status":
             return {"available": True}
         if name == "station_terminal_input":
@@ -63,6 +64,8 @@ class TerminalTest(unittest.TestCase):
         self.assertTrue(all(name in {"initialize", "tools/list", "station_controls_status", "station_shell_status"}
                             for name, _ in self.phone.calls))
         self.phone.model = "other"
+        initialize(self.phone)
+        self.phone.verified = False
         with self.assertRaises(RemoteError):
             initialize(self.phone)
 

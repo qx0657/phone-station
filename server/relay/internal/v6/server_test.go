@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -81,6 +82,12 @@ func sign(t *testing.T, key *ecdsa.PrivateKey, message []byte) string {
 
 func startTLS(t *testing.T) (*Server, *http.Client, string, *lockedBuf) {
 	t.Helper()
+	server, client, base, buf, _ := listenTLS(t)
+	return server, client, base, buf
+}
+
+func listenTLS(t *testing.T) (*Server, *http.Client, string, *lockedBuf, []byte) {
+	t.Helper()
 	dir := t.TempDir()
 	server, err := Open(dir)
 	if err != nil {
@@ -102,7 +109,12 @@ func startTLS(t *testing.T) (*Server, *http.Client, string, *lockedBuf) {
 		httpServer.Close()
 		server.Close()
 	})
-	return server, client, "https://" + listener.Addr().String(), buf
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
+	return server, client, "https://" + listener.Addr().String(), buf, sum[:]
 }
 
 func testCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
@@ -113,6 +125,7 @@ func testCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	}
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
@@ -1540,6 +1553,77 @@ func unauthKeys(server *Server) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func TestMediaPurposeSealedFrameHidesBody(t *testing.T) {
+	server, client, base, _ := startTLS(t)
+	code, err := server.IssueEnroll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := newIdentity(t)
+	phone := newIdentity(t)
+	macMain := enrollMac(t, client, base, code, mac)
+	phoneMain := joinDevice(t, server, client, base, macMain, mac, phone, "phone", "手机")
+	t.Cleanup(func() {
+		macMain.CloseNow()
+		phoneMain.CloseNow()
+	})
+	macMedia, ready := authAs(t, client, base, mac, "media")
+	if ready.Type != "ready" {
+		t.Fatalf("mac media %#v", ready)
+	}
+	phoneMedia, phoneReady := authAs(t, client, base, phone, "media")
+	if phoneReady.Type != "ready" {
+		t.Fatalf("phone media %#v", phoneReady)
+	}
+	t.Cleanup(func() {
+		macMedia.CloseNow()
+		phoneMedia.CloseNow()
+	})
+	secret := []byte("media-secret-9f3a")
+	if kept, err := link.AdmitApplication(true, link.Frame{Kind: link.KindMessage, Payload: secret}); err == nil || len(kept.Payload) != 0 {
+		t.Fatal(err, kept.Payload)
+	}
+	nonce, err := link.Nonce("mac-to-phone", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aad := link.AAD(link.KindMessage, link.FlagEncrypted|link.FlagEnd, 0, 1)
+	sealed, err := link.Seal(bytes.Repeat([]byte{7}, 32), nonce, secret, aad)
+	if err != nil || bytes.Contains(sealed, secret) {
+		t.Fatal(err)
+	}
+	raw, err := link.Encode(link.Frame{
+		Kind: link.KindMessage, Flags: link.FlagEncrypted | link.FlagEnd, Peer: phone.id, Seq: 1, Payload: sealed,
+	}, link.MediaPayload)
+	if err != nil || bytes.Contains(raw, secret) {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := macMedia.Write(ctx, websocket.MessageBinary, raw); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("frame")
+		}
+		readCtx, readCancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		frame, err := readFrame(readCtx, phoneMedia, link.MediaPayload)
+		readCancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Kind != link.KindMessage {
+			continue
+		}
+		if bytes.Contains(frame.Payload, secret) || frame.Flags&link.FlagEncrypted == 0 {
+			t.Fatalf("forwarded body %x", frame.Payload)
+		}
+		return
+	}
 }
 
 func waitUnauth(t *testing.T, server *Server, want int) {

@@ -36,4 +36,4 @@ print -r -- "录屏 $SERIAL"
 print -r -- "保存到 $out"
 print -r -- "结束：关闭窗口，或在这个终端按 Ctrl+C。"
 export ADB
-run_station_screen "$SCRCPY" --serial="$SERIAL" --stay-awake --record="$out" "$@"
+launch_screen "$SCRCPY" --serial="$SERIAL" --stay-awake --record="$out" "$@"

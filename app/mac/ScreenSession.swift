@@ -8,6 +8,7 @@ final class ScreenSession: ObservableObject {
     @Published private(set) var isStoppingRecording = false
 
     var remoteRoute: () -> (String, String)? = { nil }
+    var localScreen: () -> UInt16? = { nil }
     private let remoteScreen = RemoteScreenSession()
     private(set) var usingRemote = false
     var allow: () -> Bool = { false }
@@ -65,6 +66,12 @@ final class ScreenSession: ObservableObject {
             feedback.notice = "正在连接远程画面…"
             remoteScreen.start(endpoint: endpoint, token: token, recording: nil); return
         }
+        let port = localScreen()
+        if ScreenRoute.choose(hasFrame: port != nil) == "native", let port {
+            usingRemote = true; isMirroring = true
+            feedback.notice = "正在连接本机画面…"
+            remoteScreen.startLocal(port: port); return
+        }
         let log = FileManager.default.temporaryDirectory.appendingPathComponent("phone-mirror-\(UUID().uuidString).log")
         do {
             let process = try StationRunner.startScript("mirror.sh", [], log: log) { [weak self] finished in
@@ -108,6 +115,14 @@ final class ScreenSession: ObservableObject {
             usingRemote = true; isMirroring = true; isRecording = true; isStoppingRecording = false
             feedback.notice = "正在连接远程画面并录屏…"
             remoteScreen.start(endpoint: endpoint, token: token, recording: destination); return
+        }
+        let port = localScreen()
+        if ScreenRoute.choose(hasFrame: port != nil) == "native", let port {
+            usingRemote = true; isMirroring = true; isRecording = true; isStoppingRecording = false
+            feedback.notice = "正在连接本机画面并录屏…"
+            remoteScreen.startLocal(port: port)
+            remoteScreen.startRecording(destination)
+            return
         }
         let log = FileManager.default.temporaryDirectory.appendingPathComponent("phone-record-\(UUID().uuidString).log")
         feedback.notice = nil

@@ -29,7 +29,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(9)
             value = {'health': {'issues': []}}
         else:
-            if name == 'station_clipboard_exchange': Handler.exchanges += 1
+            if name == 'clipboard.exchange': Handler.exchanges += 1
             newer = Handler.exchanges >= 2
             value = {'shared': True, 'automatic': True, 'macOnline': True,
                      'phoneVersion': 'p2' if newer else 'p1', 'sessionId': 'fixture',

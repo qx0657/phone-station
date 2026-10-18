@@ -10,6 +10,32 @@ enum StationChrome {
     static let cardRadius: CGFloat = 12
 }
 
+private struct StationTextFactorKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    var stationTextFactor: CGFloat {
+        get { self[StationTextFactorKey.self] }
+        set { self[StationTextFactorKey.self] = newValue }
+    }
+}
+
+private struct StationScaledFont: ViewModifier {
+    @Environment(\.stationTextFactor) private var factor
+    var base: CGFloat
+    var weight: Font.Weight = .regular
+    func body(content: Content) -> some View {
+        content.font(.system(size: (base * factor).rounded(), weight: weight))
+    }
+}
+
+extension View {
+    func stationFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
+        modifier(StationScaledFont(base: size, weight: weight))
+    }
+}
+
 enum StationPalette {
     static let background = Color(nsColor: dynamic(
         dark: NSColor(srgbRed: 37 / 255, green: 37 / 255, blue: 39 / 255, alpha: 1),
@@ -57,7 +83,7 @@ enum StationRows {
 
     static func sectionTitle(_ title: String) -> some View {
         Text(StationL10n.text(title))
-            .font(.system(size: 12, weight: .medium))
+            .stationFont(size: 12, weight: .medium)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 2)
     }
@@ -69,7 +95,7 @@ enum StationRows {
                     .font(.caption.weight(.semibold))
                     .accessibilityHidden(true)
                 Text(StationL10n.text(title))
-                    .font(.system(size: 16, weight: .semibold))
+                    .stationFont(size: 16, weight: .semibold)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
@@ -95,7 +121,7 @@ enum StationRows {
                     Text(StationL10n.text(title))
                     if let detail {
                         Text(StationL10n.text(detail))
-                            .font(.caption)
+                            .stationFont(size: 10)
                             .foregroundStyle(needsAttention ? StationPalette.caution : Color.secondary)
                             .lineLimit(detailLineLimit)
                             .fixedSize(horizontal: false, vertical: true)
@@ -115,7 +141,7 @@ enum StationRows {
         }
         .buttonStyle(PressFadeStyle())
         .background { HoverWash(radius: 0) }
-        .font(.body)
+        .stationFont(size: 13)
     }
 
     static func toggleRow(_ title: String, symbol: String, subtitle: String? = nil,
@@ -128,7 +154,7 @@ enum StationRows {
                     .foregroundStyle(isOn.wrappedValue ? Color.primary : Color.secondary)
                     .accessibilityHidden(true)
                 Text(StationL10n.text(title))
-                    .font(.body)
+                    .stationFont(size: 13)
                 Spacer(minLength: 8)
                 Toggle(StationL10n.text(title), isOn: isOn)
                     .toggleStyle(.switch)
@@ -139,7 +165,7 @@ enum StationRows {
             }
             if let subtitle {
                 Text(StationL10n.text(subtitle))
-                    .font(.caption)
+                    .stationFont(size: 10)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 28)
@@ -403,7 +429,7 @@ struct PhoneAppInstallControls: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { station.setup.install() } label: {
                 Label(StationL10n.text("安装或更新手机应用"), systemImage: "arrow.down.app")
-                    .font(.body).padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    .stationFont(size: 13).padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(PressFadeStyle())
                 .disabled(station.feedback.activity != nil || !station.featureAllows("shell") || !station.featureAllows("files.read") || !station.featureAllows("files.write") || (station.link.serial == nil && station.remoteBlocker([.install]) != nil))
             if station.link.serial == nil, let blocker = station.remoteBlocker([.install]) {

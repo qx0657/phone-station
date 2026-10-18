@@ -34,6 +34,35 @@ func callGateway(g *gateway, body string) *httptest.ResponseRecorder {
 	return w
 }
 
+func TestShareUploadUsesHook(t *testing.T) {
+	var gotName string
+	var got []byte
+	g := testGateway("", nil)
+	g.sharePut = func(name string, body []byte) error {
+		gotName = name
+		got = append([]byte(nil), body...)
+		return nil
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v2/share", strings.NewReader("hello phone"))
+	request.Host = "127.0.0.1:18765"
+	request.Header.Set("Authorization", "Bearer test")
+	request.Header.Set("Phone-Station-Name", "note.txt")
+	response := httptest.NewRecorder()
+	g.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || gotName != "note.txt" || string(got) != "hello phone" {
+		t.Fatalf("%d %s %q", response.Code, gotName, got)
+	}
+	denied := httptest.NewRequest(http.MethodPost, "/v2/share", strings.NewReader("x"))
+	denied.Host = "127.0.0.1:18765"
+	denied.Header.Set("Authorization", "Bearer no")
+	denied.Header.Set("Phone-Station-Name", "note.txt")
+	rejected := httptest.NewRecorder()
+	g.ServeHTTP(rejected, denied)
+	if rejected.Code != http.StatusUnauthorized {
+		t.Fatal(rejected.Code)
+	}
+}
+
 func TestStatusStreamPublishesTransitionsAndRequiresAuth(t *testing.T) {
 	g := testGateway("", nil)
 	server := httptest.NewServer(g)

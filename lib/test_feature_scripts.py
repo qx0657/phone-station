@@ -75,6 +75,34 @@ class FeatureScriptsTest(unittest.TestCase):
             self.assertIn("请检查录像文件是否完整", result.stderr)
             with self.assertRaises(ProcessLookupError): os.kill(int((base / "pid").read_text()), 0)
 
+    def test_frame_uses_native_and_missing_frame_uses_scrcpy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            station = base / "station"
+            station.write_text("#!/bin/zsh\nprint -r -- native\n")
+            station.chmod(0o700)
+            scrcpy = base / "scrcpy"
+            scrcpy.write_text("#!/bin/zsh\nprint -r -- scrcpy\n")
+            scrcpy.chmod(0o700)
+            flags = base / "flags"
+            flags.write_text("1\n1\n")
+            adb = base / "adb"
+            adb.write_text('#!/bin/zsh\ncat "$TEST_FLAGS_FILE"\n')
+            adb.chmod(0o700)
+            native = subprocess.run(["zsh", "-e", "-c", 'source "$1"; STATION_BIN="$2"; STATION_SCREEN_FRAME=frame; launch_screen "$3"',
+                                     "test", str(ROOT / "lib/common.sh"), str(station), str(scrcpy)],
+                                    text=True, capture_output=True, timeout=5)
+            self.assertEqual(native.returncode, 0, native.stderr)
+            self.assertIn("native", native.stdout)
+            self.assertNotIn("scrcpy", native.stdout)
+            fallback = subprocess.run(["zsh", "-e", "-c", 'source "$1"; ADB="$2"; SERIAL=phone; launch_screen "$3"',
+                                       "test", str(ROOT / "lib/common.sh"), str(adb), str(scrcpy)],
+                                      env=dict(os.environ, TEST_FLAGS_FILE=str(flags)),
+                                      text=True, capture_output=True, timeout=8)
+            self.assertEqual(fallback.returncode, 0, fallback.stderr)
+            self.assertIn("scrcpy", fallback.stdout)
+            self.assertNotIn("native", fallback.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

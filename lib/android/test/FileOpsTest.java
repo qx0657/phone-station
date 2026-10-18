@@ -20,8 +20,8 @@ final class FileOpsTest {
             for (int trial = 0; trial < 30; trial++) {
                 String current = ops.stat("race.txt").get("targetVersion").string();
                 String request = Json.obj().put("jsonrpc", "2.0").put("id", 1).put("method", "tools/call")
-                        .put("params", Json.obj().put("name", "station_file_append_text").put("arguments",
-                                Json.obj().put("path", "race.txt").put("text", "!").put("targetVersion", current))).emit();
+                        .put("params", Json.obj().put("name", "files_write").put("arguments",
+                                Json.obj().put("action", "append").put("path", "race.txt").put("text", "!").put("targetVersion", current))).emit();
                 java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
                 java.util.concurrent.CompletableFuture<Boolean> a = append(start, request, ops);
                 java.util.concurrent.CompletableFuture<Boolean> b = append(start, request, otherChannel);

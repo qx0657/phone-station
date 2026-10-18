@@ -17,16 +17,20 @@ final class NotificationSyncState {
     private boolean connected;
     private Set<String> selected = new HashSet<>();
     private String session = UUID.randomUUID().toString();
-    private String client = "";
     private long sequence;
-    private long lastPoll = -1;
-    private String subscriber = "";
-    private long leaseAt = -1;
+    private static final int MAX_PEERS = 8;
+    private final LinkedHashMap<String, Peer> peers = new LinkedHashMap<>();
 
     synchronized boolean lease(String id, long now) {
-        if (id.isEmpty()) { subscriber = ""; leaseAt = -1; return false; }
-        if (!id.equals(client) || !online(now)) { return false; }
-        subscriber = id; leaseAt = now; return true;
+        if (id.isEmpty()) {
+            for (Peer peer : peers.values()) { peer.leased = false; peer.leaseAt = -1; }
+            return false;
+        }
+        Peer peer = peers.get(id);
+        if (peer == null || !peerOnline(peer, now)) { return false; }
+        peer.leased = true;
+        peer.leaseAt = now;
+        return true;
     }
     private final ArrayDeque<Event> events = new ArrayDeque<>();
     private final LinkedHashMap<String, String> seen = new LinkedHashMap<>();
@@ -90,13 +94,19 @@ final class NotificationSyncState {
         if (clientId == null || clientId.isEmpty() || clientId.length() > 128) {
             throw new IllegalArgumentException("需要 Mac clientId，最多 128 字");
         }
-        boolean baseline = !clientId.equals(client) || !online(now);
+        Peer peer = peers.get(clientId);
+        boolean wasOnline = peer != null && peerOnline(peer, now);
         long after = parseCursor(cursor);
-        baseline |= after < 0 || after > sequence;
+        boolean baseline = !wasOnline || after < 0 || after > sequence;
         if (enabled && access && connected && !selected.isEmpty()) {
-            if (baseline) { events.clear(); seen.clear(); }
-            client = clientId;
-            lastPoll = now;
+            if (peer == null) {
+                while (peers.size() >= MAX_PEERS) { peers.remove(peers.keySet().iterator().next()); }
+                peer = new Peer();
+            } else {
+                peers.remove(clientId);
+            }
+            peers.put(clientId, peer);
+            peer.lastPoll = now;
         }
         Json result = status(now);
         Json batch = Json.arr();
@@ -113,16 +123,27 @@ final class NotificationSyncState {
         return events.isEmpty() ? -1 : Math.max(1L, events.peekFirst().time + MAX_AGE_MS - now);
     }
     synchronized long untilOffline(long now) {
-        if (!online(now)) { return -1L; }
-        long poll = lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS ? ONLINE_MS - (now - lastPoll) : -1L;
-        long lease = subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L
-                ? 45_000L - (now - leaseAt) : -1L;
-        if (poll < 0) { return Math.max(1L, lease); }
-        if (lease < 0) { return Math.max(1L, poll); }
-        return Math.max(1L, Math.max(poll, lease));
+        long best = -1;
+        for (Peer peer : peers.values()) {
+            long poll = peer.lastPoll >= 0 && now >= peer.lastPoll && now - peer.lastPoll < ONLINE_MS
+                    ? ONLINE_MS - (now - peer.lastPoll) : -1L;
+            long lease = peer.leased && peer.leaseAt >= 0 && now >= peer.leaseAt && now - peer.leaseAt < 45_000L
+                    ? 45_000L - (now - peer.leaseAt) : -1L;
+            long remain = poll < 0 ? lease : lease < 0 ? poll : Math.max(poll, lease);
+            if (remain > best) { best = remain; }
+        }
+        return best < 0 ? -1L : Math.max(1L, best);
     }
-    private boolean online(long now) { return (lastPoll >= 0 && now >= lastPoll && now - lastPoll < ONLINE_MS)
-            || (subscriber.equals(client) && leaseAt >= 0 && now >= leaseAt && now - leaseAt < 45_000L); }
+    private boolean online(long now) {
+        for (Peer peer : peers.values()) {
+            if (peerOnline(peer, now)) { return true; }
+        }
+        return false;
+    }
+    private static boolean peerOnline(Peer peer, long now) {
+        return (peer.lastPoll >= 0 && now >= peer.lastPoll && now - peer.lastPoll < ONLINE_MS)
+                || (peer.leased && peer.leaseAt >= 0 && now >= peer.leaseAt && now - peer.leaseAt < 45_000L);
+    }
     private String cursor() { return session + ":" + sequence; }
     private long parseCursor(String value) {
         if (value == null || !value.startsWith(session + ":")) { return -1; }
@@ -130,8 +151,8 @@ final class NotificationSyncState {
         catch (NumberFormatException error) { return -1; }
     }
     private void reset() {
-        subscriber = ""; leaseAt = -1;
-        session = UUID.randomUUID().toString(); sequence = 0; lastPoll = -1; client = "";
+        peers.clear();
+        session = UUID.randomUUID().toString(); sequence = 0;
         events.clear(); seen.clear();
     }
     private void prune(long now) {
@@ -145,6 +166,11 @@ final class NotificationSyncState {
         if (value.length() <= max) { return value; }
         int end = Character.isHighSurrogate(value.charAt(max - 1)) ? max - 1 : max;
         return value.substring(0, end);
+    }
+    private static final class Peer {
+        long lastPoll = -1;
+        long leaseAt = -1;
+        boolean leased;
     }
     private static final class Event {
         final long sequence, time;

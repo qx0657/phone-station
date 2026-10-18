@@ -68,3 +68,19 @@ struct ScreenPacket {
     }
 }
 enum ScreenProtocolError: Error { case invalid }
+
+struct ScreenFrameBuffer {
+    private var buffer = Data()
+    mutating func append(_ data: Data) throws -> [Data] {
+        buffer.append(data)
+        var packets: [Data] = []
+        while buffer.count >= 4 {
+            let count = buffer.prefix(4).reduce(0) { ($0 << 8) | Int($1) }
+            guard count > 0, count <= 4 * 1024 * 1024 else { throw ScreenProtocolError.invalid }
+            guard buffer.count >= 4 + count else { break }
+            packets.append(buffer.subdata(in: 4..<(4 + count)))
+            buffer.removeFirst(4 + count)
+        }
+        return packets
+    }
+}

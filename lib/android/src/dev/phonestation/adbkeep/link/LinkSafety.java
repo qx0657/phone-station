@@ -3,9 +3,14 @@ package dev.phonestation.adbkeep.link;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 
-/** 配对安全码。不接入现有通道。 */
+/** 配对安全码。没有中继时，邀请方是手机，邀请编号是 16 个 0，中继位置再用一次手机公钥。 */
 public final class LinkSafety {
     private LinkSafety() {}
+
+    public static String local(byte[] phoneSpki, byte[] macSpki) {
+        byte[] invitation = new byte[16];
+        return code(phoneSpki, macSpki, invitation, phoneSpki);
+    }
 
     public static String code(byte[] inviterSpki, byte[] deviceSpki, byte[] invitationId, byte[] relaySpki) {
         if (inviterSpki.length == 0 || deviceSpki.length == 0 || invitationId.length != 16 || relaySpki.length == 0) {

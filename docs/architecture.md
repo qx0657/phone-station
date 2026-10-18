@@ -1,6 +1,6 @@
 # 系统架构与源码归属
 
-手机工位包含 Mac App、本机 MCP 网关、Android App 和公网中继。源码统一在本仓库；日常用法见 [README](../README.md)，协议见 [MCP](mcp.md) 与 [中继合约](relay-contract.md)。
+手机工位包含 Mac App、本机 MCP 网关、Android App 和公网中继。源码统一在本仓库；日常用法见 [README](../README.md)，协议见 [MCP](mcp.md) 与 [中继合约](history/relay-contract.md)。
 
 ```mermaid
 flowchart LR
@@ -19,7 +19,7 @@ flowchart LR
   Gateway -->|WebSocket| App
 ```
 
-手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，中继 3 另提供独立 WSS 屏幕连接；不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。Android 69 / Mac 32 / 中继 5 的控制长连接、事件订阅和旧版兼容见 [远程控制与事件](remote-control.md)。
+手机 MCP 只监听手机回环地址。客户端访问 Mac 网关，网关优先选本地通道；公网中继承载同一批 MCP 请求，中继 3 另提供独立 WSS 屏幕连接；不提供完整 adb。手机主动连接中继，公网服务器不反向连接手机。Android 69 / Mac 32 / 中继 5 的控制长连接、事件订阅和旧版兼容见 [远程控制与事件](history/remote-control.md)。
 
 | 组件 | 源码 | 职责与交付 |
 |---|---|---|
@@ -35,7 +35,7 @@ flowchart LR
 | shell 与 APK 更新 | adb 或 MCP | MCP 后台任务与安装助手 | Shizuku 已运行且已授权；首次安装仍需要现有安装途径 |
 | Mac 截屏、保持亮屏、手电筒 | 本地脚本 | MCP 控件 | 截屏/手电筒需要 Shizuku；亮屏需要写设置权限 |
 | 交互式 shell | adb 终端 | MCP PTY 会话 | 手机 61+，Shizuku 已运行且授权；Mac 22+ 提供菜单入口 |
-| 投屏、录屏 | adb / scrcpy | 独立 WSS 与原生 Mac 播放/MP4 保存 | Android 63、Mac 25、中继 3；已授权 Shizuku，见 [远程屏幕](remote-screen.md) |
+| 投屏、录屏 | adb / scrcpy | 独立 WSS 与原生 Mac 播放/MP4 保存 | Android 63、Mac 25、中继 3；已授权 Shizuku，见 [远程屏幕](history/remote-screen.md) |
 | 灯光跟随声音 | adb | 不提供 | 本机 adb 在线；声音采集另需 macOS 授权 |
 | 自动剪贴板 | MCP | 同一 MCP | 手机后台读取需要 Shizuku；Mac App 持续运行 |
 
@@ -47,7 +47,7 @@ Mac 主令牌和受限客户端令牌只用于本机网关；受限令牌的范�
 
 Android 64 起，远程工具还受手机端分项权限限制，默认只开放状态与结束已有会话；Shell 与安装、投屏与操控分别在手机上授权。撤销与中继信任范围见 [安全与授权](security.md)。
 
-中继能够看到转发的请求与结果，不是端到端加密边界。中继 2 将结果正文存入权限 0600 的状态目录，最多 8 份 / 32 MiB，可读取窗口 10 分钟；完全空闲时的过期文件会留到下次维护请求或启动才清理，详见 [中继合约](relay-contract.md)。不持久保存请求正文、访问日志或令牌。普通文件数据、剪贴板与通知内容因此可能出现在结果缓存中，部署到自己管理或信任的主机。
+中继能够看到转发的请求与结果，不是端到端加密边界。中继 2 将结果正文存入权限 0600 的状态目录，最多 8 份 / 32 MiB，可读取窗口 10 分钟；完全空闲时的过期文件会留到下次维护请求或启动才清理，详见 [中继合约](history/relay-contract.md)。不持久保存请求正文、访问日志或令牌。普通文件数据、剪贴板与通知内容因此可能出现在结果缓存中，部署到自己管理或信任的主机。
 
 ## 请求与恢复
 

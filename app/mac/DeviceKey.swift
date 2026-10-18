@@ -41,6 +41,26 @@ struct DeviceKey {
         return try software(label: label, tag: tag, store: store, keychain: keychain, secureEnclaveStatus: errSecUnimplemented)
     }
 
+    /// 已有软件密钥就继续用。这一步不改成 Secure Enclave。
+    static func loadOrMake(label: String, store: Store, keychain: SecKeychain, trySecureEnclave: Bool) throws -> DeviceKey {
+        let tag = Data(label.utf8)
+        if trySecureEnclave, let key = copyKey(secureLookup(tag: tag, label: label)) {
+            return DeviceKey(origin: .secureEnclave, store: store, secureEnclaveStatus: errSecSuccess, label: label, privateKey: key, tag: tag, keychain: keychain)
+        }
+        if let key = copyKey(softwareLookup(tag: tag, label: label, keychain: keychain)) {
+            return DeviceKey(origin: .software, store: store, secureEnclaveStatus: errSecUnimplemented, label: label, privateKey: key, tag: tag, keychain: keychain)
+        }
+        return try make(label: label, store: store, keychain: keychain, trySecureEnclave: trySecureEnclave)
+    }
+
+    private static func copyKey(_ query: [String: Any]) -> SecKey? {
+        var item = query
+        item[kSecReturnRef as String] = true
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(item as CFDictionary, &result) == errSecSuccess, let result else { return nil }
+        return (result as! SecKey)
+    }
+
     func sign(_ message: Data) throws -> Data {
         var error: Unmanaged<CFError>?
         guard let signature = SecKeyCreateSignature(privateKey, .ecdsaSignatureMessageX962SHA256, message as CFData, &error) as Data? else {

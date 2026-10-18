@@ -1,6 +1,6 @@
 # 设计稿：统一链路与设备身份（Link v2）
 
-状态：设计稿。L0 向量、L1 链路库、L2 回执库和 L3 中继 6 已进入源码。现有 MCP、网关和中继 5 仍按原协议运行；L4 之后仍未实施。当前协议仍以 [中继合约](relay-contract.md)、[远程控制与事件](remote-control.md)、[远程屏幕](remote-screen.md) 和 [MCP](mcp.md) 为准。Link v2 指 Mac 与手机之间统一的传输与身份层，与 Mac App 里表示 adb 连接的 `LinkSession` 无关。
+状态：实施中。L0–L3 在源码里。本地链路、六个主题的订阅、配对页和远程密封都已进源码。手机上的 POST `/mcp` 返回 404。网关生产路径走本地链路，不再用手机临时令牌；网关单测仍注入 HTTP 假手机。手机「工位配对」和 Mac 连接设置里的同一入口已在源码，回环 `POST /v2/pair`、邀请文本和二维码解码有测试。2026-10-17 已切到中继 6：新状态目录只有注册表，旧目录已归档未删。这台 Mac 已用一次性加入码注册，加入码没有写入仓库或聊天。手机已保留数据装上，版本名仍是 72；本地链路配对后点了允许，经 adb 转发的 ping 有结果。这台手机已经 join。断开 adb 后远程 ping、原编号查询和 device 事件对过。强杀后已完成回执仍是 complete，进行中的 shell 回执是 unknown。拍照解码未在真机做。Mac 拖到手机的 4096 字节文件已落到 `Download/ps-drop.bin` 且摘要一致，随后删掉。手机分享到 Mac 已用应用自己的文件提供者把 11 字节文件送到 `~/Downloads/手机工位/`，摘要一致，随后两边都删掉；没有人在手机上点系统分享面板。必须加密没有在这台已安装手机上打开：Mac 的 seal 是空的，手机私有的 `link-seal` 写不进去，没有改成明文降级。远程主会话在测试里被标成必须加密时先做密封握手，明文应用帧拒绝且不降级；本地链路不加密。中继 6 测试里转发的帧不含正文。已安装的 Mac 版本名仍是 0.1.0 (37)，临时签名，应用包已换成这次构建。正在服务的网关是这个包里的 `phone-relay-gateway`，与 `build/.phone-station/phone-relay-gateway` 摘要相同。主令牌的 `tools/list` 是 18 个没有 `station_` 前缀的名称；这次量到的 HTTP 正文是 5459 字节。2026-10-18 替换应用包后，包里的 `phone-app.apk` 摘要是 `b0c76783650ce7efd850c26a4439cd5ce02f77c924c4b6315c72b0bc094fc93c`，与已装手机一致，5632392 字节。此前包内摘要曾是 `80cfb9b92905d5799f72dd4e148d03c474060a23a5114846772284b7b945656c`。手机版本名仍是 72。没有重做 join。链路 ping 有结果。手机 `remoteConnected` 为 true，`remoteState` 是「已连接」。见[链路在线状态](history/validation.md#2026-10-18-远程状态改跟链路)。带 `station_` 的调用仍转发。已安装手机不再提供 `/mcp`，公网进程提供 `/v2/link`。旧的 [中继合约](history/relay-contract.md)、[远程控制与事件](history/remote-control.md)、[远程屏幕](history/remote-screen.md) 已转入历史。现行入口是 [MCP](mcp.md)，完整旧文在 [history/mcp-service.md](history/mcp-service.md)。这些旧文不能当成这次切换之后的运行协议。Link v2 指 Mac 与手机之间统一的传输与身份层，与 Mac App 里表示 adb 连接的 `LinkSession` 无关。
 
 已定前提：不保留旧协议和旧工具名，三端同批升级；多设备只服务同一所有者的多台 Mac 与多台手机；端到端加密可选、默认关闭，默认仍信任自建中继；机型改为能力探测，相应的 AGENTS.md 规则随实施修改。本篇覆盖传输、设备身份、配对与授权、操作回执、事件、端到端加密和中继 6。AI 工具面、Mac 常驻进程整合和手机特权进程合并见[改造路线](roadmap.md)，实施前各自细化。
 
@@ -12,9 +12,9 @@
 | 中继只有一个执行位；手机在控制连接的读循环里同步执行；网关再串行一次 | 一次长操作挡住剪贴板、通知和状态查询 | 中继 `device.active`，手机 `PhoneRelayClient.runControl` |
 | 身份是两枚静态角色令牌，中继配置只有一个 DeviceID，持久状态绑定三者摘要 | 一台中继只能配一对设备；令牌泄露即可冒充；更换要两端重填 | `server/relay/internal/relay/store.go` |
 | 手机只为后台任务（shell、截屏、安装）保存回执；文件修改等其他写操作在本地通道没有回执，远程回执存在中继，两边编号不通用 | adb 断开时，本地发出的文件修改等操作无法核实，只能报告结果未知 | [请求协调与结果恢复](mcp.md#请求协调与结果恢复) |
-| 中继把结果正文写入磁盘缓存 | 文件、剪贴板和通知内容可能在中继保留最多 10 分钟 | [会话编号与兼容](relay-contract.md#会话编号与兼容) |
+| 中继把结果正文写入磁盘缓存 | 文件、剪贴板和通知内容可能在中继保留最多 10 分钟 | [会话编号与兼容](history/relay-contract.md#会话编号与兼容) |
 | 文件字节与终端输入用十六进制 JSON | 体积翻倍，单次大小受 JSON 正文上限限制 | `station_file_*_bytes`、`station_terminal_input` |
-| 状态靠轮询 | 本地每秒 ping；通知 2 秒、设备健康 3 秒；CLI 每 0.5 秒查一次任务结果 | [哪些请求仍然定时发生](remote-control.md#哪些请求仍然定时发生) |
+| 状态靠轮询 | 本地每秒 ping；通知 2 秒、设备健康 3 秒；CLI 每 0.5 秒查一次任务结果 | [哪些请求仍然定时发生](history/remote-control.md#哪些请求仍然定时发生) |
 | 手机本地令牌随进程重启更换，每次经 adb 读取受 DUMP 保护的诊断输出 | 本地通道要靠 adb shell 往返才能恢复 | [监听和令牌](mcp.md#监听和令牌) |
 
 2026-10-16 的[资源与耗电基线](history/validation.md#2026-10-16-资源与耗电基线)显示，手机 20 秒一次的中继心跳耗电可以忽略：16 小时 Wi-Fi 共 4.0 mAh。改造的收益主要来自 Mac 侧轮询、每次调用的连接与进程开销，以及并发和可核实性，不来自降低心跳频率。
@@ -139,6 +139,10 @@ sequenceDiagram
 
 本地链路由手机担任认证方，双向签名：Mac 先发 `hello`，带自己的 deviceId 与随机数；手机回 `hello`，带自己的 deviceId、随机数和对 Mac 随机数的签名；Mac 再发 `auth`，签署手机的随机数。本地签名的原文是 `phone-station link-v2 local-auth`、对方的 16 字节 deviceId、对方的 32 字节 nonce、自己的 16 字节 deviceId，同样直接相连。算法与中继认证相同。手机只接受自己授权列表里的 Mac，未配对的 Mac 只能发起配对请求。Mac 核对手机公钥与配对时记录的一致，防止别的应用占用回环端口冒充手机。这替代现在的手机本地令牌：Mac 不再经 dumpsys 读取令牌，手机上的其他应用连到回环端口也无法冒充任何一方。
 
+这一步的手机与 Mac 角色在 `lib/link` 和 `dev.phonestation.adbkeep.link.LocalLink`。两边都在回环的临时端口上完成 hello、auth、ready。签名不对会被拒绝，断线结束会话。带 Origin 的升级和非回环 Host 会被拒绝。同编号同摘要再提交只执行一次，这条断言在 Java `LocalLinkTest`；Go 测试不调用 `LinkReceipts`。Mac 的软件密钥回退在 `DeviceKey.loadOrMake`，网关通过旁边的 `phone-device-key` 签名，不改成 Secure Enclave。手机服务用 `PhoneDeviceKey.identity()`。`McpHttp` 在读完 GET `/v2/link` 的头之后把套接字交给 `LocalLink.acceptHttp`，不换成 Java-WebSocket 服务端。授权文件 `link-grants` 空着时，未知 Mac 得到 `unknown_device`。这些文件还在 `ee4efaa` 之上的工作区，还没提交。手机已保留数据装上，版本名仍是 72。手机上的 POST `/mcp` 返回 404，不再执行工具。
+
+远程握手的客户端在 `lib/link` 的 `DialRelay` 和 `dev.phonestation.adbkeep.link.RemoteLink`。服务端是已有的中继 6 测试服务器，只听 `127.0.0.1` 的临时端口。服务端先发 hello，客户端发 auth，通过后服务端发 ready。原文沿用上面的中继认证，`purpose` 为 `main` 或 `media`。先验签，再看是否撤销。签名不对是 `bad_signature`，未注册是 `unknown_device`。远程握手已在测试里通过。手机服务只在端点是字面 IPv4 且授权列表恰好一台 Mac 时拨远程链路。网关源码的 serve 用设备密钥拨中继 6 的 `/v2/link`，不再用角色令牌；单测注入调用，域名和坏 pin 在拨号前拒绝。`cmd/phone-relay` 源码已是中继 6。2026-10-17 公网进程已换成中继 6。这台手机已经 join。断开 adb 后远程 ping、原编号查询和 device 事件对过。跨通道查询在测试里通过。已安装手机上只从远程通道查过回执，没有再从本地通道查同一编号。Java `CrossLinkTest` 用已有的 `LocalLink` 和 `RemoteLink`，共享手机上的 `LinkReceipts`：一边 `call`，另一边按原编号 `query`，摘要相同返回原回执且不执行第二次；摘要不同仍是 `conflict`，并且不执行。提交那一边断开后，查询仍从回执库读到。Go 测试不调用回执。事件替代轮询已在测试进程里通过，并随本地会话发送。这台手机已经 join，断开 adb 后远程通道对过。
+
 ### 会话
 
 链路就绪后，Mac 在 channel 0 上向某台手机发起会话：
@@ -185,7 +189,7 @@ sequenceDiagram
 
 ### 手机端规则
 
-- 有副作用的方法先写回执并 fsync，再执行。同编号、同参数摘要返回原回执；摘要不同返回 `conflict`。本阶段的库在 `dev.phonestation.adbkeep.link.LinkReceipts`，现有工具仍用 `OperationJobs`，还没有调用它。磁盘上每个回执一行：`v1`、macId、op、方法、参数 SHA-256、状态、applied、开机编号、创建与结束时的单调毫秒、结果正文的 Base64；`epoch` 文件保存 `receiptEpoch`。同一次开机用单调时钟算年龄；开机编号变了，只把年龄看成不少于这次开机已过的时间，避免改系统时间把回执提前删掉。只读初表是 `device.status`、`capabilities.get`、`op.query`、`file.stat`、`file.read`、`clipboard.get`、`notifications.list`。`shell`、`install`、`screen` 和 `controls.capture` 走特权队列；其他 `file` 走文件队列；其余有副作用的方法走交互队列。特权队列的 4 个排队名额和三个并发上限按进程计，8 个在途上限按 Mac 计。
+- 有副作用的方法先写回执并 fsync，再执行。同编号、同参数摘要返回原回执；摘要不同返回 `conflict`。本阶段的库在 `dev.phonestation.adbkeep.link.LinkReceipts`。链路里的 `terminal.*`、`shell.*`、`screen.*` 和 `install.run` 由这份回执记录并直接执行，不再另写 `OperationJobs`。`install.run` 只接受 `/storage/emulated/0/` 下不含空格和 `..` 的 apk。手机 HTTP 不再提供 `/mcp`。进程内直接调用协议处理时，终端、shell、截屏和投屏仍写 `OperationJobs`。磁盘上每个回执一行：`v1`、macId、op、方法、参数 SHA-256、状态、applied、开机编号、创建与结束时的单调毫秒、结果正文的 Base64；`epoch` 文件保存 `receiptEpoch`。同一次开机用单调时钟算年龄；开机编号变了，只把年龄看成不少于这次开机已过的时间，避免改系统时间把回执提前删掉。只读初表是 `device.status`、`capabilities.get`、`op.query`、`file.stat`、`file.read`、`clipboard.get`、`notifications.list`。`shell`、`install`、`screen` 和 `controls.capture` 走特权队列；其他 `file` 走文件队列；其余有副作用的方法走交互队列。特权队列的 4 个排队名额和三个并发上限按进程计，8 个在途上限按 Mac 计。
 - 只读方法不写回执，Mac 可以用新编号重试。方法是否只读以手机的方法表为准，不由 Mac 推断。只读调用同样占这台 Mac 的在途名额，并按方法组进入对应队列，不能绕过并发上限。`query` 与 `cancel` 是会话消息，不是调用，不占名额，在途满了也能查询和取消。
 - 回执从操作结束时起保存 24 小时，`queued` 和 `running` 不按年龄淘汰。操作结束时，回执库把完整结果交给会话层发出 `result`，与能存下多少无关。结果正文最多保存 64 KiB；更长的结果照常在这次 `result` 里送达，回执仍记为 `complete`，并标记 `resultKept: false`，之后查询只有状态。超长不是失败：副作用已经发生，改记 `failed` 会让调用方误以为可以重做。收到 `ack` 或结束满 10 分钟后丢弃正文，不等下一次查询；丢弃后查询同样标记 `resultKept: false`。
 - 回执最多 4096 条，保存的正文合计不超过 8 MiB，超出时先丢最旧的正文。条数满时只能淘汰结束满 1 小时的回执；仍然满就返回 `busy`。手机在内存里保留回执索引，提交和查询不逐个读盘。回执年龄按开机编号和单调时钟判断，不受手机改时间影响。
@@ -213,12 +217,12 @@ sequenceDiagram
 
 流用于超过 1 MiB 的参数和结果、文件字节、终端和媒体。流在 `call` 或 `result` 中声明 channel，数据帧在该 channel 上按序发送；`flags` 的 0x02 表示结束，`reset` 表示中止。接收方按消费进度发 `credit`，发送方不得超出窗口。累计授予的可用窗口超过握手里声明的每流缓冲时，按协议错误重置该流。分片按 channel 分别重组，同一 channel 上一条消息的分片之间不能插入别的消息。
 
-链路引擎有两份：`lib/link` 的 `Endpoint`，以及 `dev.phonestation.adbkeep.link` 的 `LinkEngine`。两份的输入输出都是帧，不绑定某一种 WebSocket 库。本端 `Open` 只占流名额，没有单独的打开帧；对端的第一帧数据把流打开。Mac 打开奇数 channel，手机打开偶数 channel。会话序号在帧从待发队列拉出时分配，所以控制帧插到文件帧前面时序号仍按实际发送顺序递增；`link` 帧的 seq 固定为 0，不占这个序号。初始发送窗口等于每流缓冲。应用 `Consume` 了多少字节，就发多少 `credit`，优先级与会话控制相同。可用发送窗口已经等于缓冲时再收到 `credit`，或收到的数据超过剩余接收窗口，都只重置这一条流，正文是 `{"code":"window"}`。序号是整个会话共用的，任何 channel 上不连续都说明这次会话丢了帧，丢的不一定是这条流的帧，所以结束整个会话，错误是 `seq`；Mac 重新握手后按编号查询在途操作。分片没结束时插入另一种消息是 `fragment`，重组超过 1 MiB 是 `limit`。已经结束或已经重置的流不占 8 个并发名额，同一个 channel 不能再打开。对端的 `reset` 和本端这些错误都会丢掉该流还没写出的数据和消息。数据和消息正文在没写出之前合计超过上限就拒绝继续写入，也不扣窗口；`credit`、`reset` 和心跳不占这个上限。默认上限是 4 个初始窗口，512 KiB。共用用例在 `lib/link/testdata/engine.json`，Go 与 Java 都跑这组用例。网关、中继 5 和手机服务仍不调用这层引擎。
+链路引擎有两份：`lib/link` 的 `Endpoint`，以及 `dev.phonestation.adbkeep.link` 的 `LinkEngine`。两份的输入输出都是帧，不绑定某一种 WebSocket 库。本端 `Open` 只占流名额，没有单独的打开帧；对端的第一帧数据把流打开。Mac 打开奇数 channel，手机打开偶数 channel。会话序号在帧从待发队列拉出时分配，所以控制帧插到文件帧前面时序号仍按实际发送顺序递增；`link` 帧的 seq 固定为 0，不占这个序号。初始发送窗口等于每流缓冲。应用 `Consume` 了多少字节，就发多少 `credit`，优先级与会话控制相同。可用发送窗口已经等于缓冲时再收到 `credit`，或收到的数据超过剩余接收窗口，都只重置这一条流，正文是 `{"code":"window"}`。序号是整个会话共用的，任何 channel 上不连续都说明这次会话丢了帧，丢的不一定是这条流的帧，所以结束整个会话，错误是 `seq`；Mac 重新握手后按编号查询在途操作。分片没结束时插入另一种消息是 `fragment`，重组超过 1 MiB 是 `limit`。已经结束或已经重置的流不占 8 个并发名额，同一个 channel 不能再打开。对端的 `reset` 和本端这些错误都会丢掉该流还没写出的数据和消息。数据和消息正文在没写出之前合计超过上限就拒绝继续写入，也不扣窗口；`credit`、`reset` 和心跳不占这个上限。默认上限是 4 个初始窗口，512 KiB。共用用例在 `lib/link/testdata/engine.json`，Go 与 Java 都跑这组用例。中继 6 只转发帧，不跑这层引擎；手机本地会话和网关本地拨号已经调用。
 
 - 下载：`file.read` 的结果给出 channel、大小与 SHA-256，随后是原始字节。下载是只读操作，断开后用新编号从需要的偏移重读。
 - 上传：`file.write` 在 `call` 中声明流、大小、SHA-256 和 `targetVersion`。手机写入同目录的临时文件，结束后核对大小与摘要，再原子替换。中途断开就丢弃临时文件，结果为 `failed` 且 `applied: false`。
 - 终端：每个终端会话一条双向流，输入、输出都是原始字节，取代十六进制输入与轮询读取。断线后 Mac 用 `terminal.attach {session, cursor}` 从原游标续接；终端自己的 60 秒断线租期保留。
-- 媒体：投屏的视频、音频与输入走媒体链路，编码参数、输入白名单与时限沿用[远程屏幕](remote-screen.md)。接收端积压超过 5 秒即结束会话，不堆积旧画面。一台手机同时只有一个投屏会话。
+- 媒体：投屏的视频、音频与输入走媒体链路，编码参数、输入白名单与时限沿用[远程屏幕](history/remote-screen.md)。接收端积压超过 5 秒即结束会话，不堆积旧画面。一台手机同时只有一个投屏会话。
 
 会话与链路分两层：
 
@@ -228,7 +232,7 @@ sequenceDiagram
 - 收到后应用还没取走的 channel 0 消息合计不超过 8 MiB，等于 8 个在途调用各一条最大消息；超过按协议错误结束会话。流数据受窗口约束，不另设上限。
 - 一条远程主链路可以承载多个会话，例如手机同时连着两台 Mac。链路层发帧时在会话之间按优先级排队，一个会话的大文件不挡另一个会话的控制消息。
 
-两份引擎和 `lib/link` 的 `Link`、`LinkMux` 已按这几条实现，共用用例在 `engine.json`。网关、中继 5 和手机服务仍不调用。
+两份引擎和 `lib/link` 的 `Link`、`LinkMux` 已按这几条实现，共用用例在 `engine.json`。中继 6 只转发帧，不跑这层引擎；手机本地会话和网关本地拨号已经调用。
 
 ## 事件与订阅
 
@@ -245,6 +249,8 @@ Mac 在会话内发送 `subscribe {topics, cursors}`，手机回 `subscribed`，
 
 有序主题至少送达一次，Mac 按游标去重。重连时 Mac 带上最后的游标：手机还持有的部分重新发送，否则发 `reset`，由 Mac 重建基线。不补发历史通知，也不重放旧的剪贴板写入，与现在的规则相同。多台 Mac 各自订阅；它们之间的剪贴板合并规则在剪贴板设计中定义。
 
+手机侧在 `LinkEvents`，会话消息在 `LocalLink`。状态主题的合并窗口是 1 秒，窗口内只留最新值；`ops` 再按 op 各留一份。`clipboard` 只留最新一条，`notifications` 正文保留 20 秒。会话结束就卸下订阅。通道选择在 Java `LinkRoute` 和 Go `Route`：两条都在时新操作走本地，在途留在原通道，断开后到另一条通道 `query`，流不迁移。这一层已在测试进程里通过。网关连上本地会话后发送六个主题的 `subscribe`。剪贴板和通知变化从现有信号广播给已订阅的 Mac。电量、充电、网络、亮屏和调试开关在读状态、保持亮屏或无线调试保持心跳时推进 `device`，正文没变就不重复发。功能开关变化推进 `capabilities`。允许或撤销一台 Mac 时推进这台 Mac 的 `grants`；撤销会先发出再关掉会话。网关收到后在本地满足 `event.wait`，不再把这次挂起转成手机上的轮询。同一次调用进行中到达的 `ops` 留在这条会话里，调用返回前就能读到。公网进程已是中继 6。断开 adb 后远程订阅收到过 device 快照，ops 事件没有重放。2026-10-18 在已接通的本地链路上另订了一次六个主题：接受 6 个，拒绝 0。先到的是 device 快照、clipboard 的 reset、notifications 的 reset；订阅快照里没有 ops。随后 7 条 ops 都是这次只读状态调用带出的 complete，不是重放。grants 和 capabilities 没有已保存的快照，这次没有授权变化，也没有改功能开关，所以没有这两条。手机 HTTP 不再提供 `/mcp`。同一天稍后的订阅里，device 正文是 96 字节且没有 `issues`，菜单栏仍每 3 秒读一次 `device_status`。源码在事件带上 issues 之后停掉这次空闲调用；已安装的那份摘要还发不出 issues，所以活的轮询留着。
+
 ## 在线状态与通道选择
 
 - 设备建链或断开时，中继立即向同一工位的其他在线设备推送 `presence`。
@@ -252,11 +258,13 @@ Mac 在会话内发送 `subscribe {topics, cursors}`，手机回 `subscribed`，
 - 两条通道都可用时，新操作优先走本地；在途操作留在原通道。某条通道断开后，在另一条通道上按原编号 `query`。流随通道中断：下载和上传用新编号重来，终端按游标续接。
 - 现有的延迟切换阈值保留为策略，延迟取自心跳往返，不另发探测。
 
+同一台 Mac 的本地会话和远程会话共享手机上的 `LinkReceipts`。一条通道 `call` 之后，另一条通道按原编号 `query`，返回原来的回执，不执行第二次。摘要相同的再次提交返回原回执；摘要不同仍是 `conflict`，并且不执行。提交那一边断开后，查询仍从回执库读取。测的是已经完成的回执；还在运行时另一边收到 `ops`，不先 query；提交那一边断开后，另一边按原编号 query。新操作在两条通道都可用时优先本地，在途留在原通道，流不迁移。跨通道查询在测试里通过。Java `CrossLinkTest` 用已有的 `LocalLink` 和 `RemoteLink` 走了本地提交后远程查询，以及远程提交后本地查询。Go 测试不调用回执。本地会话已经接到 `127.0.0.1:8765/v2/link`，手机上的 `/mcp` 返回 404。网关生产路径走本地链路。公网进程已是中继 6。这台手机已经 join。已安装手机上只从远程通道按原编号查过，没有再从本地通道查同一编号。事件替代轮询已在测试进程里通过，并随本地会话发送。
+
 ## 配对与授权
 
 ### 首台 Mac 加入中继
 
-中继 6 的配置只有监听地址、TLS 证书和状态目录，不再有令牌。部署者在服务器上运行 `phone-relay enroll`，生成 128 位的一次性加入码，30 分钟内有效。加入码只在终端显示一次，中继只保存它的摘要，不写日志。首台 Mac 在「连接设置 → 远程接入」填写中继地址、SPKI 指纹和加入码（隐藏输入或 stdin），用设备密钥签名提交 `enroll`，并声明 `purpose`，这条连接随之成为该用途的链路。所有 Mac 都遗失时，用同一命令再生成新码。签名字节和当前代码位置见[中继 6](#中继-6)。发布命令上的 `phone-relay enroll` 留到切换部署；这一阶段由测试进程调用库接口生成加入码。
+中继 6 的配置只有监听地址、TLS 证书和状态目录，不再有令牌。部署者在服务器上运行 `phone-relay enroll`，生成 128 位的一次性加入码，30 分钟内有效。加入码只在终端显示一次，中继只保存它的摘要，不写日志。首台 Mac 在「连接设置 → 远程接入」填写中继地址、SPKI 指纹和加入码（隐藏输入或 stdin），用设备密钥签名提交 `enroll`，并声明 `purpose`，这条连接随之成为该用途的链路。所有 Mac 都遗失时，用同一命令再生成新码。签名字节和当前代码位置见[中继 6](#中继-6)。发布命令的 `phone-relay enroll` 已在源码里：加入码只打到标准输出，注册表只留摘要。切换前没有对公网状态目录运行它。
 
 ### 邀请新设备
 
@@ -294,7 +302,7 @@ sequenceDiagram
 
 ### 没有中继时
 
-只用 adb 时，Mac 与手机在本地链路上直接交换公钥：手机弹出确认，两端显示同一个安全码，用户点「允许」即完成配对，不需要中继。之后配置中继时，Mac 经本地链路把邀请交给手机，手机自行加入，Mac 自动批准，不用再次确认。
+只用 adb 时，Mac 与手机在本地链路上直接交换公钥：手机弹出确认，两端显示同一个安全码，用户点「允许」即完成配对，不需要中继。没有中继时的安全码仍用上面的公式：邀请方公钥是手机 SPKI，新设备公钥是 Mac SPKI，邀请编号是 16 个 0，中继位置再放一次手机 SPKI。之后配置中继时，Mac 经本地链路把邀请交给手机，手机自行加入，Mac 自动批准，不用再次确认。邀请文本是 7 行 `ps-invite-v1`，含地址、指纹、邀请编号、128 位密钥、邀请方公钥和设备类型。12 位手动码是邀请编号和密钥各自前 3 字节的小写十六进制，加入前必须比对安全码。手机 `POST /v2/pair` 只在回环上接受签名过的公钥，用户点允许后才写入 `link-grants`。二维码用 ZXing `core` 3.5.3 在本地解码，应用不申请相机权限。公网进程已是中继 6。这台手机已经 join。拍照解码还没有在真机上做。
 
 adb 无线调试本身的配对（菜单栏二维码与手机的「使用二维码配对设备」）不变，与这里的工位配对是两回事。
 
@@ -324,6 +332,8 @@ adb 无线调试本身的配对（菜单栏二维码与手机的「使用二维�
 
 开启后，中继仍能看到 deviceId、帧类型、channel、大小和时间，看不到正文，但仍可以丢弃或延迟帧。不用 Noise，是因为设备密钥是只能签名的 P-256 硬件密钥，而 Noise 标准只定义了 25519 与 448；签名的临时 ECDH 所需的 ECDH、ECDSA、AES-GCM 和 HMAC 在 Go 标准库、Android 和 CryptoKit 上都有现成实现，HKDF 按 RFC 5869 用 HMAC 实现即可，不需要引入新库。要改为默认开启，需要先固定测试向量并做外部审阅。
 
+设置默认关闭。Mac 把 `link-phone.json` 的 `seal` 写成 `required` 才加密这一对的远程会话；本地拨号不看这个字段。手机在 `link-seal` 里写这台 Mac 的 deviceId，一行一个小写十六进制；文件不存在就是关闭。文件在但读不了时，手机不拨远程，避免降成明文。密封握手是 `KindHandshake` 的 `open` / `accept`，签名原文是 `phone-station link-v2 seal-open` 或 `seal-accept` 接上双方 deviceId、临时公钥和随机数。应用帧在拉出时加密，附加数据含 `FlagEncrypted`。序号不递增、标签不对或满 24 小时 / 2³² 帧时，这一帧失败并结束会话，下一次拨号重新握手，不在同一条明文会话里继续。网关和手机服务目前只为 `main` 建立远程会话，媒体链路还没单独握手。
+
 ## 安全边界
 
 | 威胁 | 默认（信任中继） | 开启端到端加密 |
@@ -345,7 +355,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 - 每个工位最多 32 台设备；每台设备一条主链路、一条媒体链路；加入码与加入尝试按来源地址与邀请限流，已注册设备的认证不限流。
 - 日志只记连接事件、deviceId 前缀和原因，不记负载、密钥、邀请码或加入码。认证失败记原因词，deviceId 还没确定时前缀记为 `-`。
 - 控制消息放在 kind 为 0x01 的帧里，一条 WebSocket 二进制消息一帧，不压缩。`GET /v2/link` 之外的路径、查询字符串、非 GET 和非空 Origin 都拒绝。服务端先发 `hello`（`protocol` 为 2、`stationId`、32 字节 `nonce`）。`enroll` 或 `join` 成功后，这条连接就是所声明的 `purpose`，随后发 `ready`。已在注册表里的设备用 `auth` 建链，原文沿用[建链与认证](#建链与认证)里的中继认证。
-- 限流：认证先验签。签名有效的已注册设备总能认证；`unknown_device`、`revoked` 和 `bad_signature` 只记日志，不计入失败。被撤销的旧 Mac 可能和其他设备在同一个出口地址后面，它的失败不能把整个家庭网络锁住；签名本身也无法靠多试猜中。计入失败的只有 `enroll` 与 `join`：同一来源地址 10 分钟内失败 8 次后，这个地址的 `enroll` 和 `join` 返回 `rate_limited`，邀请自己的 5 次尝试另计。未认证的连接 10 秒内要发出第一条消息，每个来源地址最多同时 16 条；超过时在 WebSocket 升级前返回 HTTP 503。经反向代理部署时，连接地址是代理自己。可信代理默认关闭。只有配置了名单，并且 TCP 对端在名单里，才读 `X-Forwarded-For`，取最右侧、且不属于可信代理的地址；头缺失或没有可用地址时，仍用连接自己的地址。没配置时所有人共用一个计数，只影响加入。名单解析在 `ParseTrustedProxies`，环境变量名预定为 `PHONE_RELAY_TRUSTED_PROXIES`。当前 `phone-relay` 是中继 5，不读这个变量。
+- 限流：认证先验签。签名有效的已注册设备总能认证；`unknown_device`、`revoked` 和 `bad_signature` 只记日志，不计入失败。被撤销的旧 Mac 可能和其他设备在同一个出口地址后面，它的失败不能把整个家庭网络锁住；签名本身也无法靠多试猜中。计入失败的只有 `enroll` 与 `join`：同一来源地址 10 分钟内失败 8 次后，这个地址的 `enroll` 和 `join` 返回 `rate_limited`，邀请自己的 5 次尝试另计。未认证的连接 10 秒内要发出第一条消息，每个来源地址最多同时 16 条；超过时在 WebSocket 升级前返回 HTTP 503。经反向代理部署时，连接地址是代理自己。可信代理默认关闭。只有配置了名单，并且 TCP 对端在名单里，才读 `X-Forwarded-For`，取最右侧、且不属于可信代理的地址；头缺失或没有可用地址时，仍用连接自己的地址。没配置时所有人共用一个计数，只影响加入。名单解析在 `ParseTrustedProxies`，环境变量名预定为 `PHONE_RELAY_TRUSTED_PROXIES`。`cmd/phone-relay` 读取这个变量。2026-10-17 公网进程已是中继 6；这次切换记录没有写可信代理名单。
 - 错误码：邀请不匹配、名额已满或证明被邀请方拒绝时返回 `rejected`。注册表写不下去时返回 `unavailable`，这次改动不生效：改动先在副本上做，写盘成功后才替换内存里的注册表，原文件保留。之后改注册表的请求（加入码、加入、批准、撤销）照常重试写入，磁盘恢复后自动恢复。加入请求还没交给邀请方就失败时退回这一次尝试；退回时写盘失败同样返回 `unavailable`，已经扣掉的次数不恢复。认证和转发不写注册表，照常进行。已建立的链路上，目标不在同一 `purpose` 或已经离线时返回 `undeliverable`，连接保持。
 - 转发：每条链路一个写协程和有界待发队列，主链路 4 MiB，媒体链路 8 MiB，按编码后的帧字节计算，含 32 字节帧头。发送方的读循环只把帧放进目标队列，不等目标写完；队列满时断开目标链路，发送方收到 `undeliverable`。一台停滞的设备不能拖住发送方发往其他设备的帧。
 - 设备名称 1 到 64 个字符、合法 UTF-8，拒绝控制字符和格式字符（Unicode Cc 与 Cf，例如双向控制符和零宽字符），避免批准页上显示被翻转或伪装的名称。
@@ -360,7 +370,7 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 样本输入是固定的重复字节（station `11`、nonce `22`、device `33`、加入码 `44`、invitation `55`、proof 密钥 `66`、短 SPKI `77`，名称 `n`，kind `phone`，purpose `main`）。SHA-256 与 proof 由 Go `TestTranscriptBytes` 和 Java `LinkVectorTest` 固定：enroll `28b265654ea39c8988ce7515423255e3295b4e86ebff878c48473487de36002f`，join `e47093674462494c7f377d111faf45bd8a25e6b7be7dda25d84402d6812fced3`，approve `26e8fd0aaf218a1e8063941858db263430729067dd2ddfd727176484f0ce1e97`，proof `fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3`。
 
-本阶段的服务器在 `server/relay/internal/v6`，由测试进程在临时目录上监听真实 TLS。`cmd/phone-relay` 不引用它，`scripts/build-relay.sh` 打出的仍是中继 5。隔离实例留到切换前。
+本阶段的服务器在 `server/relay/internal/v6`，由测试进程在临时目录上监听真实 TLS。`ServeLoopback` 只接受 `127.0.0.1`，其他地址在打开套接字前拒绝。`cmd/phone-relay` 已经引用它。这次没有运行构建产物。隔离测试只听 `127.0.0.1`，没有面向手机或公网。2026-10-17 公网进程已换成中继 6。这台手机已经 join。
 
 ## 失败与恢复
 
@@ -390,19 +400,19 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 
 ## 实施步骤
 
-去掉轮询与多余特权进程的整改（[改造路线](roadmap.md)的 P1）不依赖本设计。L0–L3 已经与它并行写进源码。约 24 小时 `procstats` 不再挡住后续，见[不再等待运行时长](history/validation.md#2026-10-17-不再等待运行时长)。Android 71 / Mac 37 上复采 Mac 35 / Android 70 那组行为已经通过，见[复采](history/validation.md#2026-10-17-android-71--mac-37-复采常驻助手与-wi-fi-短断)。共用助手已装到 Android 72，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。L4 这次没有开始，切换现有网关和手机 MCP 仍走[切换与回滚](#切换与回滚)。
+去掉轮询与多余特权进程的整改（[改造路线](roadmap.md)的 P1）不依赖本设计。L0–L3 已经与它并行写进源码。约 24 小时 `procstats` 不再挡住后续，见[不再等待运行时长](history/validation.md#2026-10-17-不再等待运行时长)。Android 71 / Mac 37 上复采 Mac 35 / Android 70 那组行为已经通过，见[复采](history/validation.md#2026-10-17-android-71--mac-37-复采常驻助手与-wi-fi-短断)。共用助手已装到 Android 72，见[共用助手](history/validation.md#2026-10-17-android-72-共用助手)。L4 的本地握手已接到源码里的 `127.0.0.1:8765/v2/link`，没有安装。远程握手已在测试里通过。手机服务只在端点是字面 IPv4 且授权列表恰好一台 Mac 时拨远程链路。网关源码的 serve 用设备密钥拨中继 6 的 `/v2/link`，不再用角色令牌；单测注入调用，域名和坏 pin 在拨号前拒绝。2026-10-17 公网进程已换成中继 6。这台手机已经 join，断开 adb 后远程 ping 有结果。网关生产路径已改走本地链路，手机上的 `/mcp` 返回 404。跨通道查询在测试里通过，已安装手机上没有再从另一条通道查同一编号。六个主题的订阅已在这条本地链路上对过，ops 不在订阅快照里；Mac 的设备健康仍是 3 秒读取，剪贴板和通知仍由网关用链路上的事件满足 `event.wait`。
 
 | 步骤 | 内容 | 本机验收 | 真机验收 |
 | --- | --- | --- | --- |
 | L0 规格与向量 | 帧编解码、认证签名、安全码和加密的测试向量放在仓库，Go 与 Java 共用。向量已在 `lib/link/testdata/vectors.json`。加入、邀请和批准的原文由两种语言的测试锁定同一组摘要。中继 6 的测试服务器使用帧和这些原文；网关、中继 5 和手机服务仍不使用 | 两种实现读同一组向量 | — |
-| L1 链路库 | Go 实现供网关和中继共用，Java 实现供手机使用。原语已在 `lib/link` 与 `dev.phonestation.adbkeep.link`：帧编解码、重组、窗口、优先级队列和心跳判断。L1b 的读写循环、流的打开结束与重置、按 channel 重组、按消费发 `credit`、窗口上限、写调度与背压，在 Go 的 `Endpoint` 与 Java 的 `LinkEngine`。共用用例在 `lib/link/testdata/engine.json`，两份都在跑。中继 6 的测试服务器只调用帧编解码；网关、中继 5 和手机服务仍不调用分片、窗口、优先级和这层引擎。按[会话与链路分层](#流)，这些已经在两份引擎和各自的 `Link` / `LinkMux` 里：序号不连续结束会话（`seq`，之后的帧是 `link`）；非链路帧在拉出时写入 peer；心跳在链路层，正文是 JSON `{"type":"ping"}`，一条连接一份；`SendMessage` 整条入队或一片不进；待发量降回上限以下时通知一次；channel 0 收件默认 8 MiB，超过是 `inbox` 然后 `link`；多会话按最小优先级号先发。网关、中继 5 和手机服务仍不调用 | 分片、流控、优先级、心跳、超限和畸形帧拒绝；L1b 另加乱序、交错分片、超窗、重置和慢接收方；会话结束、peer、原子入队、可写通知、收件上限和多会话各有一条共用用例 | — |
-| L2 手机回执 | 回执库、`receiptEpoch` 和三个执行队列已在 `LinkReceipts`。现有工具仍走 `OperationJobs`。审阅项已补进源码：超长结果记 `complete` 且 `resultKept: false`；`NotApplied` 记 `applied: false`，其他异常记 `applied: true`；改名后同步目录，电脑测试用 `DirectorySync` 替身；写失败时的状态与名额；4096 条上限、8 MiB 正文预算与内存索引；只读调用计入在途；排队过期和正文丢弃由定时器处理。未接入现有工具。按[手机端规则](#手机端规则)，这些已经在 `LinkReceipts`：结束时内存里保留完整结果，磁盘仍只存不超过 64 KiB 的正文，并标记 `resultKept: false`；终态年龄从结束时间算，磁盘在创建时间后多一列结束时间，旧的 10 列记录把结束时间看成创建时间；到期由下一次截止的单次定时器触发，查询时也会整理；打不开的回执移到 `corrupt/`，文件名能解析出 macId 与 op 时记为 `unknown`，残留临时文件在打开时删掉；`epoch` 缺失或不是 32 位小写十六进制时生成新的 `receiptEpoch`。手机上强杀后再查询还没有做 | 写前落盘、重启转换、冲突、同编号并发插入；补齐项各有一条用例；超长结果、结束时间、损坏回执和坏 epoch 各有一条用例 | 强杀与重启后查询 |
-| L3 中继 6 | 路由、注册表、加入码、邀请和在线推送已在 `server/relay/internal/v6`。真实 TLS 测试随 `server/relay` 的 `go test` 进入 `scripts/check.sh`。发布命令仍是中继 5。审阅项已补进源码：认证先验签且不计数，每条链路一个写协程和有界待发队列，写盘失败只拒绝这一次改动，名称拒绝 Cf。可信代理默认关闭。`ParseTrustedProxies` 解析逗号分隔的 IP，准备给 `PHONE_RELAY_TRUSTED_PROXIES`。正在运行的 `phone-relay` 是中继 5，不读这个变量，也不调用中继 6。部署中继 6 时由那个进程接上。未接入现有通道，隔离实例未启动 | 真实 TLS 联合测试接入 `scripts/check.sh`；同地址撤销设备不影响其他设备、慢接收方不阻塞发送方、写盘失败后已注册设备仍能认证 | 隔离实例 |
-| L4 网关切换 | 本地与远程都走 Link v2；跨通道查询；事件替代轮询 | 断线、切换、晚到的重复提交 | Wi-Fi 与蜂窝切换、后台保活、对照基线测耗电 |
-| L5 配对界面 | 两端的加入、邀请、授权列表和撤销页面，遵守 [DESIGN.md 开发约束](../DESIGN.md#开发约束) | [界面改动验收](validation.md#界面改动验收) | 拍照导入、adb 配对、手动输入 |
-| L6 端到端加密 | 握手、加密、拒绝降级 | 向量、篡改、重放、换钥 | 投屏延迟与 CPU |
+| L1 链路库 | Go 实现供网关和中继共用，Java 实现供手机使用。原语已在 `lib/link` 与 `dev.phonestation.adbkeep.link`：帧编解码、重组、窗口、优先级队列和心跳判断。L1b 的读写循环、流的打开结束与重置、按 channel 重组、按消费发 `credit`、窗口上限、写调度与背压，在 Go 的 `Endpoint` 与 Java 的 `LinkEngine`。共用用例在 `lib/link/testdata/engine.json`，两份都在跑。中继 6 只转发帧，不跑这层引擎；手机本地会话和网关本地拨号已经调用分片、窗口、优先级和这层引擎。按[会话与链路分层](#流)，这些已经在两份引擎和各自的 `Link` / `LinkMux` 里：序号不连续结束会话（`seq`，之后的帧是 `link`）；非链路帧在拉出时写入 peer；心跳在链路层，正文是 JSON `{"type":"ping"}`，一条连接一份；`SendMessage` 整条入队或一片不进；待发量降回上限以下时通知一次；channel 0 收件默认 8 MiB，超过是 `inbox` 然后 `link`；多会话按最小优先级号先发。中继 6 只转发帧，不跑这层引擎 | 分片、流控、优先级、心跳、超限和畸形帧拒绝；L1b 另加乱序、交错分片、超窗、重置和慢接收方；会话结束、peer、原子入队、可写通知、收件上限和多会话各有一条共用用例 | — |
+| L2 手机回执 | 回执库、`receiptEpoch` 和三个执行队列已在 `LinkReceipts`。现有工具仍走 `OperationJobs`。审阅项已补进源码：超长结果记 `complete` 且 `resultKept: false`；`NotApplied` 记 `applied: false`，其他异常记 `applied: true`；改名后同步目录，电脑测试用 `DirectorySync` 替身；写失败时的状态与名额；4096 条上限、8 MiB 正文预算与内存索引；只读调用计入在途；排队过期和正文丢弃由定时器处理。未接入现有工具。按[手机端规则](#手机端规则)，这些已经在 `LinkReceipts`：结束时内存里保留完整结果，磁盘仍只存不超过 64 KiB 的正文，并标记 `resultKept: false`；终态年龄从结束时间算，磁盘在创建时间后多一列结束时间，旧的 10 列记录把结束时间看成创建时间；到期由下一次截止的单次定时器触发，查询时也会整理；打不开的回执移到 `corrupt/`，文件名能解析出 macId 与 op 时记为 `unknown`，残留临时文件在打开时删掉；`epoch` 缺失或不是 32 位小写十六进制时生成新的 `receiptEpoch`。这台手机强杀后查过：已完成回执仍是 complete，进行中的 shell 回执是 unknown | 写前落盘、重启转换、冲突、同编号并发插入；补齐项各有一条用例；超长结果、结束时间、损坏回执和坏 epoch 各有一条用例 | 强杀与重启后查询 |
+| L3 中继 6 | 路由、注册表、加入码、邀请和在线推送已在 `server/relay/internal/v6`。真实 TLS 测试随 `server/relay` 的 `go test` 进入 `scripts/check.sh`。发布命令源码已是中继 6，并读取 `PHONE_RELAY_TRUSTED_PROXIES`。审阅项已补进源码：认证先验签且不计数，每条链路一个写协程和有界待发队列，写盘失败只拒绝这一次改动，名称拒绝 Cf。可信代理默认关闭。2026-10-17 公网进程已是中继 6。隔离实例是 `ServeLoopback`，只听 `127.0.0.1`，没有面向手机或公网 | 真实 TLS 联合测试接入 `scripts/check.sh`；同地址撤销设备不影响其他设备、慢接收方不阻塞发送方、写盘失败后已注册设备仍能认证 | 隔离实例 |
+| L4 网关切换 | 本地握手已接到 `127.0.0.1:8765/v2/link`。2026-10-17 公网进程已换成中继 6，手机保留数据重装，版本名仍是 72，本地配对后 ping 有结果。这台手机已经 join。断开 adb 后远程 ping、原编号查询和 device 事件对过。强杀后已完成回执仍是 complete，进行中的 shell 回执是 unknown。源码仍在 `ee4efaa` 之上，没有提交。 | 断线和签名不对两边都测了。同编号只执行一次在 Java `LocalLinkTest`。远程 hello、auth、ready 在 Go `DialRelay` 与 Java `RemoteLink` 对着中继 6 测试服务器各走了一次，`main` 和 `media` 都有。签名不对是 `bad_signature`，未注册是 `unknown_device`。撤销顺序在 Go `TestRelay6DialAuth`：错误签名仍是 `bad_signature`，签名正确才是 `revoked`。Java `RemoteLinkTest` 对着只听 `127.0.0.1` 的中继 6 测试服务器也按这个顺序测了：撤销设备上的错误签名仍是 `bad_signature`，签名正确才是 `revoked`。跨通道查询在 Java `CrossLinkTest`：一边 call，另一边 query 同一个 op；摘要相同返回原回执且不执行第二次；摘要不同是 conflict 且不执行；提交那一边断开后仍从回执库读到。已完成的回执和还在 running 的回执都测了。远程 call 还在 running 时，本地订阅收到 ops，不先 query；调用方断开后另一边按原编号 query。Java `LinkEventTest` 里两条会话共用回执：调用方断开时另一边读到 running，放行后读到 complete。`LinkRoute` 与 Go `Route` 在两边都可用时让新操作走本地，在途留在原通道，断开后改 query 另一边，流不迁移。Go 不调用回执。断开 adb 后远程 ping、原编号查询和 device 事件对过 | Wi-Fi 与蜂窝切换、后台保活、对照基线测耗电。这次没有做 |
+| L5 配对界面 | 手机「连接设置 → 工位配对」有待确认、允许、拒绝、授权列表和撤销。Mac 连接设置有同一入口，无线调试二维码没改。邀请文本、12 位码、二维码解码和回环 `POST /v2/pair` 已有测试。本地配对后这台手机点了允许，并已经 join。浅深色、大字号和真机点击还没做。拍照解码未在真机做 | [界面改动验收](validation.md#界面改动验收)。浅深色、大字号和真机点击还没做 | 拍照导入、adb 配对、手动输入 |
+| L6 端到端加密 | 默认关闭。必须加密时 `main` 和 `media` 都拒绝明文，不降级；本地 `RequireSeal` 返回 `local`。中继测试里这两种用途转发的载荷都不含正文。篡改、重放和换钥有测试。代码在这次已安装的手机包里，真机没有单独核对必须加密。网关和手机服务仍只打开 `main`，没有单独的投屏会话 | 向量、篡改、重放、换钥、中继看不到正文 | 投屏延迟与 CPU |
 
-实施时同步更新[架构](architecture.md)、[MCP](mcp.md)、[安全与授权](security.md)和[远程屏幕](remote-screen.md)；[中继合约](relay-contract.md)与[远程控制与事件](remote-control.md)被本设计替代后转入历史。AGENTS.md 与 CLAUDE.md 里关于角色令牌、手机本地令牌、MCP 端口和机型限制的规则也要改写，用 agent-docs-sync 同步。
+2026-10-18 已把[中继合约](history/relay-contract.md)、[远程控制与事件](history/remote-control.md)、[远程屏幕](history/remote-screen.md)和当时的 MCP 服务说明转入历史；现行入口留在[MCP](mcp.md)。实施时仍要同步[架构](architecture.md)和[安全与授权](security.md)。AGENTS.md 与 CLAUDE.md 里关于角色令牌、手机本地令牌、MCP 端口和机型限制的规则也要改写，用 agent-docs-sync 同步。
 
 ## 切换与回滚
 
@@ -413,15 +423,15 @@ Shell 授权仍等于 Shizuku 的 shell/root 能力，链路层不能把它变�
 3. 停止中继 5，完整归档它的状态目录，不删除；部署中继 6，使用新的状态目录，并生成加入码。
 4. 经 adb 保留数据安装新版手机端，再安装新版 Mac 端。
 5. Mac 加入中继，经本地链路与手机配对，在手机上授予需要的权限。
-6. 断开 adb，核对远程链路、操作查询和事件；之后再清除旧的角色令牌条目。
+6. 断开 adb 后的远程 ping、原编号查询和 device 事件已经对过。旧的角色令牌条目还没有清除。
 
 回滚：第 4 步之前，只需恢复中继 5 的程序和归档状态。第 4 步之后，Android 不卸载就无法降级，回滚只能用更高的版本号重新发布旧代码，按一次新发布处理。中继 5 的归档保留旧编号的最终回执，遵守「持久版接收过操作后，不能删除回执」的规则。实际主机和部署回执留在个人运维仓库。
 
 ## 实施前要核实
 
-1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥：不能。2026-10-16 本机自检，没有钥匙串访问组 entitlement 的临时签名程序，以及 `codesign --sign -` 的临时 App，创建 Secure Enclave P-256 都返回 -34018。两者改用登录钥匙串中的软件 P-256，签名和校验成功，名称以 `phone-station-selftest-` 开头的测试密钥已删除。没有系统授权弹窗。`scripts/build-mac-app.sh` 同样是临时签名，仓库没有 entitlement。正在使用的 App 没有替换，也没有拿它做这次自检。P2 接入通道前走这条软件密钥回退。
+1. 临时签名的 Mac App 与钥匙串助手能否创建并使用 Secure Enclave 密钥：不能。2026-10-16 本机自检，没有钥匙串访问组 entitlement 的临时签名程序，以及 `codesign --sign -` 的临时 App，创建 Secure Enclave P-256 都返回 -34018。两者改用登录钥匙串中的软件 P-256，签名和校验成功，名称以 `phone-station-selftest-` 开头的测试密钥已删除。没有系统授权弹窗。`scripts/build-mac-app.sh` 同样是临时签名，仓库没有 entitlement。2026-10-16 那次自检没有换上正在使用的 App。2026-10-17 应用包已换成这次构建，仍是临时签名，注册用的是软件密钥，没有换成 Secure Enclave。
 2. PGT-AN20 上 Keystore P-256 是否走 StrongBox，以及签名耗时。诊断行已在受 DUMP 权限保护的服务 dump 里，形如 `deviceKey strongBox=true signMs=0`，不包含密钥或签名。别名 `phone-station-device-p256` 不存在时，打开密钥时会创建它，生成时间不算进 `signMs`。StrongBox 生成失败回退普通 Keystore，本机有这条路径的用例。API 31 以下无法从 KeyInfo 区分 StrongBox，已有密钥会记成 false。2026-10-16 在 PGT-AN20 / Android 70 上读到 `strongBox=false`：密钥在普通 Keystore；签名第一次 22 ms，之后四次中位数 16.5 ms，后台签名可行。
-3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。体积已在本机量过，拍照解码这次没做。临时加入 Maven 上的 ZXing `core` 3.5.3（SHA-256 `8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82`），只含解码，没有相机类。打包方式与 `lib/android/build.sh` 相同：当前资源、应用类、Shizuku 与 Java-WebSocket，再用 `d8` 和 `zipalign -f 4`。没有 ZXing 时对齐后的未签名包是 424549 字节，加入后是 684917 字节，增加 260368 字节，两边都只有一个 `classes.dex`。测完已删掉 jar 和临时包，仓库没有留下这条依赖，也没有安装。荣耀系统相机这次没有在手机上拍，`ACTION_IMAGE_CAPTURE` 的真机解码还没做。2026-10-17 安装 Android 72 时仍没有做。
+3. 荣耀系统相机经 `ACTION_IMAGE_CAPTURE` 返回的图片能否稳定解出二维码，以及二维码库增加多少 APK 体积。体积已在本机量过，拍照解码这次没做。临时加入 Maven 上的 ZXing `core` 3.5.3（SHA-256 `8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82`），只含解码，没有相机类。打包方式与 `lib/android/build.sh` 相同：当前资源、应用类、Shizuku 与 Java-WebSocket，再用 `d8` 和 `zipalign -f 4`。没有 ZXing 时对齐后的未签名包是 424549 字节，加入后是 684917 字节，增加 260368 字节，两边都只有一个 `classes.dex`。当时测完删掉了 jar 和临时包。解码现由 `lib/android/zxing_deps.py` 在构建时取回同一份 jar，jar 不进仓库。荣耀系统相机这次没有在手机上拍，`ACTION_IMAGE_CAPTURE` 的真机解码还没做。
 4. 手机上 Java-WebSocket 服务端模式的线程与内存，与现有 `McpHttp` 对比。只在测试进程里比过，没有换成 `McpHttp`，也没有装进手机。`WebSocketServerCostTest` 用的是已经在 `RelaySocket` 里的 Java-WebSocket 1.6.0。这台电脑 12 个处理器，JVM 默认线程栈 2048 KiB。`McpHttp` 空闲时多 1 条 `station-mcp`；一次 POST 之后是这条加上 1 条 `station-mcp-request`，共 2 条。Java-WebSocket 服务端空闲是 14 条：1 条 `WebSocketSelector`、12 条 `WebSocketWorker`（等于处理器数）、1 条 `connectionLostChecker`。一次 WebSocket 升级没有再加线程。三次 GC 后的堆增量，`McpHttp` 是 304432 字节，服务端是 224416 字节；连跑两次数字相同。堆本身服务端更小，线程数多，每条线程最多可用 2048 KiB 栈，栈不会一开始全部提交。服务端空闲线程数是 2 加处理器数，手机上会随核数变化，这次没有在手机上数。结论是不把 `McpHttp` 换成这个服务端模式。
-5. 个人部署的反向代理能否透传 `/v2/link` 的 WebSocket 升级和 256 KiB 的二进制帧，以及中继看到的来源地址是不是代理自己。能透传。来源在不信任代理时是代理自己，不是真实客户端。本机 `TestReverseProxyPassesUpgradeAndMediaFrame` 用 `go test -race` 通过。测试服务器只听 `127.0.0.1`，反向代理也只听 `127.0.0.1`，再从本机出口 IPv4 拨进去，让中继看见的不是回环地址。未配置可信代理时，未认证来源记成这个出口地址。只在这个测试进程里把该地址交给 `SetTrustedProxies` 后，来源改为 `X-Forwarded-For` 里的 `127.0.0.1`。随后清掉可信代理。两边都完成 media 认证后，载荷正好 256 KiB 的二进制帧可以送达，整帧是 32 字节头加这段载荷。未认证读上限仍是 8192，这种帧不能在 media 认证前通过。`PHONE_RELAY_TRUSTED_PROXIES` 没有配到正在运行的中继 5，公网没有动，这个测试服务器也没有对着手机或公网。部署中继 6 时如果前面有代理，要把代理地址配进可信代理，否则同一来源共用未认证限额。
+5. 个人部署的反向代理能否透传 `/v2/link` 的 WebSocket 升级和 256 KiB 的二进制帧，以及中继看到的来源地址是不是代理自己。能透传。来源在不信任代理时是代理自己，不是真实客户端。本机 `TestReverseProxyPassesUpgradeAndMediaFrame` 用 `go test -race` 通过。测试服务器只听 `127.0.0.1`，反向代理也只听 `127.0.0.1`，再从本机出口 IPv4 拨进去，让中继看见的不是回环地址。未配置可信代理时，未认证来源记成这个出口地址。只在这个测试进程里把该地址交给 `SetTrustedProxies` 后，来源改为 `X-Forwarded-For` 里的 `127.0.0.1`。随后清掉可信代理。两边都完成 media 认证后，载荷正好 256 KiB 的二进制帧可以送达，整帧是 32 字节头加这段载荷。未认证读上限仍是 8192，这种帧不能在 media 认证前通过。当时 `PHONE_RELAY_TRUSTED_PROXIES` 没有配到中继 5，这个测试服务器也没有对着手机或公网。2026-10-17 公网进程已是中继 6，这次记录没有写可信代理名单。前面若有代理，来源仍会记成代理自己，同一来源共用未认证限额。
 6. adb 能否把本地转发绑定到权限 0600 的 Unix 套接字（`localfilesystem:`），避免其他本机用户连接转发端口。2026-10-16 实测能建立，但 adb 创建的套接字是 0755，不能直接当作访问控制；要么放进 0700 的私有目录，要么仍靠链路的双向设备签名。

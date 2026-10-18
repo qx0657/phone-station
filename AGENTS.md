@@ -6,7 +6,7 @@
 
 ## 项目与阅读入口
 
-本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb 和灯光跟随声音仍要求本机 adb；Mac 25、手机 63、中继 3 起，远程实时投屏与录屏使用独立 WSS，见 `docs/remote-screen.md`。
+本仓库是手机工位，公开仓库名 `phone-station`，作者检出目录为 `~/dev/phone`。电脑通过本地 adb 或可配置公网中继访问 Android 应用自己的 MCP。脚本按自身目录寻找 `lib/`，不依赖检出路径。完整 adb 和灯光跟随声音仍要求本机 adb；Mac 25、手机 63、中继 3 起，远程实时投屏与录屏使用独立 WSS，见 `docs/history/remote-screen.md`。
 
 给人看的用法在 [README.md](README.md)，组件、身份和能力矩阵在 [docs/architecture.md](docs/architecture.md)。按当前任务读取对应文档，不把全部历史或全站自检当成前置步骤：
 
@@ -17,7 +17,7 @@
 | 图库截图的信息价值与去重 | [.agents/skills/screenshot-cleanup/SKILL.md](.agents/skills/screenshot-cleanup/SKILL.md) |
 | 界面、页面组织、交互与文案 | [DESIGN.md 开发约束](DESIGN.md#开发约束)、[功能语义](docs/features.md)、[界面改动验收](docs/validation.md#界面改动验收) |
 | Mac 构建与进程、Android 权限与无线调试保持 | [docs/mac-app.md](docs/mac-app.md)、[docs/adb-keep.md](docs/adb-keep.md) |
-| 中继服务端、协议与持久恢复 | [server/relay/README.md](server/relay/README.md)、[docs/relay-contract.md](docs/relay-contract.md) |
+| 中继服务端、协议与持久恢复 | [server/relay/README.md](server/relay/README.md)、[docs/history/relay-contract.md](docs/history/relay-contract.md) |
 | 状态异常、任务中断、版本与发布 | [docs/troubleshooting.md](docs/troubleshooting.md)、[docs/releases.md](docs/releases.md) |
 | 统一本机检查与验证边界 | [docs/validation.md](docs/validation.md) |
 
@@ -43,11 +43,11 @@
 
 `mirror.sh` / `record.sh` / `screenshot.sh` / `stay-awake.sh` / `torch.sh` 会投屏、录屏、截屏、改设置或开灯；有对应要求时运行对应入口，改了某个脚本要验证时可以运行那一个。不要为查看环境运行。安全界面截屏可能黑屏，不绕过 FLAG_SECURE，也不修改系统框架。
 
-Shell 使用已运行并授权的 Shizuku 13+，不回退到应用 UID，不擅自启动或申请权限。非 root 手机重启后须重新启动 Shizuku；原授权可保留。优先提交后台任务并查询原编号；missing/result_unknown 不证明没执行。APK 更新优先 `install-apk.sh`、`android.sh --remote`，保留数据、不自动卸载处理签名冲突；上传或提交后失败不回退 adb 重装。完整规则见 [docs/remote-ops.md](docs/remote-ops.md)。
+Shell 使用已运行并授权的 Shizuku 13+，不回退到应用 UID，不擅自启动或申请权限。非 root 手机重启后须重新启动 Shizuku；原授权可保留。优先提交后台任务并查询原编号；missing/result_unknown 不证明没执行。adb 已经连着手机时，APK 更新走 `android.sh` 的本地安装。没有本地连接时才用 `install-apk.sh` 或 `android.sh --remote`。保留数据、不自动卸载处理签名冲突；远程上传或提交后失败不回退 adb 重装。完整规则见 [docs/remote-ops.md](docs/remote-ops.md)。
 
 ## 连接与凭据
 
-手机 MCP 只监听手机 `127.0.0.1:8765/mcp`；电脑固定访问网关 `127.0.0.1:18765/mcp`，adb 转发使用 18766。中继承载 MCP 和独立 WSS 屏幕会话，不能代替完整无线 adb。手机工具都在本应用服务中扩展。
+已安装的手机不再提供 `127.0.0.1:8765/mcp`，这个路径返回 404。本地工具走 `127.0.0.1:8765/v2/link`。电脑仍访问网关 `127.0.0.1:18765/mcp`，adb 转发使用 18766。公网进程已是中继 6 的 `/v2/link`。这台手机已经 join。断开 adb 后远程 ping、原编号查询和 device 事件对过；强杀后已完成回执仍是 complete，进行中的 shell 回执是 unknown。拍照解码未在真机做。中继不能代替完整无线 adb。手机工具都在本应用服务中扩展。
 
 AI 优先使用已连接 MCP 工具，或 `mcp.sh call` 从 stdin 提交 JSON-RPC；进程内部读取凭据。`mcp.sh status --safe` 只读已有网关且不输出令牌。需要启动服务时用 `mcp.sh >/dev/null`。默认启动、普通 status 和内部 snapshot/watch 可能包含授权头，不能直接贴到聊天、日志或仓库。普通 status 还会刷新 adb 转发与手机令牌，不是无副作用状态采集。
 
@@ -62,9 +62,9 @@ AI 优先使用已连接 MCP 工具，或 `mcp.sh call` 从 stdin 提交 JSON-RP
 - 界面改动先读 [DESIGN.md 开发约束](DESIGN.md#开发约束)：核心能力保持可见，连接方式、服务与功能分层，开关选择与真实状态分离；正常说明折叠，阻塞项直接给出处理入口。
 - 页面重组保留用户选择和授权，避免重复控制与状态卡；入口迁移同时维护深链、返回路径、缺项跳转及文档。按 [界面改动验收](docs/validation.md#界面改动验收) 核对受影响情形，未验收项明确记录。
 
-`scripts/` 是用户入口，`lib/` 是内部实现，`app/mac/` 是原生 Mac，`lib/android/` 是手机应用，`server/relay/` 是公网服务端。新用户脚本用 zsh、`set -euo pipefail`、按自身目录 source `../lib/common.sh`，支持 `-h`；不用 zsh 中与 PATH 绑定的变量名 path。需要 adb 的操作先 connect.sh，再 online_serial 获取唯一在线设备；远程 shell/安装不 connect。mDNS 发现统一用 `lib/adb_mdns.py`。
+`scripts/` 是用户入口，`lib/` 是内部实现，`app/mac/` 是原生 Mac，`lib/android/` 是手机应用，`server/relay/` 是公网服务端。新用户脚本用 zsh、`set -euo pipefail`、按自身目录 source `../lib/common.sh`，支持 `-h`；不用 zsh 中与 PATH 绑定的变量名 path。需要 adb 的操作先 connect.sh，再 online_serial 取得目标设备。只有一台时仍是它；同一台手机的多条连接先按序列号归并。列出多台不同手机时，用菜单栏记住的那一台，没有选择就停止并说明。远程 shell/安装不 connect。mDNS 发现统一用 `lib/adb_mdns.py`。
 
-统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/五个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
+统一本机检查 `scripts/check.sh`：镜像、Skill 软链接、文档链接、shell/Python 语法、Python/Java/六个 Go 模块 race、真实中继 TLS 联合合约、Swift 回归与 Mac 全量源码编译。非 Mac 用 `--core` 并明确排除 Swift。它使用临时测试数据，不连接手机、不启动运行中的真实网关、不读发布签名。新增 Swift 测试要在 `lib/check.py` 登记；漏登失败。CI 使用同一入口。
 
 改 Android Java/资源后运行 `lib/android/build.sh`，只在电脑构建并测试，不碰手机。完整 Mac 包用 `scripts/build-mac-app.sh`，公网包用 `scripts/build-relay.sh`。android.sh 是设备安装入口，不用于单纯构建。改 notify-sound/PlayPcm.java 或 torch/Torch.java 时运行各自 build.sh，不手改 dex，不把 R8 jar 放仓库。灯光跟随声音的机型限制、持灯与暂停规则见 [docs/torch.md](docs/torch.md)，通知与媒体音量差异见 [docs/notify.md](docs/notify.md)。
 

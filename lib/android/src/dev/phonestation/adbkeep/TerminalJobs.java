@@ -12,6 +12,8 @@ final class TerminalJobs {
     private final OperationJobs jobs;
     private final Backend backend;
     private final Set<String> cancelled = new HashSet<>();
+    /** 链路回执已经记下这次打开。这里只记活着的会话，不再写 OperationJobs。 */
+    private final Set<String> live = new HashSet<>();
 
     TerminalJobs(OperationJobs jobs, Backend backend) { this.jobs = jobs; this.backend = backend; }
 
@@ -54,6 +56,43 @@ final class TerminalJobs {
     synchronized Json resize(String id, int columns, int rows) {
         dimensions(columns, rows); requireCreated(id);
         return backend.call(request("resize", id).put("columns", columns).put("rows", rows), false);
+    }
+
+    synchronized Json openNow(String id, int columns, int rows, Runnable authorize) {
+        OperationJobs.validate(id);
+        dimensions(columns, rows);
+        authorize.run();
+        Json result = backend.call(request("open", id).put("columns", columns).put("rows", rows), true, authorize);
+        if (result != null && result.get("state") != null && "running".equals(result.get("state").string())) {
+            live.add(id);
+        }
+        return result;
+    }
+
+    synchronized Json readNow(String id, long offset) {
+        if (offset < 0) { throw new IllegalArgumentException("offset 不能为负数"); }
+        if (!live.contains(id)) { return ended(id, "lost", "原会话未确认或已结束，不会重新创建"); }
+        return backend.call(request("read", id).put("offset", offset), false);
+    }
+
+    synchronized Json inputNow(String id, long sequence, String hex) {
+        if (sequence < 0 || hex == null || hex.isEmpty() || hex.length() > 8192 || !hex.matches("(?:[0-9a-fA-F]{2})+")) {
+            throw new IllegalArgumentException("输入需要非负序号和 1–4096 字节的十六进制");
+        }
+        if (!live.contains(id)) { throw new FileFailure("原终端尚未确认或已结束，请查询同一会话"); }
+        return backend.call(request("input", id).put("sequence", sequence).put("hex", hex), false);
+    }
+
+    synchronized Json resizeNow(String id, int columns, int rows) {
+        dimensions(columns, rows);
+        if (!live.contains(id)) { throw new FileFailure("原终端尚未确认或已结束，请查询同一会话"); }
+        return backend.call(request("resize", id).put("columns", columns).put("rows", rows), false);
+    }
+
+    synchronized Json closeNow(String id) {
+        OperationJobs.validate(id);
+        if (!live.remove(id)) { return ended(id, "lost", "原会话已不存在"); }
+        return backend.call(request("close", id), false);
     }
 
     synchronized Json close(String id) {

@@ -33,6 +33,8 @@ python3 "$here/test_signing_key.py"
 
 websocket_jars=("${(@f)$(python3 "$here/websocket_deps.py")}")
 websocket_cp=${(j.:.)websocket_jars}
+zxing_jars=("${(@f)$(python3 "$here/zxing_deps.py")}")
+zxing_cp=${(j.:.)zxing_jars}
 
 print -r -- "检查打开时机…"
 javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
@@ -43,6 +45,7 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/HostLink.java" \
   "$here/src/dev/phonestation/adbkeep/RelayRetry.java" \
   "$here/src/dev/phonestation/adbkeep/RelayConnection.java" \
+  "$here/src/dev/phonestation/adbkeep/RemoteChannel.java" \
   "$here/src/dev/phonestation/adbkeep/RelayProfile.java" \
   "$here/src/dev/phonestation/adbkeep/FeaturePolicy.java" \
   "$here/src/dev/phonestation/adbkeep/RemotePolicy.java" \
@@ -67,12 +70,20 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/LocalEventWait.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkFrame.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkAuth.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkInvite.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkSafety.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkSeal.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkSealPolicy.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkSealSession.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkFlow.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkEngine.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkMux.java" \
   "$here/src/dev/phonestation/adbkeep/link/LinkReceipts.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkEvents.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LinkRoute.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LocalWire.java" \
+  "$here/src/dev/phonestation/adbkeep/link/LocalLink.java" \
+  "$here/src/dev/phonestation/adbkeep/link/RemoteLink.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardState.java" \
   "$here/src/dev/phonestation/adbkeep/ClipboardAvailability.java" \
   "$here/src/dev/phonestation/adbkeep/HealthStatus.java" \
@@ -85,9 +96,21 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/src/dev/phonestation/adbkeep/ShellRunner.java" \
   "$here/src/dev/phonestation/adbkeep/ScreenCapture.java" \
   "$here/src/dev/phonestation/adbkeep/FileOps.java" \
+  "$here/src/dev/phonestation/adbkeep/SharePaths.java" \
   "$here/src/dev/phonestation/adbkeep/McpProtocol.java" \
+  "$here/src/dev/phonestation/adbkeep/McpCatalog.java" \
   "$here/src/dev/phonestation/adbkeep/LoopbackBoundary.java" \
   "$here/src/dev/phonestation/adbkeep/McpHttp.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkTools.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkGrants.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkPairing.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkPairDesk.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkSealStore.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkPort.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkLiveEvents.java" \
+  "$here/src/dev/phonestation/adbkeep/InstallPath.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkSnapshots.java" \
+  "$here/src/dev/phonestation/adbkeep/LinkRemote.java" \
   "$here/test/KeeperPolicyTest.java" \
   "$here/test/WirelessControlTest.java" \
   "$here/test/InstallRecoveryTest.java" \
@@ -95,6 +118,7 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/test/HostLinkTest.java" \
   "$here/test/RelayRetryTest.java" \
   "$here/test/RelayConnectionTest.java" \
+  "$here/test/RemoteChannelTest.java" \
   "$here/test/EventLeaseTest.java" \
   "$here/test/RelayProfileTest.java" \
   "$here/test/RemotePolicyTest.java" \
@@ -115,6 +139,10 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/test/LinkFlowTest.java" \
   "$here/test/LinkEngineTest.java" \
   "$here/test/LinkReceiptTest.java" \
+  "$here/test/LocalLinkTest.java" \
+  "$here/test/RemoteLinkTest.java" \
+  "$here/test/CrossLinkTest.java" \
+  "$here/test/LinkEventTest.java" \
   "$here/test/JsonTest.java" \
   "$here/test/FilePolicyTest.java" \
   "$here/test/FileOpsTest.java" \
@@ -122,6 +150,7 @@ javac --release 17 -classpath "$websocket_cp" -d "$work/policy" \
   "$here/test/ScreenCaptureTest.java" \
   "$here/test/McpProtocolTest.java" \
   "$here/test/McpHttpTest.java" \
+  "$here/test/LinkHttpTest.java" \
   "$here/test/WebSocketServerCostTest.java" \
   "$here/test/McpLoopbackTest.java" \
   "$here/test/OperationJobsTest.java" \
@@ -138,6 +167,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.KeeperCopyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.HostLinkTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayRetryTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayConnectionTest
+java -cp "$work/policy" dev.phonestation.adbkeep.RemoteChannelTest
 java -cp "$work/policy" dev.phonestation.adbkeep.EventLeaseTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RelayProfileTest
 java -cp "$work/policy" dev.phonestation.adbkeep.RemotePolicyTest
@@ -158,6 +188,10 @@ java -cp "$work/policy" dev.phonestation.adbkeep.LinkVectorTest
 java -cp "$work/policy" dev.phonestation.adbkeep.LinkFlowTest
 java -cp "$work/policy" dev.phonestation.adbkeep.LinkEngineTest
 java -cp "$work/policy" dev.phonestation.adbkeep.LinkReceiptTest
+java -cp "$work/policy" dev.phonestation.adbkeep.LocalLinkTest
+(cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.RemoteLinkTest)
+(cd "$repo" && java -cp "$work/policy" dev.phonestation.adbkeep.CrossLinkTest)
+java -cp "$work/policy" dev.phonestation.adbkeep.LinkEventTest
 java -cp "$work/policy" dev.phonestation.adbkeep.JsonTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FilePolicyTest
 java -cp "$work/policy" dev.phonestation.adbkeep.FileOpsTest
@@ -165,6 +199,7 @@ java -cp "$work/policy" dev.phonestation.adbkeep.StayAwakeTest
 java -cp "$work/policy" dev.phonestation.adbkeep.ScreenCaptureTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpProtocolTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpHttpTest
+java -cp "$work/policy" dev.phonestation.adbkeep.LinkHttpTest
 java -cp "$work/policy:$websocket_cp" dev.phonestation.adbkeep.WebSocketServerCostTest
 java -cp "$work/policy" dev.phonestation.adbkeep.McpLoopbackTest
 java -cp "$work/policy" dev.phonestation.adbkeep.OperationJobsTest
@@ -211,12 +246,13 @@ done
 shizuku_cp=${(j.:.)shizuku_jars}
 
 print -r -- "编译…"
-javac --release 17 -classpath "$jar:$shizuku_cp:$websocket_cp" -d "$work/classes" \
+javac --release 17 -classpath "$jar:$shizuku_cp:$websocket_cp:$zxing_cp" -d "$work/classes" \
   "$work/gen/dev/phonestation/adbkeep/R.java" \
-  "$here"/src/dev/phonestation/adbkeep/*.java
+  "$here"/src/dev/phonestation/adbkeep/*.java \
+  "$here"/src/dev/phonestation/adbkeep/link/*.java
 mkdir -p "$work/dex"
 class_files=("${(@f)$(find "$work/classes" -name '*.class')}")
-"$bt/d8" --min-api 29 --lib "$jar" --output "$work/dex" "${class_files[@]}" "${shizuku_jars[@]}" "${websocket_jars[@]}"
+"$bt/d8" --min-api 29 --lib "$jar" --output "$work/dex" "${class_files[@]}" "${shizuku_jars[@]}" "${websocket_jars[@]}" "${zxing_jars[@]}"
 zip -j -q "$work/unsigned.apk" "$work/dex/classes.dex"
 mkdir -p "$work/META-INF/services"
 unzip -p "$repo/build/third_party/websocket/slf4j-nop-2.0.13.jar" META-INF/services/org.slf4j.spi.SLF4JServiceProvider > "$work/META-INF/services/org.slf4j.spi.SLF4JServiceProvider"
@@ -247,7 +283,8 @@ cp "$repo/docs/licenses/scrcpy.txt" "$work/assets/scrcpy-license.txt"
 cp "$repo/docs/licenses/coder-websocket.txt" "$work/assets/coder-websocket-license.txt"
 cp "$repo/docs/licenses/java-websocket.txt" "$work/assets/java-websocket-license.txt"
 cp "$repo/docs/licenses/slf4j.txt" "$work/assets/slf4j-license.txt"
-(cd "$work" && zip -q unsigned.apk assets/screen-arm64 assets/scrcpy-server assets/scrcpy-license.txt assets/coder-websocket-license.txt assets/java-websocket-license.txt assets/slf4j-license.txt)
+cp "$repo/docs/licenses/zxing.txt" "$work/assets/zxing-license.txt"
+(cd "$work" && zip -q unsigned.apk assets/screen-arm64 assets/scrcpy-server assets/scrcpy-license.txt assets/coder-websocket-license.txt assets/java-websocket-license.txt assets/slf4j-license.txt assets/zxing-license.txt)
 
 mkdir -p "$repo/build"
 # 签过名的钥匙不放进 build/。删掉构建目录或换一台电脑时，把这一份拷到同一路径再编，才不用卸掉重装。

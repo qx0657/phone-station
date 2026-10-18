@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MainPage: View {
     @ObservedObject var station: Station
@@ -76,6 +77,36 @@ struct MainPage: View {
             }
             .onAppear {
                 showsControls = stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
+            }
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                guard let provider = providers.first else { return false }
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    let name = url.lastPathComponent
+                    guard let dest = FileShare.phoneDownload(name) else { return }
+                    Task { @MainActor in
+                        guard station.mcp.requestAvailable else {
+                            station.feedback.notice = StationL10n.format("将保存到 {0}。文件还没有送上链路。", dest)
+                            return
+                        }
+                        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                        guard values?.isRegularFile == true, let size = values?.fileSize, size <= FileShare.maxDropBytes else {
+                            station.feedback.notice = StationL10n.text("这份文件超过 128 KiB，还没有送上链路。")
+                            return
+                        }
+                        guard let data = try? Data(contentsOf: url) else {
+                            station.feedback.notice = StationL10n.format("将保存到 {0}。文件还没有送上链路。", dest)
+                            return
+                        }
+                        let endpoint = station.mcp.endpoint
+                        let token = station.mcp.token
+                        let saved = await FileShare.send(name: name, data: data, endpoint: endpoint, token: token)
+                        station.feedback.notice = saved
+                            ? StationL10n.format("已保存到 {0}。", dest)
+                            : StationL10n.format("将保存到 {0}。文件还没有送上链路。", dest)
+                    }
+                }
+                return true
             }
         }
     }

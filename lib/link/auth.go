@@ -40,6 +40,17 @@ func LocalAuthMessage(peerID, peerNonce, ownID []byte) ([]byte, error) {
 	return out, nil
 }
 
+func LocalPairMessage(spki, nonce []byte) ([]byte, error) {
+	if len(spki) == 0 || len(nonce) != 32 {
+		return nil, errors.New("length")
+	}
+	out := make([]byte, 0, len("phone-station link-v2 local-pair")+len(spki)+len(nonce))
+	out = append(out, "phone-station link-v2 local-pair"...)
+	out = append(out, spki...)
+	out = append(out, nonce...)
+	return out, nil
+}
+
 func VerifySignature(spki, message, der []byte) error {
 	parsed, err := x509.ParsePKIXPublicKey(spki)
 	if err != nil {

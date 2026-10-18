@@ -116,6 +116,13 @@ final class Json {
         return list;
     }
 
+    java.util.Set<String> keys() {
+        if (kind != Kind.OBJ) {
+            throw new IllegalArgumentException("需要对象");
+        }
+        return java.util.Collections.unmodifiableSet(map().keySet());
+    }
+
     Json get(String key) {
         if (kind != Kind.OBJ) {
             throw new IllegalArgumentException("需要对象");

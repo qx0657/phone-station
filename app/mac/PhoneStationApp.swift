@@ -1,6 +1,8 @@
 import AppKit
+import ApplicationServices
 import Combine
 import OSLog
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -18,6 +20,8 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private let station = Station()
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var settingsWindow: NSWindow?
+    private var pageSubscription: AnyCancellable?
     private var menuBarShowsConnected: Bool?
     private var appearanceSubscription: AnyCancellable?
     /// Clicks in other apps never reach an `LSUIElement` popover, so `.transient` stays open.
@@ -25,13 +29,36 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     private var localDismissMonitor: Any?
 
     static func main() {
+        if CommandLine.arguments.dropFirst().contains("--register-station") {
+            let result = StationService.register()
+            fputs(result + "\n", stdout)
+            exit(result == "enabled" || result == "registered" || result == "approval" ? 0 : 1)
+        }
+        if CommandLine.arguments.dropFirst().contains("--unregister-station") {
+            do {
+                try SMAppService.agent(plistName: StationService.plistName).unregister()
+                fputs("unregistered\n", stdout)
+                exit(0)
+            } catch {
+                fputs("error\n", stderr)
+                exit(1)
+            }
+        }
         let app = NSApplication.shared
         app.delegate = retainedDelegate
         app.setActivationPolicy(.accessory)
+        exposeToAccessibility()
         app.run()
     }
 
+    /// 菜单栏应用没有 Dock 图标。不打开这项时，辅助功能看不到面板和设置窗口。
+    static func exposeToAccessibility() {
+        let element = AXUIElementCreateApplication(getpid())
+        AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.exposeToAccessibility()
         station.appearance.applyTheme()
         repairPreferredPositionIfNeeded()
         installStatusItem()
@@ -41,6 +68,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
                 let connected = self.menuBarShowsConnected ?? false
                 self.menuBarShowsConnected = nil
                 self.applyMenuBar(connected: connected)
+                self.settingsWindow?.title = StationL10n.text("设置")
                 NotificationBannerCenter.shared.refreshAppearance()
                 for window in NSApp.windows where ["手机工位 · 远程投屏", "Phone Station · Remote mirroring"].contains(window.title) {
                     window.title = StationL10n.text("手机工位 · 远程投屏")
@@ -66,6 +94,13 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(togglePopover)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        let openSettings = NSAccessibilityCustomAction(name: StationL10n.text("设置")) { [weak self] in
+            guard let self else { return false }
+            self.station.page = .more
+            return true
+        }
+        button.setAccessibilityCustomActions([openSettings])
         statusItem = item
         station.link.onMenuIcon = { [weak self] connected in
             self?.applyMenuBar(connected: connected)
@@ -76,17 +111,17 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         panel.behavior = .transient
         panel.animates = false
         panel.delegate = self
-        let host = NSHostingController(rootView: StationView(station: station))
+        let host = NSHostingController(rootView: MainPage(station: station))
         // Hug whichever page is showing. A fixed height leaves a gap under the shorter ones.
         host.sizingOptions = .preferredContentSize
         panel.contentSize = NSSize(width: 360, height: 420)
         panel.contentViewController = host
         popover = panel
+        pageSubscription = station.$page.sink { [weak self] page in
+            DispatchQueue.main.async { self?.syncSettingsWindow(page) }
+        }
         NotificationBannerCenter.shared.onOpen = { [weak self] in
-            guard let self, let button = self.statusItem?.button, let popover = self.popover else { return }
-            self.station.page = .notifications
-            if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            self?.station.page = .notifications
         }
         station.link.startWatch()
         station.mcp.startWatch()
@@ -101,7 +136,8 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
             logger.notice("Menu bar icon tracks link, connected: \(connected, privacy: .public), status: \(self.station.link.statusLabel, privacy: .public)")
         }
         let line = StationL10n.text(station.link.connectionLine)
-        let tip = StationL10n.format("手机工位：{0}", StationL10n.text("\(station.link.statusLabel)")) + (line.isEmpty ? "" : "\n\(line)")
+        let name = StationL10n.text(station.link.headline)
+        let tip = StationL10n.format("手机工位：{0}", StationL10n.text("\(station.link.statusLabel)")) + "\n" + name + (line.isEmpty ? "" : "\n\(line)")
         if button.toolTip != tip {
             button.toolTip = tip
         }
@@ -163,14 +199,90 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePopover() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showPhoneMenu()
+            return
+        }
         guard let button = statusItem?.button, let popover else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            if station.page != .main { station.page = .main }
             station.refresh()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func showPhoneMenu() {
+        guard let button = statusItem?.button else { return }
+        let phones = station.link.phones
+        guard phones.count > 1 else {
+            togglePopoverFromMenu()
+            return
+        }
+        let menu = NSMenu()
+        let header = NSMenuItem(title: StationL10n.text("切换手机"), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for seat in phones {
+            let title = StationL10n.text(seat.transport) + " · " + seat.identity
+            let item = NSMenuItem(title: title, action: #selector(choosePhone(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = seat.serial
+            let current = station.link.serial
+            item.state = current == seat.serial || seat.aliases.contains(current ?? "") ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+    }
+
+    @objc private func choosePhone(_ sender: NSMenuItem) {
+        guard let serial = sender.representedObject as? String else { return }
+        station.link.selectPhone(serial)
+    }
+
+    private func togglePopoverFromMenu() {
+        guard let button = statusItem?.button, let popover else { return }
+        if popover.isShown { return }
+        station.refresh()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func syncSettingsWindow(_ page: StationPage) {
+        if page == .main {
+            station.settingsOpen = false
+            settingsWindow?.orderOut(nil)
+            statusItem?.button?.setAccessibilityChildren(nil)
+            return
+        }
+        let window = ensureSettingsWindow()
+        window.title = StationL10n.text("设置")
+        station.settingsOpen = true
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSAccessibility.post(element: window, notification: .created)
+        if popover?.isShown == true { popover?.performClose(nil) }
+    }
+
+    private func ensureSettingsWindow() -> NSWindow {
+        if let settingsWindow { return settingsWindow }
+        let host = NSHostingController(rootView: StationView(station: station))
+        host.sizingOptions = .preferredContentSize
+        let window = NSWindow(contentViewController: host)
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.level = .floating
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.setContentSize(NSSize(width: 360, height: 560))
+        window.title = StationL10n.text("设置")
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        settingsWindow = window
+        return window
     }
 
     private func installDismissMonitors() {
@@ -245,20 +357,44 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
 
 extension PhoneStationApp: NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
+        Self.exposeToAccessibility()
+        if let view = popover?.contentViewController?.view {
+            view.setAccessibilityElement(true)
+            view.setAccessibilityRole(.group)
+            view.setAccessibilityLabel(StationL10n.text("手机工位"))
+            view.window?.setAccessibilityElement(true)
+            view.window?.setAccessibilityRole(.window)
+            view.window?.setAccessibilityLabel(StationL10n.text("手机工位"))
+            statusItem?.button?.setAccessibilityChildren([view])
+        }
         station.panelVisible = true
         if station.link.needsWirelessPairing { station.page = .connection }
         station.remoteControls.monitoring = true
+        station.refresh()
         station.remoteControls.refresh()
         installDismissMonitors()
     }
 
     func popoverDidClose(_ notification: Notification) {
-        station.pairing.stop()
+        if !station.settingsOpen {
+            statusItem?.button?.setAccessibilityChildren(nil)
+        }
+        let keepSettings = station.settingsOpen
         station.panelVisible = false
+        removeDismissMonitors()
+        if keepSettings { return }
+        station.pairing.stop()
         station.dialog = nil
         station.remoteControls.monitoring = false
-        removeDismissMonitors()
         station.files.dismissPreview()
         station.page = .main
+    }
+}
+
+extension PhoneStationApp: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        station.settingsOpen = false
+        if station.page != .main { station.page = .main }
     }
 }

@@ -108,7 +108,8 @@ final class LinkVectorTest {
         if (!Arrays.equals(sha256(LinkAuth.enrollMessage(station, nonce, device, code, "main")), hex("28b265654ea39c8988ce7515423255e3295b4e86ebff878c48473487de36002f"))
                 || !Arrays.equals(sha256(LinkAuth.joinMessage(station, nonce, device, invitation, "main")), hex("e47093674462494c7f377d111faf45bd8a25e6b7be7dda25d84402d6812fced3"))
                 || !Arrays.equals(sha256(LinkAuth.approveMessage(station, invitation, device)), hex("26e8fd0aaf218a1e8063941858db263430729067dd2ddfd727176484f0ce1e97"))
-                || !Arrays.equals(LinkAuth.invitationProof(fill(16, 0x66), fill(4, 0x77), "n", "phone", "main"), hex("fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3"))) {
+                || !Arrays.equals(LinkAuth.invitationProof(fill(16, 0x66), fill(4, 0x77), "n", "phone", "main"), hex("fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3"))
+                || !Arrays.equals(sha256(LinkAuth.localMessage(fill(16, 0x11), fill(32, 0x22), fill(16, 0x33))), hex("43d6e3b24dbca9a048816e036a08a793a0705f7d97cdaaa4172aedfc1b4c0b40"))) {
             throw new AssertionError("transcript");
         }
         try {

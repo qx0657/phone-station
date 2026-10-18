@@ -13,7 +13,7 @@ import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.spec.ECGenParameterSpec;
 
-/** Keystore 里的 P-256 设备密钥。打开时生成，优先 StrongBox，生成失败再试普通 Keystore。只给受 DUMP 保护的诊断读取，不接入现有工具。 */
+/** Keystore 里的 P-256 设备密钥。打开时生成，优先 StrongBox，生成失败再试普通 Keystore。本地链路握手用它签名。 */
 final class PhoneDeviceKey {
     static final String ALIAS = "phone-station-device-p256";
     private static final String KEYSTORE = "AndroidKeyStore";
@@ -27,6 +27,17 @@ final class PhoneDeviceKey {
                 return DeviceKeyReport.line(PhoneDeviceKey::open, System::nanoTime);
             } catch (RuntimeException error) {
                 return "deviceKey unavailable";
+            }
+        }
+    }
+
+    /** 桌面测试没有 Keystore，注入同一套 SHA256withECDSA。手机服务用 identity()。 */
+    static DeviceKeyReport.Signer localSigner() throws Exception {
+        synchronized (LOCK) {
+            try {
+                return open(true);
+            } catch (Exception strongBox) {
+                return open(false);
             }
         }
     }
@@ -74,6 +85,26 @@ final class PhoneDeviceKey {
             return info.getSecurityLevel() == KeyProperties.SECURITY_LEVEL_STRONGBOX;
         } catch (GeneralSecurityException error) {
             return false;
+        }
+    }
+
+    static dev.phonestation.adbkeep.link.LocalLink.Device identity() throws Exception {
+        synchronized (LOCK) {
+            DeviceKeyReport.Signer signer;
+            try {
+                signer = open(true);
+            } catch (Exception strongBox) {
+                signer = open(false);
+            }
+            KeyStore store = KeyStore.getInstance(KEYSTORE);
+            store.load(null);
+            java.security.cert.Certificate certificate = store.getCertificate(ALIAS);
+            if (certificate == null || certificate.getPublicKey() == null) {
+                throw new IllegalStateException("device key");
+            }
+            byte[] spki = certificate.getPublicKey().getEncoded();
+            return new dev.phonestation.adbkeep.link.LocalLink.Device(
+                    dev.phonestation.adbkeep.link.LinkAuth.deviceId(spki), spki, signer::sign);
         }
     }
 

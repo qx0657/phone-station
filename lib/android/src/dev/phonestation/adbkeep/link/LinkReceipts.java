@@ -129,6 +129,44 @@ public final class LinkReceipts implements AutoCloseable {
     private final String epoch;
     private int privilegedQueued;
     private boolean closed;
+    private Listener listener;
+    private LinkEvents events;
+    private final List<Receipt> notes = new ArrayList<Receipt>();
+
+    public LinkReceipts(Path root) throws IOException {
+        this(root, systemClock());
+    }
+
+    public static Clock systemClock() {
+        String boot = bootId();
+        return new Clock() {
+            @Override public long elapsedMillis() { return uptimeMillis(); }
+            @Override public String bootId() { return boot; }
+        };
+    }
+
+    private static String bootId() {
+        try {
+            String line = new String(Files.readAllBytes(Path.of("/proc/sys/kernel/random/boot_id")), StandardCharsets.UTF_8).trim();
+            if (line.matches("[A-Za-z0-9._-]{1,64}")) {
+                return line;
+            }
+        } catch (IOException ignored) {
+            // 电脑上的测试没有这个文件。同一次进程用固定开机编号。
+        }
+        return "desktop";
+    }
+
+    private static long uptimeMillis() {
+        try {
+            String text = new String(Files.readAllBytes(Path.of("/proc/uptime")), StandardCharsets.UTF_8).trim();
+            int space = text.indexOf(' ');
+            String seconds = space < 0 ? text : text.substring(0, space);
+            return (long) (Double.parseDouble(seconds) * 1000);
+        } catch (IOException | RuntimeException ignored) {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+        }
+    }
 
     public LinkReceipts(Path root, Clock clock) throws IOException {
         this(root, clock, MAX_RECEIPTS, BODY_BUDGET, null, null);
@@ -162,14 +200,44 @@ public final class LinkReceipts implements AutoCloseable {
         return epoch;
     }
 
+    /** 回执状态变成 queued、running 或终态时通知一次。 */
+    public interface Listener {
+        void changed(Receipt receipt);
+    }
+
+    public LinkEvents events() {
+        synchronized (lock) {
+            return events;
+        }
+    }
+
+    /** 已经建过就沿用。clock 为 null 时用自动合并的系统时钟。 */
+    public LinkEvents ensureEvents(LinkEvents.Clock clock) {
+        synchronized (lock) {
+            if (events != null) {
+                return events;
+            }
+            events = clock == null ? LinkEvents.automatic() : LinkEvents.manual(clock);
+            listener = events::changed;
+            return events;
+        }
+    }
+
     public static boolean durable(String method) {
-        return !("device.status".equals(method) || "capabilities.get".equals(method) || "op.query".equals(method)
-                || "file.stat".equals(method) || "file.read".equals(method) || "clipboard.get".equals(method)
-                || "notifications.list".equals(method));
+        if (method == null || method.startsWith("meta.")) {
+            return false;
+        }
+        int dot = method.indexOf('.');
+        String action = dot < 0 ? method : method.substring(dot + 1);
+        return !(action.equals("status") || action.equals("stat") || action.equals("get") || action.equals("read")
+                || action.equals("list") || action.equals("query") || action.equals("poll") || action.equals("state")
+                || action.equals("summary") || action.startsWith("read") || action.startsWith("search")
+                || action.endsWith("status"));
     }
 
     public static String lane(String method) {
-        if (method.startsWith("shell.") || method.startsWith("install.") || method.startsWith("screen.") || "controls.capture".equals(method)) {
+        if (method.startsWith("shell.") || method.startsWith("install.") || method.startsWith("screen.")
+                || method.startsWith("terminal.") || "controls.capture".equals(method)) {
             return "privileged";
         }
         if (method.startsWith("file.")) {
@@ -221,7 +289,9 @@ public final class LinkReceipts implements AutoCloseable {
                 privilegedQueued++;
             }
             armLocked();
+            noteLocked(created);
         }
+        flushNotes();
         workers.execute(() -> run(macId, op, work));
         synchronized (lock) {
             Record stored = index.get(key(macId, op));
@@ -232,11 +302,14 @@ public final class LinkReceipts implements AutoCloseable {
     public Receipt query(String macId, String op) throws IOException {
         validate(macId);
         validate(op);
+        Receipt receipt;
         synchronized (lock) {
             expireDueLocked();
             Record stored = index.get(key(macId, op));
-            return stored == null ? missing(macId, op) : view(stored);
+            receipt = stored == null ? missing(macId, op) : view(stored);
         }
+        flushNotes();
+        return receipt;
     }
 
     public Receipt ack(String macId, String op) throws IOException {
@@ -268,12 +341,12 @@ public final class LinkReceipts implements AutoCloseable {
     public Receipt cancel(String macId, String op) throws IOException {
         validate(macId);
         validate(op);
+        Receipt receipt;
         synchronized (lock) {
             Record stored = index.get(key(macId, op));
             if (stored == null) {
-                return missing(macId, op);
-            }
-            if ("queued".equals(stored.state)) {
+                receipt = missing(macId, op);
+            } else if ("queued".equals(stored.state)) {
                 stored.state = "canceled";
                 stored.applied = false;
                 markFinished(stored);
@@ -285,13 +358,17 @@ public final class LinkReceipts implements AutoCloseable {
                     privilegedQueued--;
                 }
                 releaseQuiet(stored.macId);
-                return view(stored);
+                noteLocked(stored);
+                receipt = view(stored);
+            } else {
+                if ("running".equals(stored.state)) {
+                    cancelRequested.add(key(stored.macId, stored.op));
+                }
+                receipt = view(stored);
             }
-            if ("running".equals(stored.state)) {
-                cancelRequested.add(key(stored.macId, stored.op));
-            }
-            return view(stored);
         }
+        flushNotes();
+        return receipt;
     }
 
     public boolean cancelRequested(String macId, String op) {
@@ -303,8 +380,13 @@ public final class LinkReceipts implements AutoCloseable {
     }
 
     @Override public void close() {
+        LinkEvents stopping;
         synchronized (lock) {
             closed = true;
+            stopping = events;
+        }
+        if (stopping != null) {
+            stopping.close();
         }
         if (dueTask != null) {
             dueTask.cancel(false);
@@ -368,35 +450,44 @@ public final class LinkReceipts implements AutoCloseable {
         }
         boolean started = false;
         try {
+            boolean stop = false;
             synchronized (lock) {
                 Record stored = index.get(key(macId, op));
                 if (stored == null || !"queued".equals(stored.state) || closed) {
-                    return;
-                }
-                if ("privileged".equals(lane(stored.method)) && age(stored) > PRIVILEGED_QUEUE_MS) {
+                    stop = true;
+                } else if ("privileged".equals(lane(stored.method)) && age(stored) > PRIVILEGED_QUEUE_MS) {
                     expireQueued(stored);
-                    return;
-                }
-                stored.state = "running";
-                try {
-                    write(stored);
-                } catch (IOException error) {
-                    stored.state = "expired";
-                    stored.applied = false;
+                    stop = true;
+                } else {
+                    stored.state = "running";
                     try {
                         write(stored);
-                    } catch (IOException ignored) {
+                    } catch (IOException error) {
+                        stored.state = "expired";
+                        stored.applied = false;
+                        try {
+                            write(stored);
+                        } catch (IOException ignored) {
+                        }
+                        if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
+                            privilegedQueued--;
+                        }
+                        releaseQuiet(macId);
+                        noteLocked(stored);
+                        stop = true;
                     }
-                    if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
-                        privilegedQueued--;
+                    if (!stop) {
+                        if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
+                            privilegedQueued--;
+                        }
+                        noteLocked(stored);
+                        started = true;
                     }
-                    releaseQuiet(macId);
-                    return;
                 }
-                if ("privileged".equals(lane(stored.method)) && privilegedQueued > 0) {
-                    privilegedQueued--;
-                }
-                started = true;
+            }
+            flushNotes();
+            if (stop || !started) {
+                return;
             }
             byte[] body = null;
             Exception failure = null;
@@ -442,8 +533,10 @@ public final class LinkReceipts implements AutoCloseable {
                 cancelRequested.remove(key(macId, op));
                 releaseQuiet(macId);
                 armLocked();
+                noteLocked(stored);
                 started = false;
             }
+            flushNotes();
         } finally {
             lane.release();
             if (started) {
@@ -473,6 +566,7 @@ public final class LinkReceipts implements AutoCloseable {
             privilegedQueued--;
         }
         releaseQuiet(stored.macId);
+        noteLocked(stored);
     }
 
     private void sweepQuiet() {
@@ -482,6 +576,7 @@ public final class LinkReceipts implements AutoCloseable {
                     expireDueLocked();
                 }
             }
+            flushNotes();
         } catch (Exception ignored) {
         }
     }
@@ -687,7 +782,7 @@ public final class LinkReceipts implements AutoCloseable {
             throw new IOException("epoch");
         }
         if (Files.exists(file)) {
-            String text = Files.readString(file).trim();
+            String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim();
             if (text.matches("[0-9a-f]{32}")) {
                 return text;
             }
@@ -715,7 +810,7 @@ public final class LinkReceipts implements AutoCloseable {
         if (Files.isSymbolicLink(file) || !Files.isRegularFile(file) || Files.size(file) > BODY_LIMIT * 2L + 1024) {
             throw new IOException("receipt");
         }
-        String[] parts = Files.readString(file).split("\t", -1);
+        String[] parts = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).split("\t", -1);
         if ((parts.length != 10 && parts.length != 11) || !"v1".equals(parts[0])) {
             throw new IOException("receipt");
         }
@@ -853,6 +948,31 @@ public final class LinkReceipts implements AutoCloseable {
             return origin + BODY_MS;
         }
         return origin + KEEP_MS;
+    }
+
+    private void noteLocked(Record stored) {
+        if (listener != null) {
+            notes.add(view(stored));
+        }
+    }
+
+    private void flushNotes() {
+        List<Receipt> batch;
+        Listener current;
+        synchronized (lock) {
+            if (notes.isEmpty()) {
+                return;
+            }
+            batch = new ArrayList<Receipt>(notes);
+            notes.clear();
+            current = listener;
+        }
+        if (current == null) {
+            return;
+        }
+        for (Receipt receipt : batch) {
+            current.changed(receipt);
+        }
     }
 
     private Receipt view(Record stored) {

@@ -21,7 +21,7 @@ struct RemoteControlsReading: Decodable {
     var screenshotAvailable: Bool
     var screenshotReason: String
     var torch: Torch
-    var supportedModel: Bool { verified && model.replacingOccurrences(of: "_", with: "-") == "PGT-AN20" }
+    var supportedModel: Bool { verified }
 }
 
 enum RemoteCapture {
@@ -152,7 +152,7 @@ final class RemoteControlsSession: ObservableObject {
         Task {
             defer { inFlight = false; nextPoll = Date().addingTimeInterval(10) }
             do {
-                let data = try await rpc(endpoint, token, "station_controls_status", [:])
+                let data = try await rpc(endpoint, token, "device_status", [:])
                 guard ticket == epoch, let now = route(), now.0 == endpoint, now.1 == token else { return }
                 reading = try JSONDecoder().decode(RemoteControlsReading.self, from: data)
                 readAt = Date(); readRoute = (endpoint, token); failure = nil
@@ -165,24 +165,24 @@ final class RemoteControlsSession: ObservableObject {
     }
     func setStayAwake(_ on: Bool) {
         guard canStayAwake, on != stayAwake else { return }
-        perform(name: "station_stay_awake", on: on, activity: "正在更改远程息屏设置…",
+        perform(action: "awake", on: on, activity: "正在更改远程息屏设置…",
                 notice: on ? "已保持亮屏。" : "已恢复息屏。")
     }
     func setTorch(_ on: Bool) {
         guard canTorch, on != torchOn else { return }
-        perform(name: "station_torch", on: on, activity: on ? "正在远程打开手电筒…" : "正在远程关闭手电筒…",
+        perform(action: "torch", on: on, activity: on ? "正在远程打开手电筒…" : "正在远程关闭手电筒…",
                 notice: on ? "手电筒已打开。" : "手电筒已关闭。")
     }
-    private func perform(name: String, on: Bool, activity: String, notice: String) {
+    private func perform(action: String, on: Bool, activity: String, notice: String) {
         guard let (endpoint, token) = route() else { return }
         operation = true; epoch += 1; feedback.activity = activity; feedback.notice = nil
         Task {
             do {
-                let data = try await rpc(endpoint, token, name, ["on": on])
+                let data = try await rpc(endpoint, token, "device_control", ["action": action, "on": on])
                 let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let key = name == "station_torch" ? "on" : "stayAwake"
+                let key = action == "torch" ? "on" : "stayAwake"
                 guard result?[key] as? Bool == on else { throw ClipboardRPC.Failure(message: "手机状态未确认") }
-                if name == "station_torch" { reading?.torch.on = on } else { reading?.stayAwake = on }
+                if action == "torch" { reading?.torch.on = on } else { reading?.stayAwake = on }
                 feedback.notice = notice
             } catch {
                 reading = nil
@@ -207,7 +207,7 @@ final class RemoteControlsSession: ObservableObject {
         Task {
             defer { feedback.activity = nil; operation = false; refresh() }
             do {
-                _ = try await rpc(endpoint, token, "station_screen_capture_release", ["requestId": pending.id])
+                _ = try await rpc(endpoint, token, "screenshot", ["action": "release", "requestId": pending.id])
                 rememberCapture(nil); feedback.notice = "手机临时截图已清理。"
             } catch { feedback.notice = "清理结果未确认，保留截图编号：\(pending.id)" }
         }
@@ -215,21 +215,21 @@ final class RemoteControlsSession: ObservableObject {
     private func captureInformation(id: String, endpoint: String, token: String, new: Bool) async throws -> Data {
         let jobID = id.replacingOccurrences(of: "-", with: "")
         let data = new
-            ? try await rpc(endpoint, token, "station_screen_capture_start", ["jobId": jobID, "requestId": id])
-            : try await rpc(endpoint, token, "station_operation_status", ["jobId": jobID])
+            ? try await rpc(endpoint, token, "screenshot", ["action": "start", "jobId": jobID, "requestId": id])
+            : try await rpc(endpoint, token, "task_status", ["jobId": jobID])
         var receipt = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let deadline = Date().addingTimeInterval(90)
         while receipt?["state"] as? String == "queued" || receipt?["state"] as? String == "running" {
             guard Date() < deadline else { throw ClipboardRPC.Failure(message: "截图任务等待超时；可查询原编号") }
             try await Task.sleep(nanoseconds: 500_000_000)
-            let data = try await rpc(endpoint, token, "station_operation_status", ["jobId": jobID])
+            let data = try await rpc(endpoint, token, "task_status", ["jobId": jobID])
             receipt = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         }
         if receipt?["state"] as? String == "completed", let result = receipt?["result"] as? [String: Any] {
             return try JSONSerialization.data(withJSONObject: result)
         }
         // A restart or an older pending capture may leave a PNG even when its job receipt is missing.
-        return try await rpc(endpoint, token, "station_screen_capture_status", ["requestId": id])
+        return try await rpc(endpoint, token, "screenshot", ["action": "status", "requestId": id])
     }
     private func runCapture(id: String, endpoint: String, token: String, new: Bool) {
         operation = true; epoch += 1
@@ -249,7 +249,7 @@ final class RemoteControlsSession: ObservableObject {
                     while png.count < info.size {
                         guard Date() < deadline else { throw ClipboardRPC.Failure(message: "截图下载超时") }
                         feedback.activity = "正在下载截图… \(png.count * 100 / info.size)%"
-                        let data = try await rpc(endpoint, token, "station_file_read_bytes", ["path": info.path, "offset": png.count, "length": 65536])
+                        let data = try await rpc(endpoint, token, "files_read", ["action": "bytes", "path": info.path, "offset": png.count, "length": 65536])
                         let page = try JSONDecoder().decode(RemoteCapture.Page.self, from: data)
                         png.append(try RemoteCapture.decode(page, info: info, offset: png.count))
                     }
@@ -262,7 +262,7 @@ final class RemoteControlsSession: ObservableObject {
                     rememberCapture(PendingCapture(id: id, endpoint: endpoint, localFile: file.path))
                     NSWorkspace.shared.open(file); onFinishedCapture()
                 }
-                _ = try await rpc(endpoint, token, "station_screen_capture_release", ["requestId": id])
+                _ = try await rpc(endpoint, token, "screenshot", ["action": "release", "requestId": id])
                 rememberCapture(nil); feedback.notice = "截图已保存，手机临时文件已清理。"
             } catch {
                 feedback.notice = pendingCapture?.localFile == nil

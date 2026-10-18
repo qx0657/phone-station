@@ -101,6 +101,11 @@ public final class ConnectionActivity extends StationActivity {
         notice = ui.notice(link);
         notice.view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
 
+        LinearLayout pairing = ui.card();
+        ui.statusLinkRow(pairing, R.drawable.ic_status_permission, "工位配对",
+                "本地链路、拍照解码或手动输入",
+                view -> startActivity(new Intent(this, PairingActivity.class)));
+
         LinearLayout remote = ui.card();
         ui.groupTitle(remote, "远程连接");
         remoteLink = ui.statusLinkRow(remote, R.drawable.ic_status_cloud, "远程接入",
@@ -295,7 +300,7 @@ public final class ConnectionActivity extends StationActivity {
         paintCheck(localState, local, host.localConnected);
         Json service = FileMcpService.status(this);
         paintCheck(mcpState, service.get("localLabel").string(), service.get("localReady").boolValue());
-        paintCheck(remoteState, PhoneRelayClient.connectionLabel(this), master && host.remoteConnected);
+        paintCheck(remoteState, RemoteStatus.label(this), master && host.remoteConnected);
         boolean canWrite = KeeperEngine.canWrite(this);
         paintCheck(writeState, canWrite ? "已授权" : "未授权", canWrite);
     }
@@ -318,8 +323,8 @@ public final class ConnectionActivity extends StationActivity {
     }
     private void paintRemote() {
         boolean enabled = RemoteStore.enabled(this);
-        String value = PhoneRelayClient.connectionLabel(this);
-        boolean connected = StationFeatures.master(this) && enabled && PhoneRelayClient.connected();
+        String value = RemoteStatus.label(this);
+        boolean connected = StationFeatures.master(this) && enabled && RemoteStatus.connected(this);
         remoteLink.value.setText(StationText.translate(value));
         remoteLink.value.setTextColor(connected ? ui.held() : ui.muted());
         ui.paintOn(remoteLink.mark, connected);

@@ -41,6 +41,8 @@ type Endpoint struct {
 	outSeq        uint64
 	inSeq         uint64
 	broken        bool
+	codec         frameCodec
+	codecErr      error
 	lastIn        time.Time
 	lastOut       time.Time
 	sched         Scheduler
@@ -201,6 +203,9 @@ func (e *Endpoint) SendMessage(priority int, channel uint32, kind byte, payload 
 	if limit <= 0 {
 		limit = MainPayload
 	}
+	if e.codec != nil && limit > 16 {
+		limit -= 16
+	}
 	frames := make([]Frame, 0, len(payload)/limit+1)
 	if len(payload) == 0 {
 		frames = append(frames, Frame{Kind: kind, Flags: FlagEnd, Channel: channel})
@@ -293,6 +298,14 @@ func (e *Endpoint) Accept(frame Frame) error {
 		return errors.New("seq")
 	}
 	e.inSeq++
+	if e.codec != nil && (frame.Kind == KindMessage || frame.Kind == KindData) {
+		opened, err := e.codec.Open(frame)
+		if err != nil {
+			e.broken = true
+			return err
+		}
+		frame = opened
+	}
 	if frame.Channel == 0 {
 		switch frame.Kind {
 		case KindMessage, KindHandshake:
@@ -328,6 +341,19 @@ func (e *Endpoint) Pull() (Frame, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.pullLocked()
+}
+
+// Fail is the seal error that stopped the last pull. An empty queue leaves it nil.
+func (e *Endpoint) Fail() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.codecErr
+}
+
+func (e *Endpoint) useCodec(codec frameCodec) {
+	e.mu.Lock()
+	e.codec = codec
+	e.mu.Unlock()
 }
 
 // Advance does not emit a keepalive. One connection uses Link.Advance so every session on it
@@ -496,12 +522,21 @@ func (e *Endpoint) pullLocked() (Frame, bool) {
 		frame.Seq = e.outSeq
 		e.outSeq++
 	}
+	if e.codec != nil && (frame.Kind == KindMessage || frame.Kind == KindData) {
+		sealed, err := e.codec.Seal(frame)
+		if err != nil {
+			e.broken = true
+			e.codecErr = err
+			return Frame{}, false
+		}
+		frame = sealed
+	}
 	return frame, true
 }
 
 func fatalLink(err error) bool {
 	switch err.Error() {
-	case "link", "seq", "inbox":
+	case "link", "seq", "inbox", "plaintext", "replay", "rekey", "open", "local", "bad_signature":
 		return true
 	default:
 		return false

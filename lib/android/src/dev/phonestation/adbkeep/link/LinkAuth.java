@@ -42,6 +42,14 @@ public final class LinkAuth {
         return join(label, peerId, peerNonce, ownId);
     }
 
+    public static byte[] localPairMessage(byte[] spki, byte[] nonce) {
+        if (spki.length == 0 || nonce.length != 32) {
+            throw new IllegalArgumentException("length");
+        }
+        byte[] label = "phone-station link-v2 local-pair".getBytes(StandardCharsets.US_ASCII);
+        return join(label, spki, nonce);
+    }
+
     public static byte[] enrollMessage(byte[] stationId, byte[] nonce, byte[] deviceId, byte[] code, String purpose) {
         if (stationId.length != 16 || nonce.length != 32 || deviceId.length != 16 || code.length != 16 || !purposeOk(purpose)) {
             throw new IllegalArgumentException("length");

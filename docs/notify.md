@@ -10,7 +10,7 @@ Android 47 新增 `PhoneNotificationListener`，由系统按 `BIND_NOTIFICATION_
 
 监听先核对当前用户、开关、系统授权、监听连接、包名白名单和 Mac 接收会话，再读取 extras。手机工位自身、常驻通知、分组汇总及空内容跳过。标题来自 `EXTRA_TITLE`，正文依次取 `EXTRA_BIG_TEXT`、`EXTRA_TEXT`、最后一条 `EXTRA_TEXT_LINES`。标题最多 200 个、正文最多 4000 个 UTF-16 单元，截断不拆开 emoji 的代理对。Android 15 对检测到验证码的通知可能隐藏内容，遵循 [Android 15 通知监听保护](https://developer.android.com/about/versions/15/behavior-changes-all#otp-redaction)，不尝试绕过。
 
-`NotificationSyncState` 是可在电脑上测试的纯 Java 状态。轮询会话租期 15 秒；Android 69 / Mac 32 / 中继 5 的 [事件订阅](remote-control.md) 可为已有同 clientId 会话续租，单次最长 45 秒。队列最多 64 条、事件最多保留 20 秒，正文过期计时不随订阅续租延长；到期安排主线程清理，即使没有后续请求也不长期留存。选择变化、关闭同步、授权撤销或监听断开会更换会话并清除队列。首个 cursor、未知 cursor、新客户端及租期过期都只建立基线，不返回先前事件。Mac 未接收时不收集正文。去重按通知 key 和内容；内容改变时产生新事件，Mac 用包名与 key 的 SHA-256 作为系统条目标识。
+`NotificationSyncState` 是可在电脑上测试的纯 Java 状态。轮询会话租期 15 秒；Android 69 / Mac 32 / 中继 5 的 [事件订阅](history/remote-control.md) 可为已有同 clientId 会话续租，单次最长 45 秒。队列最多 64 条、事件最多保留 20 秒，正文过期计时不随订阅续租延长；到期安排主线程清理，即使没有后续请求也不长期留存。选择变化、关闭同步、授权撤销或监听断开会更换会话并清除队列。首个 cursor、未知 cursor、新客户端及租期过期都只建立基线，不返回先前事件。Mac 未接收时不收集正文。去重按通知 key 和内容；内容改变时产生新事件，Mac 用包名与 key 的 SHA-256 作为系统条目标识。
 
 同一个 MCP 服务新增：
 

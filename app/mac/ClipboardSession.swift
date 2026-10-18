@@ -93,7 +93,7 @@ final class ClipboardSession: ObservableObject {
         if let automatic { args["automatic"] = automatic }
         else if shared == true { args["automatic"] = true }
         if let images { args["images"] = images }
-        perform("station_clipboard_configure", args) { [weak self] data in
+        perform("clipboard.configure", args) { [weak self] data in
             guard let self, let snapshot = try? JSONDecoder().decode(ClipboardSnapshot.self, from: data) else { return }
             self.applySettings(snapshot)
             self.policy.disconnect()
@@ -174,7 +174,7 @@ final class ClipboardSession: ObservableObject {
                 var version = policy.phoneVersion
                 if needsProbe {
                     // Reconcile an unknown outcome without replaying the old exchange.
-                    let data = try await call(endpoint, token, "station_clipboard_state", ["refresh": true])
+                    let data = try await call(endpoint, token, "clipboard.state", ["refresh": true])
                     guard !permissionBlocked() else { return }
                     let snapshot = try JSONDecoder().decode(ClipboardSnapshot.self, from: data)
                     applySettings(snapshot)
@@ -215,7 +215,7 @@ final class ClipboardSession: ObservableObject {
                 lastSentCount = sentCount
                 recovery.sent(count: sentCount)
                 let sentAt = Date().timeIntervalSince1970 * 1000
-                let data = try await call(endpoint, token, "station_clipboard_exchange", args)
+                let data = try await call(endpoint, token, "clipboard.exchange", args)
                 let receivedAt = Date().timeIntervalSince1970 * 1000
                 guard let currentRoute = route(), currentRoute.0 == endpoint, currentRoute.1 == token else {
                     interrupted(nil); return

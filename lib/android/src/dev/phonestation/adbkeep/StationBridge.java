@@ -69,7 +69,15 @@ final class StationBridge implements StationHost {
         this.localRevision = RemoteStore.permissionRevision(context);
     }
 
-    @Override public void noteAuthenticated() { HostPresence.noteLocal(); }
+    @Override public void noteAuthenticated() {
+        boolean wireless = false;
+        try {
+            wireless = KeeperEngine.wifiAdbEnabled(context);
+        } catch (RuntimeException ignored) {
+            wireless = false;
+        }
+        HostPresence.noteLocal(wireless ? "wireless" : "usb");
+    }
 
     @Override public void authorize(String tool) {
         StationFeatures.require(context, tool);
@@ -98,25 +106,62 @@ final class StationBridge implements StationHost {
         requireVerifiedModel();
         if (!RemoteStore.enabled(context) || !RemoteStore.configured(context)) { throw new FileFailure("请先连接远程中继"); }
         RemoteStore.policy(context).require("station_screen_open");
+        return jobs(context).start(id, "screen.open", Json.obj().put("sessionId", id), () -> screenOpenNow(id));
+    }
+
+    private Json screenOpenNow(String id) {
+        requireVerifiedModel();
+        if (!RemoteStore.enabled(context) || !RemoteStore.configured(context)) { throw new FileFailure("请先连接远程中继"); }
         String revision = RemoteStore.permissionRevision(context);
-        return jobs(context).start(id, "screen.open", Json.obj().put("sessionId", id), () -> {
-            Runnable check = () -> {
-                authorize("station_screen_open");
-                if (!RemoteStore.enabled(context) || !revision.equals(RemoteStore.permissionRevision(context))) {
-                    throw new FileFailure("投屏权限或远程连接已变化，尚未执行");
-                }
-                RemoteStore.policy(context).require("station_screen_open");
-            };
-            check.run();
-            String token;
-            try { token = RemoteStore.decryptToken(RemoteStore.encryptedToken(context)); }
-            catch (Exception e) { throw new FileFailure("远程凭据不可用"); }
-            Json addresses = Json.arr();
-            try { for (java.net.InetAddress address : java.net.InetAddress.getAllByName(new java.net.URL(RemoteStore.endpoint(context)).getHost())) { addresses.add(Json.str(address.getHostAddress())); } }
-            catch (Exception e) { throw new FileFailure("无法解析中继地址"); }
-            return ShizukuScreen.call(context, Json.obj().put("op", "open").put("sessionId", id)
-                    .put("endpoint", RemoteStore.endpoint(context)).put("pin", RemoteStore.pin(context)).put("token", token).put("addresses", addresses), true, check);
-        });
+        Runnable check = () -> {
+            authorize("station_screen_open");
+            if (!RemoteStore.enabled(context) || !revision.equals(RemoteStore.permissionRevision(context))) {
+                throw new FileFailure("投屏权限或远程连接已变化，尚未执行");
+            }
+            RemoteStore.policy(context).require("station_screen_open");
+        };
+        check.run();
+        String token;
+        try { token = RemoteStore.decryptToken(RemoteStore.encryptedToken(context)); }
+        catch (Exception e) { throw new FileFailure("远程凭据不可用"); }
+        Json addresses = Json.arr();
+        try { for (java.net.InetAddress address : java.net.InetAddress.getAllByName(new java.net.URL(RemoteStore.endpoint(context)).getHost())) { addresses.add(Json.str(address.getHostAddress())); } }
+        catch (Exception e) { throw new FileFailure("无法解析中继地址"); }
+        return ShizukuScreen.call(context, Json.obj().put("op", "open").put("sessionId", id)
+                .put("endpoint", RemoteStore.endpoint(context)).put("pin", RemoteStore.pin(context)).put("token", token).put("addresses", addresses), true, check);
+    }
+
+    @Override public Json linkWork(String method, byte[] params) {
+        Json args = params == null || params.length == 0 ? Json.obj() : Json.parse(new String(params, java.nio.charset.StandardCharsets.UTF_8));
+        if (args == null || !args.isObject()) { throw new IllegalArgumentException("params"); }
+        switch (method) {
+            case "shell.status":
+                return shellStatus();
+            case "shell.exec":
+                requireVerifiedModel();
+                return shellExecute(shellRequest(args));
+            case "shell.start":
+                requireVerifiedModel();
+                return ShizukuShell.execute(context, shellRequest(args), () -> authorize("station_shell_start"));
+            case "screen.open":
+                return screenOpenNow(textArg(args, "sessionId"));
+            case "screen.status":
+                return screenStatus(textArg(args, "sessionId"));
+            case "screen.close":
+                return screenClose(textArg(args, "sessionId"));
+            case "screen.capture":
+            case "screen.capturestart":
+                requireVerifiedModel();
+                String requestId = textArg(args, "requestId");
+                ScreenCapture.path(requestId);
+                return screenCapture(requestId);
+            case "install.run":
+                requireVerifiedModel();
+                return ShizukuShell.execute(context, new ShellRequest(InstallPath.command(textArg(args, "path")), 60_000, 65_536),
+                        () -> authorize("station_shell_start"));
+            default:
+                throw new FileFailure("没有这个方法");
+        }
     }
     @Override public Json screenStatus(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "status").put("sessionId", id), false); }
     @Override public Json screenClose(String id) { OperationJobs.validate(id); return ShizukuScreen.call(context, Json.obj().put("op", "close").put("sessionId", id), false); }
@@ -124,6 +169,29 @@ final class StationBridge implements StationHost {
         requireVerifiedModel(); OperationJobs.validate(id);
         if (terminalOwner != null) { terminalOwner.accept(id); }
         return terminals(context).open(id, columns, rows, () -> authorize("station_terminal_open"));
+    }
+    @Override public Json linkTerminal(String method, byte[] params) {
+        Json args = params == null || params.length == 0 ? Json.obj() : Json.parse(new String(params, java.nio.charset.StandardCharsets.UTF_8));
+        if (args == null || !args.isObject()) { throw new IllegalArgumentException("params"); }
+        String id = textArg(args, "sessionId");
+        switch (method) {
+            case "terminal.open":
+                requireVerifiedModel();
+                if (terminalOwner != null) { terminalOwner.accept(id); }
+                return terminals(context).openNow(id, intArg(args, "columns", 80), intArg(args, "rows", 24), () -> authorize("station_terminal_open"));
+            case "terminal.read":
+                return terminals(context).readNow(id, longArg(args, "offset", 0));
+            case "terminal.input":
+                requireVerifiedModel();
+                return terminals(context).inputNow(id, longArg(args, "sequence", -1), textArg(args, "hex"));
+            case "terminal.resize":
+                requireVerifiedModel();
+                return terminals(context).resizeNow(id, intArg(args, "columns", 80), intArg(args, "rows", 24));
+            case "terminal.close":
+                return terminals(context).closeNow(id);
+            default:
+                throw new FileFailure("没有这个方法");
+        }
     }
     @Override public Json terminalRead(String id, long offset) { return terminals(context).read(id, offset); }
     @Override public Json terminalInput(String id, long sequence, String hex) {
@@ -159,7 +227,7 @@ final class StationBridge implements StationHost {
         }
     }
 
-    private static boolean verifiedModel() { return "PGT-AN20".equals(Build.MODEL.replace('_', '-')); }
+    private static boolean verifiedModel() { return VerifiedDevice.current(); }
     private static void requireVerifiedModel() {
         if (!verifiedModel()) { throw new FileFailure("当前机型 " + Build.MODEL + " 尚未验证，停止设备操作"); }
     }
@@ -225,12 +293,12 @@ final class StationBridge implements StationHost {
         int timeout = systemInt(Settings.System.SCREEN_OFF_TIMEOUT);
         int plugged = globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN);
         HostProbe host = HostProbe.current(context);
-        return Json.obj()
+        Json reading = Json.obj()
                 .put("connected", host.linked)
                 .put("connectionType", host.connectionType)
                 .put("remoteConnected", host.remoteConnected)
                 .put("remoteChecking", host.remoteChecking)
-                .put("remoteState", PhoneRelayClient.connectionLabel(context))
+                .put("remoteState", RemoteStatus.label(context))
                 .put("health", PhoneHealth.read(context))
                 .put("batteryPercent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
                 .put("charging", battery.isCharging())
@@ -243,11 +311,14 @@ final class StationBridge implements StationHost {
                 .put("stayAwake", StayAwake.held(timeout, plugged))
                 .put("freeBytes", volume.get("freeBytes").longValue())
                 .put("totalBytes", volume.get("totalBytes").longValue());
+        LinkDeviceNote.now(context);
+        return reading;
     }
 
     @Override
     public Json stayAwake(boolean on) {
         StayAwakeController.set(context, on);
+        LinkDeviceNote.now(context);
         int timeout = systemInt(Settings.System.SCREEN_OFF_TIMEOUT);
         int plugged = globalInt(Settings.Global.STAY_ON_WHILE_PLUGGED_IN);
         return Json.obj()
@@ -437,5 +508,35 @@ final class StationBridge implements StationHost {
         } catch (SecurityException error) {
             throw new FileFailure("读不了系统设置");
         }
+    }
+
+    private static ShellRequest shellRequest(Json args) {
+        return new ShellRequest(textArg(args, "command"),
+                intArg(args, "timeoutMs", ShellRequest.DEFAULT_TIMEOUT_MS),
+                intArg(args, "maxOutputBytes", ShellRequest.DEFAULT_OUTPUT_BYTES));
+    }
+
+    private static String textArg(Json args, String key) {
+        Json value = args.get(key);
+        if (value == null || !value.isString() || value.string().isEmpty()) {
+            throw new IllegalArgumentException(key);
+        }
+        return value.string();
+    }
+
+    private static int intArg(Json args, String key, int fallback) {
+        Json value = args.get(key);
+        if (value == null || value.isNull()) {
+            return fallback;
+        }
+        return (int) value.longValue();
+    }
+
+    private static long longArg(Json args, String key, long fallback) {
+        Json value = args.get(key);
+        if (value == null || value.isNull()) {
+            return fallback;
+        }
+        return value.longValue();
     }
 }

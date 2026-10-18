@@ -84,6 +84,22 @@ final class RemoteStore {
         return prefs(context).getString(PIN, "");
     }
 
+    /** 记下中继地址和指纹，不写令牌，也不清掉已有授权。 */
+    static boolean rememberLink(Context context, String endpoint, String pin) {
+        endpoint = RelayProfile.normalizeEndpoint(endpoint);
+        if (endpoint == null || pin == null || !pin.matches("[0-9a-fA-F]{64}")) {
+            return false;
+        }
+        boolean saved = prefs(context).edit()
+                .putString(ENDPOINT, endpoint)
+                .putString(PIN, pin.toLowerCase(Locale.US))
+                .commit();
+        if (saved) {
+            publishState(context);
+        }
+        return saved;
+    }
+
     static boolean configured(Context context) {
         return RelayProfile.normalizeEndpoint(endpoint(context)) != null
                 && pin(context).matches("[0-9a-f]{64}")

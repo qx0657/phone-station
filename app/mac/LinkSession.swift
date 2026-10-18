@@ -14,6 +14,7 @@ struct LinkReading: Sendable {
     var transport: String = ""
     var link: Link
     var serial: String? = nil
+    var phones: [PhoneRoster.Seat] = []
     /// 一台设备都没有，而且不是在等手机上点允许。这种才自动跑 connect.sh。
     var reconnectable = false
     var features: PhoneFeatureState? = nil
@@ -26,6 +27,7 @@ final class LinkSession: ObservableObject {
     @Published private(set) var deviceDetail = ""
     @Published private(set) var transport = ""
     @Published private(set) var serial: String?
+    @Published private(set) var phones: [PhoneRoster.Seat] = []
     @Published private(set) var phoneFeatures: PhoneFeatureState?
     @Published private(set) var connectionPreferences: PhoneConnectionPreferences?
     @Published private(set) var battery: BatteryReport.Reading?
@@ -211,7 +213,7 @@ final class LinkSession: ObservableObject {
             let reading = await Task.detached(priority: .utility) { reader(trusted) }.value
             accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
                    link: reading.link, serial: reading.serial, readingControls: controls,
-                   reconnectable: reading.reconnectable)
+                   reconnectable: reading.reconnectable, listedPhones: reading.phones)
             if revision == statusRevision {
                 if reading.features != nil { phoneFeatures = reading.features }
                 if reading.preferences != nil { connectionPreferences = reading.preferences }
@@ -237,20 +239,22 @@ final class LinkSession: ObservableObject {
             accept(statusRevision, name: "手机未连接", detail: "正在检查连接…", link: .offline,
                    readingControls: false, reconnectable: false)
         }
-        if devices.filter({ $0.state == "device" }).count > 1, !tidying {
-            tidying = true
-            Task.detached(priority: .utility) {
-                UsageCounters.noteReconnect("link")
-                _ = StationRunner.scriptResult("connect.sh", timeout: 15)
-                await MainActor.run { self.tidying = false }
-            }
-        }
         let trusted = trustedSerial
+        let preferred = PhoneRoster.remembered(defaults: .standard)
+        let onlineCount = devices.filter { $0.state == "device" }.count
         Task {
             let reading = await Task.detached(priority: .utility) {
-                Self.describe(devices, trustedSerial: trusted, adb: StationRunner.executable("adb"))
+                Self.describe(devices, trustedSerial: trusted, preferred: preferred, adb: StationRunner.executable("adb"))
             }.value
             guard revision == self.statusRevision else { return }
+            if onlineCount > 1, reading.phones.count == 1, !self.tidying {
+                self.tidying = true
+                Task.detached(priority: .utility) {
+                    UsageCounters.noteReconnect("link")
+                    _ = StationRunner.scriptResult("connect.sh", timeout: 15)
+                    await MainActor.run { self.tidying = false }
+                }
+            }
             let listedGone = reading.serial == nil || (self.unreachableSerial != nil && reading.serial != self.unreachableSerial)
             if listedGone, self.unreachableSerial != nil {
                 self.livenessGeneration += 1
@@ -259,7 +263,7 @@ final class LinkSession: ObservableObject {
             }
             self.accept(revision, name: reading.name, detail: reading.detail, transport: reading.transport,
                         link: reading.link, serial: reading.serial, readingControls: false,
-                        reconnectable: reading.reconnectable)
+                        reconnectable: reading.reconnectable, listedPhones: reading.phones)
         }
     }
 
@@ -336,48 +340,46 @@ final class LinkSession: ObservableObject {
             let detail = devices.timedOut ? "adb 检查超时，请重试。" : StationText.reason(devices.output, fallback: "无法读取 adb 设备列表。")
             return LinkReading(name: "设备检查失败", detail: detail, link: .offline)
         }
-        return describe(AdbDevice.parse(devices.output), trustedSerial: trustedSerial, adb: adb)
+        let preferred = PhoneRoster.remembered(defaults: .standard)
+        return describe(AdbDevice.parse(devices.output), trustedSerial: trustedSerial, preferred: preferred, adb: adb)
     }
 
-    private nonisolated static func describe(_ listed: [AdbDevice], trustedSerial: String?, adb: URL?) -> LinkReading {
+    func selectPhone(_ serial: String) {
+        PhoneRoster.remember(serial, defaults: .standard)
+        Task { await probe(readingControls: true) }
+    }
+
+    private nonisolated static func describe(_ listed: [AdbDevice], trustedSerial: String?, preferred: String? = nil, adb: URL?) -> LinkReading {
         guard let adb else {
             return LinkReading(name: "未找到 adb", detail: "请安装 Android platform-tools。", link: .offline)
         }
-        var online = listed.filter { $0.state == "device" }.map(\.serial)
-        if online.count > 1 {
-            let identities = online.map { serial -> String in
-                let result = StationRunner.capture(adb, ["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 2)
-                let identity = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                return result.succeeded && !identity.isEmpty && identity != "unknown" ? identity : serial
-            }
-            guard Set(identities).count == 1 else {
-                return LinkReading(name: "检测到多台设备", detail: "请只保留一台在线设备；多余的无线连接可以在连接页断开。", link: .offline)
-            }
-            online.sort { left, right in
-                let a = transportLabel(left) == "USB 连接" ? 0 : left.contains(where: \.isWhitespace) ? 2 : 1
-                let b = transportLabel(right) == "USB 连接" ? 0 : right.contains(where: \.isWhitespace) ? 2 : 1
-                return a < b
-            }
-        }
-        guard let only = online.first else {
+        let online = listed.filter { $0.state == "device" }.map(\.serial)
+        let seats = PhoneRoster.collapse(serials: online, identity: { serial in
+            guard online.count > 1 else { return serial }
+            let result = StationRunner.capture(adb, ["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 2)
+            let identity = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return result.succeeded && !identity.isEmpty && identity != "unknown" ? identity : serial
+        }, transport: transportLabel)
+        guard let chosen = PhoneRoster.choose(seats, preferred: preferred) else {
             let unauthorized = listed.contains { $0.state == "unauthorized" || $0.state == "authorizing" }
             let detail = unauthorized ? "请在手机上允许 USB 调试。" : "接入 USB，或在手机上开启无线调试后再连接。"
             return LinkReading(name: unauthorized ? "等待手机授权" : "手机未连接", detail: detail, link: .offline,
                                reconnectable: !unauthorized)
         }
+        let only = chosen.serial
         if let trustedSerial, only == trustedSerial {
-            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only)
+            return LinkReading(name: "PGT-AN20", detail: "", transport: transportLabel(only), link: .connected, serial: only, phones: seats)
         }
         let model = StationRunner.capture(adb, ["-s", only, "shell", "getprop", "ro.product.model"], timeout: 2)
         let rawName = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard model.succeeded, !rawName.isEmpty else {
-            return LinkReading(name: "无法识别手机型号", detail: "请检查连接，然后重新打开面板。", link: .offline)
+            return LinkReading(name: "无法识别手机型号", detail: "请检查连接，然后重新打开面板。", link: .offline, phones: seats)
         }
         if rawName == "PGT-AN20" {
-            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only)
+            return LinkReading(name: rawName, detail: "", transport: transportLabel(only), link: .connected, serial: only, phones: seats)
         }
         return LinkReading(name: rawName, detail: "该型号尚未验证。请先查看项目说明中的设备支持范围。",
-                           transport: transportLabel(only), link: .unverified)
+                           transport: transportLabel(only), link: .unverified, phones: seats)
     }
 
     private nonisolated static func transportLabel(_ serial: String) -> String {
@@ -387,7 +389,7 @@ final class LinkSession: ObservableObject {
 
     private func accept(_ revision: Int, name: String, detail: String, transport: String = "",
                         link newLink: Link, serial newSerial: String? = nil, readingControls: Bool,
-                        reconnectable: Bool = false) {
+                        reconnectable: Bool = false, listedPhones: [PhoneRoster.Seat] = []) {
         guard revision == statusRevision else { return }
         var linkValue = newLink
         var serialValue = newSerial
@@ -397,6 +399,7 @@ final class LinkSession: ObservableObject {
             serialValue = nil
             reconnect = false
         }
+        if phones != listedPhones { phones = listedPhones }
         if deviceName != name { deviceName = name }
         if deviceDetail != detail { deviceDetail = detail }
         if self.transport != transport { self.transport = transport }

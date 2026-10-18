@@ -90,7 +90,7 @@ final class CommandSession: ObservableObject {
     private struct ModelStatus: Decodable {
         var model: String
         var verified: Bool
-        var supported: Bool { verified && model.replacingOccurrences(of: "_", with: "-") == "PGT-AN20" }
+        var supported: Bool { verified }
     }
     private struct ShellStatus: Decodable {
         var available: Bool
@@ -284,7 +284,7 @@ final class CommandSession: ObservableObject {
         Task {
             defer { readInFlight = false; nextPoll = Date().addingTimeInterval(10) }
             do {
-                let modelData = try await rpc(endpoint, token, "station_controls_status", [:])
+                let modelData = try await rpc(endpoint, token, "device_status", [:])
                 guard matchesRoute(endpoint, token, epoch: epoch) else { return }
                 let model = try JSONDecoder().decode(ModelStatus.self, from: modelData)
                 guard model.supported else {
@@ -292,7 +292,7 @@ final class CommandSession: ObservableObject {
                     remoteFailure = "当前机型 \(model.model) 尚未验证，远程命令未启用。"
                     return
                 }
-                let data = try await rpc(endpoint, token, "station_shell_status", [:])
+                let data = try await rpc(endpoint, token, "shell_run", ["action": "status"])
                 guard matchesRoute(endpoint, token, epoch: epoch) else { return }
                 remoteShell = try JSONDecoder().decode(ShellStatus.self, from: data)
                 remoteReadAt = Date(); remoteReadRoute = (endpoint, token); remoteFailure = nil
@@ -353,8 +353,8 @@ final class CommandSession: ObservableObject {
                 var current: Receipt?
                 if let command {
                     do {
-                        let data = try await rpc(pending.endpoint, token, "station_shell_start", [
-                            "jobId": pending.jobID, "command": command, "timeoutMs": 15000, "maxOutputBytes": 32768
+                        let data = try await rpc(pending.endpoint, token, "shell_run", [
+                            "action": "start", "jobId": pending.jobID, "command": command, "timeoutMs": 15000, "maxOutputBytes": 32768
                         ])
                         current = try receipt(data, for: pending)
                     } catch {
@@ -366,7 +366,7 @@ final class CommandSession: ObservableObject {
                         throw ClipboardRPC.Failure(message: "等待任务结果超时")
                     }
                     if current != nil { try await Task.sleep(nanoseconds: 500_000_000) }
-                    let data = try await rpc(pending.endpoint, token, "station_operation_status", ["jobId": pending.jobID])
+                    let data = try await rpc(pending.endpoint, token, "task_status", ["jobId": pending.jobID])
                     current = try receipt(data, for: pending)
                 }
                 guard let current else { throw ClipboardRPC.Failure(message: "任务回执无效") }

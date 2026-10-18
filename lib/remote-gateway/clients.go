@@ -34,6 +34,10 @@ var clientToolScopes = map[string]string{
 	"station_file_delete_directory": "files.write", "station_file_truncate_bytes": "files.write", "station_file_move": "files.write",
 	"station_file_copy": "files.write", "station_file_delete": "files.write",
 	"station_shell_exec": "shell", "station_shell_start": "shell", "station_operation_status": "shell",
+	"device_list": "status", "device_status": "status",
+	"files_list": "files.read", "files_stat": "files.read", "files_read": "files.read", "files_grep": "files.read",
+	"files_write": "files.write", "files_edit": "files.write", "files_manage": "files.write", "files_transfer": "files.write",
+	"app_install": "shell", "shell_run": "shell", "task_status": "shell",
 	"station_terminal_open": "shell", "station_terminal_read": "shell", "station_terminal_input": "shell",
 	"station_terminal_resize": "shell", "station_terminal_close": "shell",
 }
@@ -342,7 +346,7 @@ func (c clientGrant) preflight(body []byte) ([]json.RawMessage, error) {
 		}
 		ids = append(ids, id)
 		switch method {
-		case "initialize", "ping":
+		case "initialize", "ping", "server/discover":
 		case "tools/list":
 			lists = append(lists, id)
 		case "tools/call":

@@ -24,6 +24,9 @@ final class Station: ObservableObject {
     let pairing = WirelessPairingSession()
     private var navigation = StationNavigation()
     @Published var panelVisible = false
+    /// 设备、客户端、中继和权限在设置窗口里，不占用菜单栏快捷面板。
+    @Published var settingsOpen = false
+    var surfaceVisible: Bool { panelVisible || settingsOpen }
     @Published var dialog: StationDialogKind?
     @Published var page: StationPage = .main {
         didSet {
@@ -59,6 +62,7 @@ final class Station: ObservableObject {
         self.feedback = feedback
         link = LinkSession(feedback: feedback)
         screen = ScreenSession(feedback: feedback)
+        screen.localScreen = NativeScreen.port
         torch = TorchSession(feedback: feedback)
         files = RecentFilesSession()
         commands = CommandSession(feedback: feedback)
@@ -72,7 +76,12 @@ final class Station: ObservableObject {
         wire()
         $panelVisible.sink { [weak self] visible in
             self?.bindPage()
-            self?.link.notePanel(visible)
+            self?.link.notePanel(self?.surfaceVisible ?? false)
+            if visible { self?.refreshAdbFeaturesIfNeeded() }
+        }.store(in: &subscriptions)
+        $settingsOpen.sink { [weak self] visible in
+            self?.bindPage()
+            self?.link.notePanel(self?.surfaceVisible ?? false)
             if visible { self?.refreshAdbFeaturesIfNeeded() }
         }.store(in: &subscriptions)
         $page.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
@@ -85,11 +94,15 @@ final class Station: ObservableObject {
     /// 面板关闭时不转发子会话；打开时只转发当前页会读到的会话。
     private func bindPage() {
         pageWatch.removeAll()
-        guard panelVisible else { return }
+        guard surfaceVisible else { return }
         observe(feedback)
         observe(appearance)
         observe(link)
         observe(mcp)
+        if panelVisible {
+            observe(health); observe(clipboard); observe(notifications); observe(torch); observe(screen); observe(remoteControls); observe(files)
+        }
+        guard settingsOpen else { return }
         switch page {
         case .main:
             observe(health); observe(clipboard); observe(notifications); observe(torch); observe(screen); observe(remoteControls); observe(files)
@@ -105,6 +118,8 @@ final class Station: ObservableObject {
             observe(login)
         case .mcp, .remoteRelay:
             observe(remoteControls)
+        case .stationPair:
+            break
         case .remotePermissions:
             observe(remoteControls); observe(setup)
         case .features:
@@ -226,6 +241,10 @@ final class Station: ObservableObject {
             guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
         }
+        health.states = { [weak self] in
+            guard let self, let (endpoint, token) = self.health.route() else { throw CancellationError() }
+            return try await ClipboardRPC.call(endpoint: endpoint, token: token, name: "station_event_states", arguments: [:])
+        }
         clipboard.route = { [weak self] in
             guard let self, self.mcp.requestAvailable else { return nil }
             return (self.mcp.endpoint, self.mcp.token)
@@ -236,6 +255,7 @@ final class Station: ObservableObject {
         }
         clipboard.access = { [weak self] in self?.remoteControls.accessState ?? RemoteAccessState() }
         notifications.access = { [weak self] in self?.remoteControls.accessState ?? RemoteAccessState() }
+        setup.prefersLocalInstall = { [weak self] in self?.link.serial != nil }
         setup.installBlocker = { [weak self] in
             guard let self, self.link.serial == nil else { return nil }
             return self.remoteBlocker([.install])
@@ -268,12 +288,12 @@ final class Station: ObservableObject {
         pairing.onPaired = { [weak self] in self?.link.noteWirelessPaired() }
         link.onPairingNeeded = { [weak self] in
             guard let self else { return }
-            if !self.panelVisible || self.page == .main {
+            if !self.surfaceVisible || self.page == .main {
                 self.page = .connection
             }
-            if self.panelVisible && self.page == .connection {
+            if self.surfaceVisible && self.page == .connection {
                 self.pairing.startIfIdle()
-            } else if self.panelVisible {
+            } else if self.surfaceVisible {
                 self.feedback.notice = "这台电脑尚未配对。打开连接设置，用手机扫描二维码。"
             }
         }

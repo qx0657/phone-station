@@ -20,7 +20,7 @@ import (
 	"phone-station/link"
 )
 
-// Server is the relay 6 link endpoint. cmd/phone-relay does not import it.
+// Server is the relay 6 link endpoint. cmd/phone-relay serves it. The process that is running on the public host is still relay 5 until that host is switched.
 type Server struct {
 	reg        *registry
 	station    []byte
@@ -35,6 +35,7 @@ type Server struct {
 	unauth     map[string]int
 	trusted    map[string]struct{}
 	closed     bool
+	tap        func([]byte)
 }
 
 const (
@@ -127,7 +128,7 @@ func (s *Server) SetTrustedProxies(addrs []string) {
 
 // ParseTrustedProxies splits the comma-separated list intended for PHONE_RELAY_TRUSTED_PROXIES.
 // Blank pieces are skipped. A piece that is not an IP is an error, so a typo does not silently drop that proxy.
-// The phone-relay process is relay 5 and does not call this.
+// cmd/phone-relay reads PHONE_RELAY_TRUSTED_PROXIES. An empty value leaves the header ignored.
 func ParseTrustedProxies(text string) ([]string, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
@@ -596,7 +597,19 @@ func (s *Server) onRevoke(sess *session, msg message) {
 	s.record(prefix(sess.hexID), "revoke")
 }
 
+func (s *Server) watch(fn func([]byte)) {
+	s.mu.Lock()
+	s.tap = fn
+	s.mu.Unlock()
+}
+
 func (s *Server) forward(from *session, frame link.Frame) {
+	s.mu.Lock()
+	tap := s.tap
+	s.mu.Unlock()
+	if tap != nil {
+		tap(append([]byte(nil), frame.Payload...))
+	}
 	if frame.Peer == from.id {
 		s.undeliverable(from)
 		return

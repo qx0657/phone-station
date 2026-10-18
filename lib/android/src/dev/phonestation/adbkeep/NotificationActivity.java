@@ -158,7 +158,7 @@ public final class NotificationActivity extends StationActivity {
         boolean remoteOnly = HostProbe.remoteOnly(this);
         boolean blocked = remoteOnly && !RemoteStore.permission(this, "personal");
         remoteSync.setVisibility(master && on && blocked ? android.view.View.VISIBLE : android.view.View.GONE);
-        boolean mcpReady = FileMcpService.listening() || PhoneRelayClient.connected();
+        boolean mcpReady = FileMcpService.listening() || RemoteStatus.connected(this);
         mcpAccess.row.setVisibility(master && on && !mcpReady ? android.view.View.VISIBLE : android.view.View.GONE);
         syncStatus.setVisibility(master && on ? android.view.View.VISIBLE : android.view.View.GONE);
         syncStatus.setText(StationText.translate(!StationFeatures.master(this) ? "总开关已关闭，同步选择已保留" : !on ? "同步已关闭，可先选择应用"

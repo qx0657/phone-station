@@ -21,27 +21,29 @@ enum CommandSessionTest {
         var truncated = false
         var holdModel = false
         var held: CheckedContinuation<Data, Error>?
-        var starts: [Call] { calls.filter { $0.name == "station_shell_start" } }
-        var queries: [Call] { calls.filter { $0.name == "station_operation_status" } }
+        var starts: [Call] { calls.filter { $0.name == "shell_run" && $0.arguments["action"] as? String == "start" } }
+        var queries: [Call] { calls.filter { $0.name == "task_status" } }
 
         func call(_ endpoint: String, _ token: String, _ name: String, _ arguments: [String: Any]) async throws -> Data {
             calls.append(Call(name: name, arguments: arguments))
             switch name {
-            case "station_controls_status":
+            case "device_status":
                 if holdModel {
                     holdModel = false
                     return try await withCheckedThrowingContinuation { held = $0 }
                 }
                 return data(["model": model, "verified": verified])
-            case "station_shell_status":
-                return data(["available": shellAvailable, "reason": shellAvailable ? "" : "Shizuku 未启动", "terminalSupported": terminalSupported, "terminalProtocol": 1])
-            case "station_shell_start":
+            case "shell_run":
+                if arguments["action"] as? String == "status" {
+                    return data(["available": shellAvailable, "reason": shellAvailable ? "" : "Shizuku 未启动", "terminalSupported": terminalSupported, "terminalProtocol": 1])
+                }
+                precondition(arguments["action"] as? String == "start")
                 jobID = arguments["jobId"] as! String
                 precondition(arguments["timeoutMs"] as? Int == 15000)
                 precondition(arguments["maxOutputBytes"] as? Int == 32768)
                 if dropStart { throw NSError(domain: "lost-response", code: 1) }
                 return receipt()
-            case "station_operation_status":
+            case "task_status":
                 precondition(arguments["jobId"] as? String == jobID, "query must retain the submitted ID")
                 if failStatus { throw NSError(domain: "offline", code: 1) }
                 return receipt()
@@ -93,7 +95,7 @@ enum CommandSessionTest {
         precondition(session.commands.count == 2)
         precondition(session.disabledReason(for: session.commands[0]) != nil)
         await ready(session)
-        precondition(phone.calls.allSatisfy { ["station_controls_status", "station_shell_status"].contains($0.name) },
+        precondition(phone.calls.allSatisfy { $0.name == "device_status" || ($0.name == "shell_run" && $0.arguments["action"] as? String == "status") },
                      "opening the page must not execute shell commands")
         precondition(!session.canOpenShell)
         phone.terminalSupported = true
@@ -114,11 +116,11 @@ enum CommandSessionTest {
         session.refreshRemote()
         await waitFor { session.disabledReason(for: session.commands[0]) == "Shizuku 未启动" }
         session.run(session.commands[0]); precondition(phone.starts.isEmpty)
-        let shellReads = phone.calls.filter { $0.name == "station_shell_status" }.count
+        let shellReads = phone.calls.filter { $0.name == "shell_run" && $0.arguments["action"] as? String == "status" }.count
         phone.model = "other"; phone.verified = false
         session.refreshRemote()
         await waitFor { session.remoteFailure?.contains("other") == true }
-        precondition(phone.calls.filter { $0.name == "station_shell_status" }.count == shellReads)
+        precondition(phone.calls.filter { $0.name == "shell_run" && $0.arguments["action"] as? String == "status" }.count == shellReads)
         session.run(session.commands[0]); precondition(phone.starts.isEmpty)
         connected = false; session.refreshRemote()
         precondition(session.disabledReason(for: session.commands[0]) == "请先连接手机。")

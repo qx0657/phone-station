@@ -6,11 +6,30 @@ DIR=${0:A:h}
 source "$DIR/../lib/common.sh"
 ADB=$(adb_bin)
 print -r -- "当前设备"
-"$ADB" devices -l
+station=""
+for candidate in "$DIR/../build/.phone-station/station" "$DIR/../lib/station"; do
+  if [[ -x $candidate ]]; then
+    station=$candidate
+    break
+  fi
+done
+if [[ -n $station ]] && "$station" devices; then
+  :
+else
+  "$ADB" devices -l
+fi
 print
 print -r -- "局域网无线调试"
 typeset -a lines
-if ! lines=("${(@f)$(python3 "$DIR/../lib/adb_mdns.py" list connect 4)}") ; then
+wireless_status=0
+if [[ -n $station ]]; then
+  lines=("${(@f)$("$station" wireless)}") || wireless_status=$?
+else
+  wireless_status=3
+fi
+if (( wireless_status == 3 )); then
+  lines=("${(@f)$(python3 "$DIR/../lib/adb_mdns.py" list connect 4)}") || exit 0
+elif (( wireless_status != 0 )); then
   exit 0
 fi
 for line in "${lines[@]}"; do

@@ -49,6 +49,7 @@ final class PhoneRelayClient implements Runnable {
 
     static void event(String topic) {
         LocalEventWait.note(topic);
+        LinkLiveEvents.note(topic);
         PhoneRelayClient client = activeClient;
         RemoteEvents events = client == null ? null : client.events;
         if (events != null) { events.changed(topic); }

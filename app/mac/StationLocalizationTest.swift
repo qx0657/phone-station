@@ -32,6 +32,15 @@ import Foundation
         defaults.set("unsupported", forKey: "displayTheme")
         let fallback = StationAppearance(defaults: defaults)
         precondition(fallback.language == .system && fallback.theme == .system)
+        precondition(StationTextScale.factor(category: nil) == 1)
+        precondition(StationTextScale.factor(category: "UICTContentSizeCategoryL") == 1)
+        precondition(StationTextScale.factor(category: "nope") == 1)
+        precondition(StationTextScale.points(category: nil, base: 13) == 13)
+        precondition(StationTextScale.points(category: "UICTContentSizeCategoryAccessibilityXXXL", base: 13) == 39)
+        precondition(StationTextScale.points(category: "UICTContentSizeCategoryAccessibilityXXXL", base: 16) == 48)
+        defaults.set("UICTContentSizeCategoryAccessibilityXXXL", forKey: StationTextScale.categoryKey)
+        let enlarged = StationAppearance(defaults: defaults)
+        precondition(enlarged.textFactor == 3)
         print("StationLocalizationTest passed")
     }
 }

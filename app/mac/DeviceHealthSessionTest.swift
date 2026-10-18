@@ -14,7 +14,7 @@ enum DeviceHealthSessionTest {
         var pending: CheckedContinuation<Data, Error>?
         let session = DeviceHealthSession(startTimer: false) { _, _, name, arguments in
             calls += 1
-            precondition(name == "station_device_status" && arguments.isEmpty, "diagnostics must only use read-only device status")
+            precondition(name == "device_status" && arguments.isEmpty, "diagnostics must only use read-only device status")
             if hold { hold = false; return try await withCheckedThrowingContinuation { pending = $0 } }
             if fail { throw NSError(domain: "offline", code: 1) }
             let issues: [[String: String]] = blocked ? [["id": "shizuku", "title": "Shizuku 未启动",
@@ -44,6 +44,36 @@ enum DeviceHealthSessionTest {
         pending = nil
         for _ in 0..<100 { await Task.yield() }
         precondition(session.issues.isEmpty, "late response cannot restore warnings after disconnect")
+        var statusCalls = 0
+        let watching = DeviceHealthSession(startTimer: false) { _, _, name, _ in
+            statusCalls += 1
+            precondition(name == "device_status")
+            return try JSONSerialization.data(withJSONObject: ["health": ["issues": []]])
+        }
+        watching.route = { ("http://127.0.0.1:18765/mcp", "test") }
+        watching.states = { throw NSError(domain: "events", code: 1) }
+        await watching.idle()
+        await waitFor { statusCalls == 1 }
+        let issueBody: [String: Any] = ["generation": 1, "device": ["batteryPercent": 40, "issues": [
+            ["id": "shizuku", "title": "Shizuku 未启动", "detail": "需要 Shizuku", "destination": "permissions"]]]]
+        watching.states = { try JSONSerialization.data(withJSONObject: issueBody) }
+        await watching.idle()
+        precondition(statusCalls == 1 && watching.issues.count == 1 && watching.issues[0].title == "Shizuku 未启动",
+                     "an issues event suppresses the idle device_status call")
+        await watching.idle()
+        precondition(statusCalls == 1, "unchanged issues body does not cause another device_status call")
+        watching.refresh()
+        await waitFor { statusCalls == 2 }
+        let bareCalls = statusCalls
+        let bare = DeviceHealthSession(startTimer: false) { _, _, name, _ in
+            statusCalls += 1
+            precondition(name == "device_status")
+            return try JSONSerialization.data(withJSONObject: ["health": ["issues": []]])
+        }
+        bare.route = { ("http://127.0.0.1:18765/mcp", "test") }
+        bare.states = { try JSONSerialization.data(withJSONObject: ["generation": 2, "device": ["batteryPercent": 40]]) }
+        await bare.idle()
+        await waitFor { statusCalls == bareCalls + 1 }
         print("DeviceHealthSessionTest passed")
     }
 }

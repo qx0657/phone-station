@@ -65,6 +65,19 @@ def gateway_binary() -> Path:
     raise RemoteError("找不到远程网关。先运行 ./scripts/build-mac-app.sh。")
 
 
+def shell_output(status: dict) -> dict | None:
+    """Finished shell body. A missing or still-open receipt is not a result."""
+    if not isinstance(status, dict):
+        return None
+    if status.get("state") == "completed" and isinstance(status.get("result"), dict):
+        return status["result"]
+    # The link runs shell.start to completion and returns the output itself.
+    # Querying task_status then looks in the old job store and comes back missing.
+    if "state" not in status and "exitCode" in status:
+        return status
+    return None
+
+
 class Client:
     def __init__(self):
         self.binary = gateway_binary()
@@ -104,7 +117,21 @@ class Client:
         self.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
                                 "clientInfo": {"name": "phone-remote-ops", "version": "1"}})
         names = {item["name"] for item in self.rpc("tools/list", {}).get("tools", [])}
+        self.names = names
         self.require_permissions(["files.read", "files.write", "shell"] if install else ["shell"], names)
+        if "shell_run" in names:
+            required = {"shell_run", "device_status", "task_status"}
+            if install:
+                required |= {"files_write", "files_manage"}
+            if not required <= names:
+                raise RemoteError("手机工位版本缺少远程工具，请先更新到支持 Shizuku shell 的版本。")
+            self.async_shell = True
+            state = self.tool("shell_run", {"action": "status"})
+            if not state.get("available"):
+                raise RemoteError(state.get("reason", "Shizuku 尚不可用。"))
+            if self.tool("device_status").get("verified") is not True:
+                raise DeviceMismatch("当前手机型号尚未验证，停止设备操作。")
+            return
         required = {"station_shell_status", "station_shell_exec"}
         if install:
             required |= {"station_file_access_policy", "station_file_create_directory", "station_file_write_bytes", "station_file_append_bytes", "station_file_write_text"}
@@ -114,13 +141,20 @@ class Client:
         state = self.tool("station_shell_status")
         if not state.get("available"):
             raise RemoteError(state.get("reason", "Shizuku 尚不可用。"))
-        model = self.shell("getprop ro.product.model")["stdout"].strip()
-        if model.replace("_", "-") != "PGT-AN20":
-            raise DeviceMismatch(f"当前机型 {model} 尚未验证，停止设备操作。")
+        if "station_controls_status" in names:
+            if self.tool("station_controls_status").get("verified") is not True:
+                raise DeviceMismatch("当前手机型号尚未验证，停止设备操作。")
+        else:
+            model = self.shell("getprop ro.product.model")["stdout"].strip()
+            if model.replace("_", "-") != "PGT-AN20":
+                raise DeviceMismatch(f"当前机型 {model} 尚未验证，停止设备操作。")
 
     def require_permissions(self, scopes: list[str], names: set[str] | None = None):
         if names is None:
             names = {item["name"] for item in self.rpc("tools/list", {}).get("tools", [])}
+        if "device_status" in names:
+            check_permissions(self.tool("device_status"), scopes)
+            return
         if "station_controls_status" not in names:
             return  # Older phones have no permission metadata.
         state = self.tool("station_controls_status")
@@ -129,23 +163,28 @@ class Client:
     def shell(self, command: str, timeout_ms: int = 10000, output_bytes: int = 32768) -> dict:
         arguments = {"command": command, "timeoutMs": timeout_ms, "maxOutputBytes": output_bytes}
         if not self.async_shell:  # Bootstrap upgrades from APKs predating the job tools.
-            return self.tool("station_shell_exec", arguments)
+            return self.tool("shell_run" if "shell_run" in getattr(self, "names", ()) else "station_shell_exec", arguments)
         job_id = uuid.uuid4().hex
+        start_name = "shell_run" if "shell_run" in getattr(self, "names", ()) else "station_shell_start"
+        query_name = "task_status" if "task_status" in getattr(self, "names", ()) else "station_operation_status"
+        if start_name == "shell_run":
+            arguments = {**arguments, "action": "start"}
         deadline = time.monotonic() + timeout_ms / 1000 + 25
         original_timeout = self.rpc_timeout
         status = None
         try:
             self.rpc_timeout = min(original_timeout, 20)
-            try: status = self.tool("station_shell_start", {**arguments, "jobId": job_id})
+            try: status = self.tool(start_name, {**arguments, "jobId": job_id})
             except RemoteError: pass  # Unknown submission: query the same ID, never start again.
             while time.monotonic() < deadline:
                 self.rpc_timeout = max(1, min(original_timeout, 15, deadline - time.monotonic()))
                 if status is not None:
-                    if status.get("state") == "completed" and isinstance(status.get("result"), dict):
-                        return {**status["result"], "jobId": job_id}
+                    finished = shell_output(status)
+                    if finished is not None:
+                        return {**finished, "jobId": job_id}
                     if status.get("state") not in {"queued", "running"}:
                         break
-                try: status = self.tool("station_operation_status", {"jobId": job_id})
+                try: status = self.tool(query_name, {"jobId": job_id})
                 except RemoteError: status = None
                 if status is None or status.get("state") in {"queued", "running"}: time.sleep(0.5)
         finally: self.rpc_timeout = original_timeout
@@ -260,7 +299,10 @@ def upload(client: Client, apk: dict, remote: str):
             args = {"path": remote, "hex": chunk.hex()}
             if version:
                 args["targetVersion"] = version
-            result = client.tool("station_file_append_bytes" if version else "station_file_write_bytes", args)
+            if "files_write" in getattr(client, "names", ()):
+                result = client.tool("files_write", {**args, "action": "append-bytes" if version else "bytes"})
+            else:
+                result = client.tool("station_file_append_bytes" if version else "station_file_write_bytes", args)
             version = result["targetVersion"]
 
 
@@ -362,8 +404,12 @@ def prepare(client: Client, apks: list[dict], job_id: str, open_app: bool = True
     inbox = f"{UPLOAD_ROOT}/install-{job_id}"
     job = f"{JOB_ROOT}/{job_id}"
     client.checked_shell(f"test ! -e {job} || exit 1")
-    client.tool("station_file_access_policy")
-    client.tool("station_file_create_directory", {"path": inbox})
+    if "files_manage" in getattr(client, "names", ()):
+        client.tool("device_status")
+        client.tool("files_manage", {"action": "mkdir", "path": inbox})
+    else:
+        client.tool("station_file_access_policy")
+        client.tool("station_file_create_directory", {"path": inbox})
     for index, apk in enumerate(apks):
         print(f"上传 {apk['file'].name}（{apk['size']} 字节）", file=sys.stderr, flush=True)
         upload(client, apk, f"{inbox}/{index}.apk")
@@ -378,8 +424,9 @@ def prepare(client: Client, apks: list[dict], job_id: str, open_app: bool = True
                               "expectedVersion": apks[0].get("versionName", "")}
     script = installer_script(apks, job, inbox, open_app, previous_pid)
     record_text = json.dumps(record) + "\n"
-    client.tool("station_file_write_text", {"path": f"{inbox}/request.json", "text": record_text})
-    client.tool("station_file_write_text", {"path": f"{inbox}/install.sh", "text": script})
+    write = "files_write" if "files_write" in getattr(client, "names", ()) else "station_file_write_text"
+    client.tool(write, {"path": f"{inbox}/request.json", "text": record_text})
+    client.tool(write, {"path": f"{inbox}/install.sh", "text": script})
     commands = ["set -e", "umask 077", f"mkdir -p {JOB_ROOT}", f"mkdir {job}"]
     for index, apk in enumerate(apks):
         commands += [f"cp {shlex.quote(inbox + '/' + str(index) + '.apk')} {job}/{index}.apk",
@@ -494,7 +541,7 @@ def check_recovery(client: Client, job: str, result: dict):
     server = client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
                                       "clientInfo": {"name": "phone-install-recovery", "version": "1"}})
     version = str(server.get("serverInfo", {}).get("version", ""))
-    live = client.tool("station_device_status")
+    live = client.tool("device_status" if "device_status" in getattr(client, "names", ()) else "station_device_status")
     recovery["remote"] = {"connected": live.get("remoteConnected") is True, "serverVersion": version}
     if requested.get("expectedVersion") and version != requested["expectedVersion"]:
         recovery.update(state="failed", reason="远程运行版本与安装包不一致。")
@@ -568,11 +615,19 @@ def main(argv=None) -> int:
     try:
         client = Client()
         if args.mode == "shell" and args.job_status:
-            print(json.dumps(client.tool("station_operation_status", {"jobId": args.job_status}), ensure_ascii=False))
+            names = {item["name"] for item in client.rpc("tools/list", {}).get("tools", [])}
+            client.names = names
+            query = "task_status" if "task_status" in names else "station_operation_status"
+            print(json.dumps(client.tool(query, {"jobId": args.job_status}), ensure_ascii=False))
             return 0
         if args.mode == "shell" and args.status:
             client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "phone-shell", "version": "1"}})
-            print(json.dumps(client.tool("station_shell_status"), ensure_ascii=False))
+            names = {item["name"] for item in client.rpc("tools/list", {}).get("tools", [])}
+            client.names = names
+            if "shell_run" in names:
+                print(json.dumps(client.tool("shell_run", {"action": "status"}), ensure_ascii=False))
+            else:
+                print(json.dumps(client.tool("station_shell_status"), ensure_ascii=False))
             return 0
         if args.mode == "install" and args.status:
             client.rpc_timeout = 20

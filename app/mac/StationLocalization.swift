@@ -9,6 +9,7 @@ import Foundation
     static let shared = StationAppearance()
     private let defaults: UserDefaults
     private var localeObserver: NSObjectProtocol?
+    private var textObserver: NSObjectProtocol?
     @Published var language: Language { didSet { defaults.set(language.rawValue, forKey: "displayLanguage") } }
     @Published var theme: Theme { didSet { defaults.set(theme.rawValue, forKey: "displayTheme"); applyTheme() } }
 
@@ -16,15 +17,53 @@ import Foundation
         self.defaults = defaults
         language = Language(rawValue: defaults.string(forKey: "displayLanguage") ?? "") ?? .system
         theme = Theme(rawValue: defaults.string(forKey: "displayTheme") ?? "") ?? .system
+        textFactor = StationTextScale.factor(category: defaults.string(forKey: StationTextScale.categoryKey))
         localeObserver = NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification,
             object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.objectWillChange.send() }
             }
+        textObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("ApplePreferredContentSizeCategoryChangedNotification"),
+            object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadTextFactor() }
+            }
     }
-    deinit { if let localeObserver { NotificationCenter.default.removeObserver(localeObserver) } }
+    deinit {
+        if let localeObserver { NotificationCenter.default.removeObserver(localeObserver) }
+        if let textObserver { NotificationCenter.default.removeObserver(textObserver) }
+    }
+    private func reloadTextFactor() {
+        textFactor = StationTextScale.factor(category: defaults.string(forKey: StationTextScale.categoryKey))
+    }
     var locale: Locale { Locale(identifier: StationL10n.english(language: language.rawValue) ? "en" : "zh-Hans") }
+    /// 系统「文字大小」写在 `UIPreferredContentSizeCategoryName`。这台 Mac 上 SwiftUI 的 `.body` 不跟着它变，所以设置窗口按这个值自己放大。
+    @Published private(set) var textFactor: CGFloat
     func applyTheme() {
         NSApp?.appearance = theme == .system ? nil : NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+    }
+}
+
+enum StationTextScale {
+    static let categoryKey = "UIPreferredContentSizeCategoryName"
+    /// 缺省和未知都是 1，对应现在的字号。最大档是 3 倍。
+    static func factor(category: String?) -> CGFloat {
+        switch category {
+        case "UICTContentSizeCategoryXS": return 0.8
+        case "UICTContentSizeCategoryS": return 0.9
+        case "UICTContentSizeCategoryM", "UICTContentSizeCategoryL": return 1
+        case "UICTContentSizeCategoryXL": return 1.25
+        case "UICTContentSizeCategoryXXL": return 1.5
+        case "UICTContentSizeCategoryXXXL": return 1.75
+        case "UICTContentSizeCategoryAccessibilityM": return 2
+        case "UICTContentSizeCategoryAccessibilityL": return 2.25
+        case "UICTContentSizeCategoryAccessibilityXL": return 2.5
+        case "UICTContentSizeCategoryAccessibilityXXL": return 2.75
+        case "UICTContentSizeCategoryAccessibilityXXXL": return 3
+        default: return 1
+        }
+    }
+    static func points(category: String?, base: CGFloat) -> CGFloat {
+        (base * factor(category: category)).rounded()
     }
 }
 

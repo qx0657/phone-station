@@ -102,7 +102,7 @@ public final class RemoteRelayActivity extends StationActivity {
 
     private void paintStatus() {
         boolean configured = RemoteStore.configured(this);
-        boolean online = StationFeatures.master(this) && configured && RemoteStore.enabled(this) && PhoneRelayClient.connected();
+        boolean online = StationFeatures.master(this) && configured && RemoteStatus.connected(this);
         updatingRemote = true;
         remote.toggle.setChecked(configured && RemoteStore.enabled(this));
         updatingRemote = false;
@@ -111,9 +111,9 @@ public final class RemoteRelayActivity extends StationActivity {
         permissionLink.value.setTextColor(ui.muted());
         paintConfig();
         ui.paintOn(remote.mark, remote.toggle.isChecked());
-        String label = PhoneRelayClient.connectionLabel(this);
+        String label = RemoteStatus.label(this);
         if (!label.contentEquals(status.getText())) { status.setText(StationText.translate(label)); }
-        status.setTextColor(online ? ui.held() : PhoneRelayClient.checking() ? ui.waiting() : ui.muted());
+        status.setTextColor(online ? ui.held() : RemoteStatus.checking(this) ? ui.waiting() : ui.muted());
     }
 
     private void showMessage(String value, boolean error) {

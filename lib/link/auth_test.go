@@ -32,6 +32,13 @@ func TestTranscriptBytes(t *testing.T) {
 	if hex.EncodeToString(proof) != "fbe5926156331eed23633774e48e7b2b213f4618762151325811bbca517cb5d3" {
 		t.Fatalf("proof %x", proof)
 	}
+	local, err5 := LocalAuthMessage(bytes.Repeat([]byte{0x11}, 16), bytes.Repeat([]byte{0x22}, 32), bytes.Repeat([]byte{0x33}, 16))
+	if err5 != nil {
+		t.Fatal(err5)
+	}
+	if got := sha256.Sum256(local); hex.EncodeToString(got[:]) != "43d6e3b24dbca9a048816e036a08a793a0705f7d97cdaaa4172aedfc1b4c0b40" {
+		t.Fatalf("local %x", got)
+	}
 	if _, err := EnrollMessage(station, nonce, device, code, "side"); err == nil {
 		t.Fatal("purpose")
 	}

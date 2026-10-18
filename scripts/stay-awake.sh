@@ -25,7 +25,21 @@ fi
 ADB=$(adb_bin)
 SERIAL=$(online_serial "$ADB")
 if [[ "$enabled" == true ]]; then require_station_feature "$ADB" "$SERIAL" awake; fi
-if ! result=$("$ADB" -s "$SERIAL" shell am broadcast -f 0x00400000 \
+station=""
+for candidate in "$DIR/../build/.phone-station/station" "$DIR/../lib/station"; do
+  if [[ -x $candidate ]]; then
+    station=$candidate
+    break
+  fi
+done
+if [[ -n $station ]]; then
+  if ! result=$("$station" shell "$SERIAL" am broadcast -f 0x00400000 \
+      -n dev.phonestation.adbkeep/.StayAwakeReceiver \
+      -a dev.phonestation.adbkeep.STAY_AWAKE --ez on "$enabled" 2>&1); then
+    print -u2 -- "亮屏操作应答丢失，请先核实手机状态；未自动重试。"
+    exit 1
+  fi
+elif ! result=$("$ADB" -s "$SERIAL" shell am broadcast -f 0x00400000 \
     -n dev.phonestation.adbkeep/.StayAwakeReceiver \
     -a dev.phonestation.adbkeep.STAY_AWAKE --ez on "$enabled" 2>&1); then
   print -u2 -- "亮屏操作应答丢失，请先核实手机状态；未自动重试。"

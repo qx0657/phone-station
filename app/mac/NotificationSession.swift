@@ -66,7 +66,7 @@ final class NotificationSession: ObservableObject {
         self.deliver = deliver ?? { try await NotificationDelivery.shared.post($0) }
         self.rpc = rpc ?? { endpoint, token, name, arguments in
             try await ClipboardRPC.call(endpoint: endpoint, token: token, name: name, arguments: arguments,
-                timeout: name == "station_notification_icon" ? 2 : 8)
+                timeout: name == "notification.icon" ? 2 : 8)
         }
         self.saveReceiving = saveReceiving ?? { UserDefaults.standard.set($0, forKey: "receivePhoneNotifications") }
         self.dismissBanners = dismissBanners ?? {
@@ -118,7 +118,7 @@ final class NotificationSession: ObservableObject {
             var event = PhoneNotification(id: "preview", key: "preview", packageName: "preview",
                 app: "手机工位", title: "横幅预览", text: "这是界面验证示例，收到手机通知时会显示对应应用图标。")
             if remoteBlocker == nil, let (endpoint, token) = route(),
-               let data = try? await rpc(endpoint, token, "station_notification_icon", [:]),
+               let data = try? await rpc(endpoint, token, "notification.icon", [:]),
                let icon = try? JSONDecoder().decode(NotificationIcon.self, from: data),
                let png = icon.png, let app = icon.app, let pkg = icon.packageName {
                 event.app = app; event.packageName = pkg; event.iconPNG = png
@@ -153,7 +153,7 @@ final class NotificationSession: ObservableObject {
             defer { busy = false; refresh() }
             do {
                 if let remoteBlocker { message = remoteBlocker.detail; return }
-                let data = try await rpc(endpoint, token, "station_notification_configure", ["enabled": enabled])
+                let data = try await rpc(endpoint, token, "notification.configure", ["enabled": enabled])
                 snapshot = try JSONDecoder().decode(NotificationSnapshot.self, from: data)
                 policy.disconnect()
                 message = nil
@@ -195,7 +195,7 @@ final class NotificationSession: ObservableObject {
                 if let cursor = policy.cursor { arguments["cursor"] = cursor }
             } else { policy.disconnect() }
             do {
-                let data = try await rpc(endpoint, token, consume ? "station_notification_poll" : "station_notification_status", arguments)
+                let data = try await rpc(endpoint, token, consume ? "notification.poll" : "notification.status", arguments)
                 guard let current = route(), current.0 == endpoint, current.1 == token else {
                     connected = false; policy.disconnect(); dismissBanners(); return
                 }
@@ -229,7 +229,7 @@ final class NotificationSession: ObservableObject {
         if let cached = icons[packageName], Date().timeIntervalSince(cached.1) < (cached.0 == nil ? 30 : 600) {
             return cached.0
         }
-        let data = try? await rpc(endpoint, token, "station_notification_icon", ["packageName": packageName])
+        let data = try? await rpc(endpoint, token, "notification.icon", ["packageName": packageName])
         let value = data.flatMap { try? JSONDecoder().decode(NotificationIcon.self, from: $0) }
         guard remoteBlocker == nil else { return nil }
         let png = value?.packageName == packageName ? value?.png : nil

@@ -15,6 +15,12 @@ import Foundation
             do { _ = try ScreenPacket(invalid); preconditionFailure("invalid framing accepted") } catch {}
         }
         do { _ = try ScreenPacket.nals(Data([0,0,1])); preconditionFailure("empty NAL accepted") } catch {}
+        var framed = ScreenFrameBuffer()
+        let one = Data([0, 0, 0, 5, 0]) + Data("h264".utf8)
+        let packets = try framed.append(one.prefix(3)) + framed.append(one.dropFirst(3))
+        precondition(packets.count == 1 && packets[0] == Data([0]) + Data("h264".utf8))
+        var bad = ScreenFrameBuffer()
+        do { _ = try bad.append(Data([0, 0, 0, 0])); preconditionFailure("empty frame") } catch {}
         let touch = ScreenPacket.touch(action: 0, x: 20, y: 30, width: 720, height: 1600)
         precondition(touch.count == 32 && touch[0] == 2 && ScreenPacket.key(4, down: true).count == 14)
         print("Screen video protocol tests ok")

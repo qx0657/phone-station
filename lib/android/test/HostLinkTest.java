@@ -50,6 +50,15 @@ final class HostLinkTest {
                 || !HostLink.localLinked(now, now, "usb", false, false)) {
             throw new AssertionError("Wi-Fi loss invalidates wireless heartbeat immediately, preserving USB");
         }
+        if (!"".equals(HostLink.localTransport(false, "wireless", true))
+                || !"wireless".equals(HostLink.localTransport(true, "wireless", false))
+                || !"wireless".equals(HostLink.localTransport(true, "", true))
+                || !"usb".equals(HostLink.localTransport(true, "", false))
+                || !"本地".equals(HostLink.localName(""))
+                || !"无线".equals(HostLink.localName("wireless"))
+                || !"USB".equals(HostLink.localName("usb"))) {
+            throw new AssertionError("transport label");
+        }
         System.out.println("HostLinkTest ok");
     }
 }

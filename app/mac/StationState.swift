@@ -11,6 +11,7 @@ enum StationPage: Equatable {
     case about
     case mcp
     case remoteRelay
+    case stationPair
     case remotePermissions
     case features
     case clipboard

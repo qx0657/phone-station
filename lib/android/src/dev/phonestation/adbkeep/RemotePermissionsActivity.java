@@ -83,7 +83,7 @@ public final class RemotePermissionsActivity extends StationActivity {
         summary.setText(StationText.translate(RemoteStore.permissionSummary(this)));
         channel.setText(StationText.translate(!configured ? "尚未配置远程通道。可预先选择访问范围；更换中继资料时需要重新确认。"
                 : !RemoteStore.enabled(this) ? "远程通道已关闭，授权选择已保留，开启通道后生效。"
-                : "远程通道 · " + PhoneRelayClient.connectionLabel(this)));
+                : "远程通道 · " + RemoteStatus.label(this)));
         painting = true;
         for (Map.Entry<String, StationChrome.Control> entry : controls.entrySet()) {
             boolean on = RemoteStore.permission(this, entry.getKey());

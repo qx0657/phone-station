@@ -89,7 +89,8 @@ if [[ ${1:-} == -h || ${1:-} == --help ]]; then
   print -r -- "      android.sh status"
   print -r -- "      android.sh --remove"
   print -r -- "在手机上安装「手机工位」。无线调试保持是里面的一项功能。"
-  print -r -- "已有远程中继和 Shizuku 时优先远程更新；--remote 只走远程，--adb 指定本地安装。"
+  print -r -- "adb 已经连着手机时走本地安装。没有本地连接时才远程更新。"
+  print -r -- "--remote 只走远程，--adb 指定本地安装。"
   print -r -- "同时授所有文件访问，给同一应用里的 MCP服务用。"
   print -r -- "并把「提醒」通道的横幅通知打开。这台 MagicOS 不会让新装应用自己弹出。"
   print -r -- "Wi-Fi 连着且 USB 调试开着时，会把被关掉的无线调试重新打开。"
@@ -119,9 +120,18 @@ if (( ${#remote_job_args} )) && [[ $mode == status || $mode == --remove || $mode
 fi
 if [[ -n $mode ]]; then set -- "$mode"; else set --; fi
 
-# Check before any APK write or install. Once remote deployment begins, a lost
-# response must never fall back to a second adb installation.
-if [[ -z ${1:-} || ${1:-} == --remote ]]; then
+# 已经有 device、且这次没有指定远程任务时，走原来的本地安装。
+# --remote 和 --job-id 仍只走远程。远程上传一旦开始，失败也不再改走 adb。
+prefer_local=0
+if [[ -z ${1:-} && ${#remote_job_args[@]} -eq 0 ]]; then
+  if ADB=$(adb_bin 2>/dev/null); then
+    if "$ADB" devices | awk 'NR>1 && $2 == "device" { found = 1 } END { exit found ? 0 : 1 }'; then
+      prefer_local=1
+      print -u2 -- "已有本地连接，使用本地 adb 安装。"
+    fi
+  fi
+fi
+if [[ $prefer_local -eq 0 && ( -z ${1:-} || ${1:-} == --remote ) ]]; then
   if "$DIR/install-apk.sh" --check; then
     if [[ -x $ROOT/lib/android/build.sh ]]; then
       "$ROOT/lib/android/build.sh"

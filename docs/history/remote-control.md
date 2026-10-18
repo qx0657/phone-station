@@ -1,6 +1,8 @@
+> 2026-10-18 从当时的现行文档转入。中继 5 的合约、控制长连接、独立屏幕 WSS 和手机上的 `/mcp` 不再是当前协议。 当前链路见 [link-v2](../link-v2.md)。下文保持转入时的原文。
+
 # 远程控制长连接与事件订阅
 
-Android 69、Mac 32、中继 5 增加 `control-v1` 和 `events-v1`。三端升级后沿用已有配对、功能选择与授权，无需重新配对或新增公网端口；构建与实际部署证据见 [发布记录](releases.md)。操作回执仍使用 durable-epochs-v1，音视频仍使用独立的 [屏幕连接](remote-screen.md)。
+Android 69、Mac 32、中继 5 增加 `control-v1` 和 `events-v1`。三端升级后沿用已有配对、功能选择与授权，无需重新配对或新增公网端口；构建与实际部署证据见 [发布记录](../releases.md)。操作回执仍使用 durable-epochs-v1，音视频仍使用独立的 [屏幕连接](remote-screen.md)。
 
 ## 哪些请求仍然定时发生
 
@@ -31,7 +33,7 @@ flowchart LR
 
 手机 WSS 沿用手机角色令牌、SPKI 固定验证及主机名校验，认证只放请求头。控制帧为 UTF-8 JSON 文本，消息及分片合计上限 18 MiB，不启用压缩，不接受重定向。中继沿用 Origin、重复认证头、URL 参数、重复 JSON 字段和深度检查。
 
-手机侧使用 Java-WebSocket 1.6.0 与 SLF4J 2.0.13（NOP 日志实现），构建时按固定 SHA-256 获取，缓存位于忽略的 `build/third_party/websocket/`。许可随 APK 附带：[Java-WebSocket MIT](licenses/java-websocket.txt)、[SLF4J MIT](licenses/slf4j.txt)。控制连接不依赖 Shizuku。
+手机侧使用 Java-WebSocket 1.6.0 与 SLF4J 2.0.13（NOP 日志实现），构建时按固定 SHA-256 获取，缓存位于忽略的 `build/third_party/websocket/`。许可随 APK 附带：[Java-WebSocket MIT](../licenses/java-websocket.txt)、[SLF4J MIT](../licenses/slf4j.txt)。控制连接不依赖 Shizuku。
 
 ## 控制会话与结果
 
@@ -88,6 +90,6 @@ Mac 重连按 1–30 秒退避。未收到手机主题确认时始终保留原�
 
 推荐先升级中继 5，再升级 Android 69 和 Mac 32。新中继兼容旧手机和 Mac；新手机连接旧中继时显式降级长轮询，新 Mac 的订阅连接失败时继续原轮询。中继前的反向代理必须透传控制和事件路径的 WebSocket Upgrade，已有屏幕代理规则不一定涵盖这两个新路径。
 
-只替换传输协议和增加订阅租约，不改变持久状态格式。回滚使用能读取 durable-epochs-v1 的版本并保留完整状态目录；禁止删除旧回执。公网停启、手机安装、Mac 替换均需按 [发布流程](releases.md) 单独执行并核实恢复。
+只替换传输协议和增加订阅租约，不改变持久状态格式。回滚使用能读取 durable-epochs-v1 的版本并保留完整状态目录；禁止删除旧回执。公网停启、手机安装、Mac 替换均需按 [发布流程](../releases.md) 单独执行并核实恢复。
 
 本机测试覆盖真实 TLS Java/Go 通信、SPKI 拒绝、持久结果确认、原结果重传、连接接替、静默连接超时、订阅隔离、变化信号正文剥离、同 clientId 租约过期、Mac 晚到确认拒绝及请求期间补查。手机 Wi-Fi/蜂窝/VPN 切换、后台保活、通知即时性、PGT-AN20 系统剪贴板监听兼容与实际耗电必须部署后实测，本机通过不能替代这些验收。

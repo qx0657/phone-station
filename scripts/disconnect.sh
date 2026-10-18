@@ -14,6 +14,19 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+station=""
+for candidate in "$DIR/../build/.phone-station/station" "$DIR/../lib/station"; do
+  if [[ -x $candidate ]]; then
+    station=$candidate
+    break
+  fi
+done
+if [[ -n $station ]]; then
+  if [[ -n "${1:-}" ]]; then
+    exec "$station" disconnect "$1"
+  fi
+  exec "$station" disconnect
+fi
 if [[ -n "${1:-}" ]]; then
   "$ADB" disconnect "$1"
 else

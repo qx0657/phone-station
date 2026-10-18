@@ -32,6 +32,7 @@ final class LinkEngineTest {
             throw new AssertionError("missing " + need);
         }
         delivers();
+        shareOverLink();
         stopsOnControlSeq();
         System.out.println("link engine ok");
     }
@@ -185,6 +186,51 @@ final class LinkEngineTest {
             }
             if (got == null || got.channel != 1 || !got.end || !Arrays.equals(got.payload, "hi".getBytes())) {
                 throw new AssertionError("delivered");
+            }
+        } finally {
+            mac.close();
+            phone.close();
+            for (Thread thread : threads) {
+                thread.join(2000);
+                if (thread.isAlive()) {
+                    throw new AssertionError("serve did not stop");
+                }
+            }
+        }
+        if (failure.get() != null) {
+            throw new AssertionError("serve " + failure.get().getMessage());
+        }
+    }
+
+    private static void shareOverLink() throws Exception {
+        if (!"/storage/emulated/0/Download/note.txt".equals(SharePaths.phoneDownload("note.txt"))) {
+            throw new AssertionError("dest");
+        }
+        byte[] body = "hello phone".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ArrayBlockingQueue<LinkEngine.Frame> macToPhone = new ArrayBlockingQueue<>(8);
+        ArrayBlockingQueue<LinkEngine.Frame> phoneToMac = new ArrayBlockingQueue<>(8);
+        long now = System.currentTimeMillis();
+        LinkEngine mac = new LinkEngine(true, 64, 64, 0, now);
+        LinkEngine phone = new LinkEngine(false, 64, 64, 0, now);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        List<Thread> threads = new ArrayList<>();
+        threads.add(serve(mac, new Pipe(phoneToMac, macToPhone), failure));
+        threads.add(serve(phone, new Pipe(macToPhone, phoneToMac), failure));
+        try {
+            mac.open(3);
+            mac.sendMessage(3, 3, LinkFrame.KIND_DATA, body);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            LinkEngine.Chunk got = null;
+            while (System.nanoTime() < deadline) {
+                List<LinkEngine.Chunk> items = phone.inbox();
+                if (items.size() == 1 && items.get(0).end) {
+                    got = items.get(0);
+                    break;
+                }
+                Thread.sleep(5);
+            }
+            if (got == null || got.channel != 3 || !Arrays.equals(got.payload, body)) {
+                throw new AssertionError("share");
             }
         } finally {
             mac.close();

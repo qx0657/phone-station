@@ -291,14 +291,14 @@ struct ConnectionStatusTest {
         var reads = 0
         var permissions: [String: Bool]? = nil
         let controls = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, args in
-            if name == "station_torch" {
+            if name == "device_control" && args["action"] as? String == "torch" {
                 writes += 1
                 torchOn = args["on"] as! Bool // 操作已生效，但应答丢失。
                 throw ClipboardRPC.Failure(message: "response lost")
             }
-            precondition(name == "station_controls_status")
+            precondition(name == "device_status")
             reads += 1
-            return try JSONSerialization.data(withJSONObject: ["model": model, "verified": true,
+            return try JSONSerialization.data(withJSONObject: ["model": model, "verified": model == "PGT-AN20",
                 "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
                 "screenshotAvailable": true, "screenshotReason": "", "remotePermissions": permissions as Any? ?? NSNull(),
                 "torch": ["on": torchOn, "available": true, "reason": ""]])
@@ -332,15 +332,15 @@ struct ConnectionStatusTest {
 
         var captureCalls = 0
         var statusCalls = 0
-        let recovery = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
-            if name == "station_screen_capture_start" { captureCalls += 1; throw ClipboardRPC.Failure(message: "lost") }
-            if name == "station_operation_status" { return Data("{\"state\":\"result_unknown\"}".utf8) }
-            if name == "station_screen_capture_release" { return Data("{}".utf8) }
-            if name == "station_screen_capture_status" {
+        let recovery = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, args in
+            if name == "screenshot" && args["action"] as? String == "start" { captureCalls += 1; throw ClipboardRPC.Failure(message: "lost") }
+            if name == "task_status" { return Data("{\"state\":\"result_unknown\"}".utf8) }
+            if name == "screenshot" && args["action"] as? String == "release" { return Data("{}".utf8) }
+            if name == "screenshot" && args["action"] as? String == "status" {
                 statusCalls += 1
                 return try JSONSerialization.data(withJSONObject: ["available": false])
             }
-            precondition(name == "station_controls_status")
+            precondition(name == "device_status")
             return try JSONSerialization.data(withJSONObject: ["model": "PGT-AN20", "verified": true,
                 "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
                 "screenshotAvailable": true, "screenshotReason": "",
@@ -365,14 +365,14 @@ struct ConnectionStatusTest {
         let saved = RemoteControlsSession.PendingCapture(id: cleanupID, endpoint: "capture-endpoint", localFile: "/test/saved.png")
         defaults.set(try! JSONEncoder().encode(saved), forKey: "phoneStationPendingCapture")
         var releaseCalls = 0
-        let cleanup = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, _ in
-            if name == "station_controls_status" {
+        let cleanup = RemoteControlsSession(feedback: feedback, startTimer: false, defaults: defaults, rpc: { _, _, name, args in
+            if name == "device_status" {
                 return try JSONSerialization.data(withJSONObject: ["model": "PGT-AN20", "verified": true,
                     "stayAwake": true, "stayAwakeAvailable": true, "stayAwakeReason": "",
                     "screenshotAvailable": true, "screenshotReason": "", "remotePermissions": ["controls": true],
                     "torch": ["on": false, "available": true, "reason": ""]])
             }
-            precondition(name == "station_screen_capture_release", "保存后只清理，不重新下载")
+            precondition(name == "screenshot" && args["action"] as? String == "release", "保存后只清理，不重新下载")
             releaseCalls += 1
             if releaseCalls == 1 { throw ClipboardRPC.Failure(message: "lost cleanup response") }
             return Data("{}".utf8)

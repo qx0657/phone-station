@@ -23,3 +23,16 @@ Mac 0.1.0 (15) 移除首页顶部随后台状态增删的剪贴板、通知、MC
 Mac 0.1.0 (16) 整改剪贴板误报恢复和远程请求拥塞：App 统一调度 MCP 请求，超时从实际发出开始计时；正常排队保持同步状态，真实慢响应、失败与断线分开。网关忙碌导致确认过期时保留发送通道，实际离线仍停用。远程剪贴板与通知空闲轮询等待上次完成后至少 2 秒，新 Mac 复制立即进入调度；远程健康诊断降到完成后至少 15 秒。远程控制只在面板显示期间定时核实，修正了每次状态/RTT 更新都会额外发起控制检查的问题。可取消队列、真实 HTTP 排队及恢复回归见 [clipboard.md](../clipboard.md#mac-16-的请求调度与慢响应)。
 
 2026-10-03 已安装启动 Mac 16，并保留原有签名的钥匙串助手；构建、安装包签名、代码与版本核对通过，旧 App 保留在忽略的 `build/.phone-station/backups/clipboard-scheduling-before-16.app`。安装后约 90.8 秒、每 2 秒的 46 次本机网关采样全部为远程在线且已验证，未采到确认中；新版四个调度日志窗口累计完成 120 个 App 请求、失败 0、最多 1 个等待请求，没有剪贴板恢复循环或超过 6 秒的慢响应日志。这是短时实机后台观察，不代表所有未来网络环境；原始状态采样在忽略的 `build/.phone-station/clipboard-scheduling-review/live-status.json`。本次不改变手机权限、共享设置或真实剪贴板，不安装手机 APK。
+
+
+## 2026-10-18 Cursor 退出后的后台归属排查
+
+用户要求退出 Adobe / Cursor worker 后，Dock 仍提示 Cursor“正在后台运行”。本机 `ps` 已没有 Cursor 主程序、项目 worker、桌面控制服务与 Cursor crashpad。`lsappinfo list` 仍将 Cursor 标记为 `exited-with-subordinates`，并列出三个 `relatedCoalitionPIDs`：adb server、已安装手机工位包内的 `phone-relay-gateway serve`、`dns-sd` 无线调试发现进程。三者 PPID 都为 1。因此“Cursor 进程无残留”不足以证明 macOS 的应用后台归属已经清空；这些关联也不表示手机工位功能依赖 Cursor。
+
+源码核对：`lib/remote-gateway/main.go` 的 `startDaemon` 用 `exec.Command(executable, "serve")`、`Setsid: true` 和 `Process.Release()` 启动独立网关；`lib/adb_mdns.py` 的 `Dns` 用 `subprocess.Popen` 启动 `dns-sd`，正常 `close()` 会终止该子进程。已检查的 Mac 与脚本连接路径没有 Cursor / anysphere 运行依赖。结合系统关联，后台服务继承开发工具启动归属是合理解释，但本次没有重放启动链路，不能据此断定每个旧进程的完整启动来源，也不能把 `Setsid` 当作 macOS coalition / responsible application 隔离。
+
+用户明确授权后，核对 PID 对应可执行文件，再向上述三个旧进程发送 SIGTERM。随后复查三个旧 PID 均已退出，Cursor 条目不再列出 `relatedCoalitionPIDs`，但当次采样仍留有 `exited-with-subordinates` 应用登记；没有进行 Dock 视觉确认，不能宣称提示已消失。仍运行的手机连接组件随后出现一个新 adb server，另有三个未列入上述 Cursor 关联的 `dns-sd`，本次未按名字批量结束。停止旧网关不等于关闭手机端服务；本次没有操作手机、重新配对或验证远程通道恢复。
+
+待处理的工程问题：独立网关的系统应用归属，以及发现任务异常退出后的子进程回收。后续应在受控启动/退出实验中验证独立服务的启动归属和超时、强退清理，再决定是否采用系统服务管理；不能仅补 `setsid` 或只改文档就报告已修复。本次仅进行本机进程清理与文档记录，没有修改运行代码、构建、安装、提交或推送。
+
+随后用户明确要求全部退出：通过应用退出事件关闭手机工位菜单栏 App，再停止新建的 adb server 和剩余三个无线调试 `dns-sd` 发现进程。等待后复查，本次目标范围内的手机工位 App、随包网关、adb server 和无线调试发现进程均无残留。本次未修改手机工位登录项，未重新启动服务，也未操作手机。

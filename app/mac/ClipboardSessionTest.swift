@@ -38,11 +38,11 @@ enum ClipboardSessionTest {
         }
         func rpc(_ endpoint: String, _ token: String, _ name: String, _ args: [String: Any]) async throws -> Data {
             calls.append((name, args))
-            if name == "station_clipboard_configure" {
+            if name == "clipboard.configure" {
                 if let on = args["images"] as? Bool { images = on }
                 return reply()
             }
-            if name == "station_clipboard_state" {
+            if name == "clipboard.state" {
                 if holdState { holdState = false; return try await withCheckedThrowingContinuation { stateWait = $0 } }
                 return reply()
             }
@@ -104,7 +104,7 @@ enum ClipboardSessionTest {
         session.refresh()
         await waitFor { session.connected }
         precondition(session.lastSyncAt == nil, "a first-contact baseline is not a successful sync")
-        precondition(fake.calls.map(\.0) == ["station_clipboard_state", "station_clipboard_exchange"])
+        precondition(fake.calls.map(\.0) == ["clipboard.state", "clipboard.exchange"])
         precondition(fake.calls.last!.1["phoneVersion"] == nil, "first contact only establishes a baseline")
         fake.holdExchange = true
         session.refresh()
@@ -124,7 +124,7 @@ enum ClipboardSessionTest {
         fake.exchangeWait!.resume(throwing: NSError(domain: "handover", code: 1)); fake.exchangeWait = nil
         await waitFor { fake.stateWait != nil }
         precondition(!session.connected && session.summary == "正在恢复同步")
-        precondition(fake.calls.last!.0 == "station_clipboard_state" && fake.calls.last!.1["refresh"] as? Bool == true,
+        precondition(fake.calls.last!.0 == "clipboard.state" && fake.calls.last!.1["refresh"] as? Bool == true,
                      "unknown outcomes are reconciled with a read-only state probe")
         fake.copy("latest-during-probe"); session.refresh()
         fake.stateWait!.resume(returning: fake.reply()); fake.stateWait = nil
@@ -164,7 +164,7 @@ enum ClipboardSessionTest {
         await waitFor { unavailable.blocker != nil }
         precondition(unavailable.summary == "Shizuku 未启动" && !unavailable.connected,
                      "home summary explains the actual blocker, not generic recovery")
-        precondition(blocked.calls.map(\.0) == ["station_clipboard_state"] && blocked.writes.isEmpty,
+        precondition(blocked.calls.map(\.0) == ["clipboard.state"] && blocked.writes.isEmpty,
                      "blocked read-only probe must not send clipboard exchange or write")
         blocked.blocked = false
         unavailable.refresh(); await waitFor { unavailable.connected }
@@ -172,8 +172,8 @@ enum ClipboardSessionTest {
         precondition(blocked.writes.isEmpty && blocked.calls.last!.1["phoneVersion"] == nil,
                      "recovering from missing permission establishes a baseline")
         unavailable.configure(shared: true)
-        await waitFor { blocked.calls.contains(where: { $0.0 == "station_clipboard_configure" }) && !unavailable.busy }
-        let configuration = blocked.calls.first(where: { $0.0 == "station_clipboard_configure" })!.1
+        await waitFor { blocked.calls.contains(where: { $0.0 == "clipboard.configure" }) && !unavailable.busy }
+        let configuration = blocked.calls.first(where: { $0.0 == "clipboard.configure" })!.1
         precondition(configuration["shared"] as? Bool == true && configuration["automatic"] as? Bool == true,
                      "the single share switch always enables automatic syncing")
         await imageTests()

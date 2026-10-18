@@ -33,11 +33,19 @@ fi
 "$GO" -C "$ROOT/lib/remote-gateway" build -trimpath \
   -o "$ROOT/build/.phone-station/.phone-relay-gateway-$$" .
 mv -f "$ROOT/build/.phone-station/.phone-relay-gateway-$$" "$ROOT/build/.phone-station/phone-relay-gateway"
+"$GO" -C "$ROOT/lib/stationd" build -trimpath \
+  -o "$ROOT/build/.phone-station/.station-$$" ./cmd/stationd
+mv -f "$ROOT/build/.phone-station/.station-$$" "$ROOT/build/.phone-station/station"
 python3 "$ROOT/lib/test_mcp_pair.py"
 python3 "$ROOT/lib/test_mcp_stop.py"
 python3 "$ROOT/lib/build_keychain.py" --compiler "$SWIFTC" --target "$TARGET" --sdk "$SDK" \
   --source "$ROOT/lib/remote-gateway/keychain/main.swift" \
   --binary "$ROOT/build/.phone-station/phone-relay-keychain"
+"$SWIFTC" -O -swift-version 5 \
+  -target "$TARGET" -sdk "$SDK" -framework Security -framework CryptoKit \
+  -o "$ROOT/build/.phone-station/phone-device-key" \
+  "$ROOT/app/mac/DeviceKey.swift" \
+  "$ROOT/lib/remote-gateway/devicekey/main.swift"
 POLICY_TEST="$ROOT/build/.phone-station/reconnect-policy-test"
 "$SWIFTC" -parse-as-library -swift-version 5 "$ROOT/app/mac/StationLocalization.swift" \
   -target "$TARGET" -sdk "$SDK" \
@@ -154,7 +162,9 @@ cp "$ROOT/lib/common.sh" "$ROOT/lib/adb_mdns.py" "$ROOT/lib/torch.dex" "$ROOT/li
 cp "$ROOT/lib/notify_mcp.py" "$ROOT/lib/remote_ops.py" "$ROOT/lib/remote_terminal.py" "$ROOT/lib/pair_qr.py" "$ROOT/lib/notify-sound.dex" "$RESOURCES/lib/"
 cp "$ROOT/build/.phone-station/phone-relay-gateway" "$RESOURCES/lib/phone-relay-gateway"
 cp "$ROOT/build/.phone-station/phone-relay-keychain" "$RESOURCES/lib/phone-relay-keychain"
-chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain"
+cp "$ROOT/build/.phone-station/phone-device-key" "$RESOURCES/lib/phone-device-key"
+cp "$ROOT/build/.phone-station/station" "$RESOURCES/lib/station"
+chmod +x "$RESOURCES/lib/phone-relay-gateway" "$RESOURCES/lib/phone-relay-keychain" "$RESOURCES/lib/phone-device-key" "$RESOURCES/lib/station"
 mkdir -p "$RESOURCES/lib/torch-audio"
 cp "$ROOT/lib/torch-audio/main.swift" "$RESOURCES/lib/torch-audio/"
 audio_src="$ROOT/lib/torch-audio/main.swift"
@@ -209,7 +219,10 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
 
+mkdir -p "$CONTENTS/Library/LaunchAgents"
+"$GO" -C "$ROOT/lib/stationd" run ./cmd/stationd plist-bundle > "$CONTENTS/Library/LaunchAgents/dev.phonestation.stationd.plist"
 plutil -lint "$CONTENTS/Info.plist"
+plutil -lint "$CONTENTS/Library/LaunchAgents/dev.phonestation.stationd.plist"
 codesign --force --deep --sign - "$STAGING"
 rm -rf "$APP"
 mv "$STAGING" "$APP"

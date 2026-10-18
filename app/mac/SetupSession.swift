@@ -10,6 +10,7 @@ final class SetupSession: ObservableObject {
     var onFinished: () -> Void = {}
     var installBlocker: () -> RemotePermissionBlocker? = { nil }
     var queryInstallBlocker: () -> RemotePermissionBlocker? = { nil }
+    var prefersLocalInstall: () -> Bool = { false }
 
     private let feedback: StationFeedback
 
@@ -93,8 +94,11 @@ final class SetupSession: ObservableObject {
         guard feedback.activity == nil else { return }
         feedback.activity = "正在打开手机远程访问范围页…"
         Task.detached(priority: .userInitiated) {
-            let args = modernPage ? ["--es", "dev.phonestation.adbkeep.PAGE", "remotePermissions", "--es", "dev.phonestation.adbkeep.REMOTE_SCOPE", scope ?? ""]
+            var args = modernPage ? ["--es", "dev.phonestation.adbkeep.PAGE", "remotePermissions"]
                 : ["--es", "dev.phonestation.adbkeep.PAGE", "permissions"]
+            if modernPage, let scope, !scope.isEmpty {
+                args += ["--es", "dev.phonestation.adbkeep.REMOTE_SCOPE", scope]
+            }
             let result = StationRunner.capture(adb, ["-s", serial, "shell", "am", "start", "-n", "dev.phonestation.adbkeep/.MainActivity"] + args, timeout: 10)
             await MainActor.run {
                 self.feedback.activity = nil
@@ -131,6 +135,24 @@ final class SetupSession: ObservableObject {
 
     func install() {
         guard feedback.activity == nil else { return }
+        if prefersLocalInstall() {
+            feedback.activity = "正在安装手机上的「手机工位」…"
+            feedback.notice = nil
+            Task.detached(priority: .userInitiated) {
+                let result = StationRunner.scriptResult("android.sh", ["--adb"], timeout: 600)
+                await MainActor.run {
+                    self.feedback.activity = nil
+                    if result.succeeded {
+                        self.remember(nil)
+                        self.feedback.notice = "已安装。"
+                        self.onFinished()
+                    } else {
+                        self.feedback.notice = StationText.reason(result.output, fallback: "本地安装没有完成。")
+                    }
+                }
+            }
+            return
+        }
         if let blocker = installBlocker() {
             feedback.notice = blocker.title + "。尚未开始安装。" + blocker.detail
             return

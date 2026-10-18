@@ -57,6 +57,19 @@ print -r -- "Broadcast completed: result=$TEST_RESULT"
         self.env["TEST_LOST"] = "1"
         self.assertNotEqual(self.run_script().returncode, 0)
 
+    def test_station_shell_replaces_adb_when_present(self):
+        binary = self.root / "build/.phone-station/station"
+        binary.parent.mkdir(parents=True)
+        binary.write_text('#!/bin/zsh\nprint -r -- "$*" >> "$TEST_EVENTS"\nprint -r -- "Broadcast completed: result=$TEST_RESULT"\n')
+        binary.chmod(0o700)
+        result = self.run_script("on")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = self.events.read_text().splitlines()
+        self.assertEqual(events[0], "connect")
+        self.assertTrue(events[1].startswith("shell test-device am broadcast"))
+        self.assertIn(".StayAwakeReceiver", events[1])
+        self.assertNotIn("-s test-device shell", "\n".join(events))
+
     def test_invalid_arguments_do_not_connect(self):
         for args in [("wrong",), ("off", "extra"), ("-h",)]:
             self.run_script(*args)

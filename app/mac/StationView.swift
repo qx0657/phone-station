@@ -21,6 +21,11 @@ struct StationView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(StationPalette.background)
         .environment(\.locale, station.appearance.locale)
+        .environment(\.stationTextFactor, station.appearance.textFactor)
+        .onExitCommand {
+            if station.dialog != nil { station.dialog = nil }
+            else { station.goBack() }
+        }
         .task { station.refresh() }
     }
 
@@ -50,6 +55,8 @@ struct StationView: View {
                 FeaturesPage(station: station)
             case .remoteRelay:
                 RemoteRelayPage(station: station, mcp: station.mcp)
+            case .stationPair:
+                StationPairPage(station: station)
             case .clipboard:
                 ClipboardPage(station: station, clipboard: station.clipboard)
             case .notifications:

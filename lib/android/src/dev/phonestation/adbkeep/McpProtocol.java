@@ -33,6 +33,7 @@ final class McpProtocol {
             try {
                 for (Json item : batch) { authorizeCall(item, host); }
             } catch (FileFailure denied) { return new Reply(403, Json.obj().put("error", denied.getMessage()).emit()); }
+            catch (UnknownTool error) { return rpcError(null, -32001, error.getMessage(), Json.obj().put("code", "unknown_tool")); }
             Json replies = Json.arr();
             for (Json item : batch) {
                 Reply reply = message(item, files, host, version);
@@ -55,7 +56,11 @@ final class McpProtocol {
         Json method = message.get("method"), params = message.get("params");
         if (method != null && method.isString() && method.string().equals("tools/call")
                 && params != null && params.isObject() && params.get("name") != null && params.get("name").isString()) {
-            host.authorize(params.get("name").string());
+            Json arguments = params.get("arguments");
+            String requested = params.get("name").string();
+            if (McpCatalog.retired(requested)) { throw new UnknownTool(); }
+            String mapped = McpCatalog.legacy(requested, arguments == null || !arguments.isObject() ? Json.obj() : arguments);
+            host.authorize(mapped != null ? mapped : requested);
         }
     }
 
@@ -94,20 +99,27 @@ final class McpProtocol {
             if ("initialize".equals(method)) {
                 return rpc(id, initialize(version));
             }
+            if ("server/discover".equals(method)) {
+                return rpc(id, discover(version));
+            }
             if ("tools/list".equals(method)) {
                 Json visible = Json.arr();
-                for (Json tool : tools().array()) {
+                for (Json tool : McpCatalog.tools().array()) {
                     try {
-                        if (host != null) { host.authorize(tool.get("name").string()); }
+                        if (host != null) { host.authorize(McpCatalog.gate(tool.get("name").string())); }
                         visible.add(tool);
                     } catch (FileFailure denied) { /* The phone owns this tool's permission. */ }
                 }
-                return rpc(id, Json.obj().put("tools", visible));
+                return rpc(id, Json.obj()
+                        .put("resultType", "complete")
+                        .put("tools", visible)
+                        .put("ttlMs", 300000)
+                        .put("cacheScope", "private"));
             }
             if ("tools/call".equals(method)) {
                 // 文件事务跨通道串行；主机状态与后台任务查询不占文件锁。
                 String name = params == null || params.get("name") == null ? "" : params.get("name").string();
-                if (name.startsWith("station_file_") || name.equals("station_storage_summary")) {
+                if (McpCatalog.fileTool(name)) {
                     synchronized (FileOps.TRANSACTIONS) { return rpc(id, call(params, files, host)); }
                 }
                 return rpc(id, call(params, files, host));
@@ -124,6 +136,70 @@ final class McpProtocol {
             error.printStackTrace();
             return rpcError(id, -32603, "内部错误");
         }
+    }
+
+    static byte[] linkInitialize(String version) {
+        return initialize(version).emit().getBytes(StandardCharsets.UTF_8);
+    }
+
+    static byte[] linkTools(StationHost host) {
+        Json visible = Json.arr();
+        for (Json tool : tools().array()) {
+            try {
+                if (host != null) { host.authorize(tool.get("name").string()); }
+                visible.add(tool);
+            } catch (FileFailure denied) { /* 手机没放开的工具不出现。 */ }
+        }
+        return Json.obj().put("tools", visible).emit().getBytes(StandardCharsets.UTF_8);
+    }
+
+    static java.util.List<String> toolNames() {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (Json tool : tools().array()) { names.add(tool.get("name").string()); }
+        return names;
+    }
+
+    /** 本地链路已经核对过设备签名，不再要手机临时令牌。 */
+    static byte[] invokeTool(String tool, byte[] arguments, FileOps files, StationHost host) throws Exception {
+        return invokeParsed(tool, arguments, files, host, true);
+    }
+
+    /** 链路方法仍执行原来的处理。HTTP tools/call 才拒绝已经退休的 station_ 名称。 */
+    static byte[] invokeLink(String tool, byte[] arguments, FileOps files, StationHost host) throws Exception {
+        return invokeParsed(tool, arguments, files, host, false);
+    }
+
+    private static byte[] invokeParsed(String tool, byte[] arguments, FileOps files, StationHost host, boolean catalogGate) throws Exception {
+        if (host != null) { host.noteAuthenticated(); }
+        Json args;
+        if (arguments == null || arguments.length == 0) {
+            args = Json.obj();
+        } else {
+            args = Json.parse(new String(arguments, StandardCharsets.UTF_8));
+            if (!args.isObject()) { throw new IllegalArgumentException("params"); }
+        }
+        if (!catalogGate) {
+            if (host != null) { host.authorize(tool); }
+            Json result = runDispatch(tool, args, files, host);
+            return toolOk(result).emit().getBytes(StandardCharsets.UTF_8);
+        }
+        Json params = Json.obj().put("name", tool).put("arguments", args);
+        Json result = runCall(tool, params, files, host);
+        return result.emit().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static Json runCall(String tool, Json params, FileOps files, StationHost host) {
+        if (McpCatalog.fileTool(tool)) {
+            synchronized (FileOps.TRANSACTIONS) { return call(params, files, host); }
+        }
+        return call(params, files, host);
+    }
+
+    private static Json runDispatch(String tool, Json args, FileOps files, StationHost host) {
+        if (McpCatalog.fileTool(tool)) {
+            synchronized (FileOps.TRANSACTIONS) { return dispatch(tool, args, files, host); }
+        }
+        return dispatch(tool, args, files, host);
     }
 
     static boolean authorized(String header, String token) {
@@ -149,24 +225,61 @@ final class McpProtocol {
                 .put("serverInfo", Json.obj().put("name", "手机工位").put("version", version));
     }
 
+    private static Json discover(String version) {
+        return Json.obj()
+                .put("resultType", "complete")
+                .put("supportedVersions", Json.arr().add(Json.str("2025-03-26")).add(Json.str("2026-07-28")))
+                .put("capabilities", Json.obj().put("tools", Json.obj()))
+                .put("_meta", Json.obj().put("io.modelcontextprotocol/serverInfo",
+                        Json.obj().put("name", "手机工位").put("version", version)))
+                .put("ttlMs", 3600000)
+                .put("cacheScope", "public");
+    }
+
     private static Json call(Json params, FileOps files, StationHost host) {
         if (params == null || params.get("name") == null) {
             throw new IllegalArgumentException("需要工具名");
         }
-        String name = params.get("name").string();
+        String requested = params.get("name").string();
         Json args = params.get("arguments");
         if (args == null || args.isNull()) {
             args = Json.obj();
         }
+        if (McpCatalog.retired(requested)) { throw new UnknownTool(); }
+        String mapped = McpCatalog.legacy(requested, args);
+        String name = mapped != null ? mapped : requested;
         if (!FeaturePolicy.known(name)) { throw new UnknownTool(); }
         try {
             if (host != null) { host.authorize(name); }
+            if ("device_status".equals(requested)) { return toolOk(deviceStatus(args, files, host)); }
+            if ("device_list".equals(requested)) { return toolOk(deviceList(args, files, host)); }
             return toolOk(dispatch(name, args, files, host));
         } catch (FileFailure error) {
             return toolError(error.getMessage());
         } catch (IllegalArgumentException error) {
             return toolError(error.getMessage());
         }
+    }
+
+    private static Json deviceStatus(Json args, FileOps files, StationHost host) {
+        Json device = dispatch("station_device_status", args, files, host);
+        Json controls = dispatch("station_controls_status", args, files, host);
+        if (device != null && device.isObject() && controls != null && controls.isObject()) {
+            for (String key : controls.keys()) {
+                if (!device.has(key)) { device.put(key, controls.get(key)); }
+            }
+        }
+        return device;
+    }
+
+    private static Json deviceList(Json args, FileOps files, StationHost host) {
+        Json controls = dispatch("station_controls_status", args, files, host);
+        Json one = Json.obj().put("online", true);
+        if (controls != null && controls.isObject()) {
+            if (controls.has("model")) { one.put("model", controls.get("model")); }
+            if (controls.has("verified")) { one.put("verified", controls.get("verified")); }
+        }
+        return Json.obj().put("devices", Json.arr().add(one));
     }
 
     private static Json dispatch(String name, Json args, FileOps files, StationHost host) {
@@ -687,11 +800,11 @@ final class McpProtocol {
                 .put("maximum", max);
     }
 
-    private static Json toolOk(Json payload) {
+    static Json toolOk(Json payload) {
         return Json.obj().put("content", Json.arr().add(textContent(payload.emit())));
     }
 
-    private static Json toolError(String message) {
+    static Json toolError(String message) {
         return Json.obj()
                 .put("content", Json.arr().add(textContent(Json.obj().put("error", message).emit())))
                 .put("isError", true);

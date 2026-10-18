@@ -7,6 +7,13 @@ import (
 	"fmt"
 )
 
+// LocalSafetyCode is the no-relay code. The phone is the inviter, the invitation
+// id is 16 zero bytes, and the relay slot is the phone SPKI again.
+func LocalSafetyCode(phoneSPKI, macSPKI []byte) (string, error) {
+	var id [16]byte
+	return SafetyCode(phoneSPKI, macSPKI, id[:], phoneSPKI)
+}
+
 func SafetyCode(inviterSPKI, deviceSPKI, invitationID, relaySPKI []byte) (string, error) {
 	if len(inviterSPKI) == 0 || len(deviceSPKI) == 0 || len(invitationID) != 16 || len(relaySPKI) == 0 {
 		return "", errors.New("length")

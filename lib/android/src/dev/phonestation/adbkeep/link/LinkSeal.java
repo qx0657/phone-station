@@ -12,7 +12,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/** 端到端密钥与 AES-GCM。不接入现有通道。 */
+/** 端到端密钥与 AES-GCM。远程会话加密时使用；本地链路不调用。 */
 public final class LinkSeal {
     private LinkSeal() {}
 

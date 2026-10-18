@@ -20,14 +20,20 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** 只听 127.0.0.1。一次连接处理一个 POST /mcp。 */
+/** 只听 127.0.0.1。工具走 /v2/link，不再提供 /mcp。不换成 Java-WebSocket 服务端。 */
 final class McpHttp {
+    /** null 表示不是链路升级。true 表示套接字已经交给会话。false 表示拒绝已经写完，调用方关掉套接字。 */
+    interface Upgrade {
+        Boolean take(Socket socket, InputStream input, String method, String target, String version,
+                java.util.Map<String, String> headers) throws IOException;
+    }
     static final int HEADER_LIMIT = 65536;
     static final int LINE_LIMIT = 8192;
     static final int READ_TIMEOUT_MS = 20000;
     static final int BODY_LIMIT = 8 * 1024 * 1024;
 
     private final ServerSocket socket;
+    private final Upgrade upgrade;
     private final Thread thread;
     private final Set<Socket> clients = new HashSet<>();
     private final ThreadPoolExecutor requests = new ThreadPoolExecutor(
@@ -43,8 +49,9 @@ final class McpHttp {
             final String token,
             final FileOps files,
             final StationHost host,
-            final String version, final int timeoutMs) {
+            final String version, final int timeoutMs, Upgrade upgrade) {
         this.socket = socket;
+        this.upgrade = upgrade;
         thread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -57,15 +64,25 @@ final class McpHttp {
 
     static McpHttp open(int port, String token, FileOps files, StationHost host, String version)
             throws IOException {
-        return open(port, token, files, host, version, READ_TIMEOUT_MS);
+        return open(port, token, files, host, version, READ_TIMEOUT_MS, null);
     }
 
     static McpHttp open(int port, String token, FileOps files, StationHost host, String version, int timeoutMs)
             throws IOException {
+        return open(port, token, files, host, version, timeoutMs, null);
+    }
+
+    static McpHttp open(int port, String token, FileOps files, StationHost host, String version, Upgrade upgrade)
+            throws IOException {
+        return open(port, token, files, host, version, READ_TIMEOUT_MS, upgrade);
+    }
+
+    static McpHttp open(int port, String token, FileOps files, StationHost host, String version, int timeoutMs,
+            Upgrade upgrade) throws IOException {
         ServerSocket server = new ServerSocket();
         server.setReuseAddress(true);
         server.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 8);
-        return new McpHttp(server, token, files, host, version, timeoutMs);
+        return new McpHttp(server, token, files, host, version, timeoutMs, upgrade);
     }
 
     int port() {
@@ -112,9 +129,10 @@ final class McpHttp {
             }
             try {
                 requests.execute(() -> {
+                    boolean handed = false;
                     try {
                         try {
-                            serve(client, token, files, host, version, deadline);
+                            handed = serve(client, token, files, host, version, deadline, upgrade);
                         } catch (HttpFailure invalid) {
                             write(client.getOutputStream(), invalid.status, "{\"error\":\"请求头无效或过大\"}");
                         } catch (SocketTimeoutException slow) {
@@ -123,7 +141,9 @@ final class McpHttp {
                     } catch (IOException ignored) {
                         // 对端提前断开时这一次请求作废。
                     } finally {
-                        release(client);
+                        if (!handed) {
+                            release(client);
+                        }
                     }
                 });
             } catch (RejectedExecutionException busy) {
@@ -141,31 +161,33 @@ final class McpHttp {
         } catch (IOException ignored) {}
     }
 
-    private static void serve(
-            Socket client, String token, FileOps files, StationHost host, String version, long deadline)
+    private static boolean serve(
+            Socket client, String token, FileOps files, StationHost host, String version, long deadline, Upgrade upgrade)
             throws IOException {
-        InputStream input = new BufferedInputStream(new DeadlineInput(client, deadline), 4096);
-        String requestLine = readLine(input, LINE_LIMIT);
+        DeadlineInput raw = new DeadlineInput(client, deadline);
+        String requestLine = readLine(raw, LINE_LIMIT);
         if (requestLine == null || requestLine.isEmpty()) {
-            return;
+            return false;
         }
         String[] parts = requestLine.split(" ", 3);
         String method = parts.length > 0 ? parts[0] : "";
         String target = parts.length > 1 ? parts[1] : "";
         if (parts.length != 3 || (!"HTTP/1.1".equals(parts[2]) && !"HTTP/1.0".equals(parts[2]))) { throw new HttpFailure(400); }
+        String httpVersion = parts[2];
+        boolean link = upgrade != null && "GET".equals(method) && ("/v2/link".equals(target) || target.startsWith("/v2/link?"));
+        InputStream input = link ? raw : new BufferedInputStream(raw, 4096);
         int query = target.indexOf('?');
-        if (query >= 0) {
-            target = target.substring(0, query);
-        }
+        String path = query >= 0 ? target.substring(0, query) : target;
         String hostHeader = null;
         String origin = null;
         String authorization = null;
         int contentLength = -1;
+        java.util.Map<String, String> websocket = new java.util.HashMap<>();
         int headerBytes = requestLine.length() + 2;
         while (true) {
             String line = readLine(input, Math.min(LINE_LIMIT, HEADER_LIMIT - headerBytes));
             if (line == null) {
-                return;
+                return false;
             }
             headerBytes += line.length() + 2;
             if (headerBytes > HEADER_LIMIT) { throw new HttpFailure(431); }
@@ -193,32 +215,41 @@ final class McpHttp {
                 catch (NumberFormatException error) { throw new HttpFailure(413); }
             } else if ("transfer-encoding".equals(name)) {
                 throw new HttpFailure(400);
+            } else if ("upgrade".equals(name) || "connection".equals(name) || "sec-websocket-key".equals(name)
+                    || "sec-websocket-version".equals(name)) {
+                if (websocket.containsKey(name)) { throw new HttpFailure(400); }
+                websocket.put(name, value);
             }
         }
+        if (link) {
+            raw.release();
+            java.util.Map<String, String> headers = new java.util.HashMap<>(websocket);
+            if (hostHeader != null) { headers.put("host", hostHeader); }
+            if (origin != null) { headers.put("origin", origin); }
+            Boolean taken = upgrade.take(client, input, method, target, httpVersion, headers);
+            if (taken != null) {
+                return taken;
+            }
+        }
+        target = path;
         OutputStream output = client.getOutputStream();
         if (!LoopbackBoundary.allowed(hostHeader, origin)) {
-            write(output, 403, "{\"error\":\"Host 或 Origin 不允许\"}"); return;
+            write(output, 403, "{\"error\":\"Host 或 Origin 不允许\"}"); return false;
         }
-        if (!"/mcp".equals(target)) { write(output, 404, "{\"error\":\"没有这个入口\"}"); return; }
-        if (!McpProtocol.authorized(authorization, token)) {
-            write(output, 401, "{\"error\":\"需要 Authorization: Bearer\"}");
-            return;
+        if ("/v2/pair".equals(target)) {
+            if (!"POST".equals(method)) { write(output, 405, "{\"error\":\"pair\"}"); return false; }
+            if (contentLength < 1) { write(output, 400, "{\"error\":\"pair\"}"); return false; }
+            if (contentLength > 2048) { write(output, 413, "{\"error\":\"pair\"}"); return false; }
+            byte[] pairBody = readExact(input, contentLength);
+            try {
+                write(output, 200, LinkPairing.offer(pairBody));
+            } catch (IllegalArgumentException | IllegalStateException error) {
+                write(output, error instanceof IllegalStateException ? 404 : 400, "{\"error\":\"pair\"}");
+            }
+            return false;
         }
-        if (!"POST".equals(method)) { write(output, 405, "{\"error\":\"只接受 POST /mcp\"}"); return; }
-        if (contentLength < 0) {
-            write(output, 400, "{\"error\":\"需要 Content-Length\"}");
-            return;
-        }
-        if (contentLength > BODY_LIMIT) {
-            write(output, 413, "{\"error\":\"请求太大\"}");
-            return;
-        }
-        byte[] body = readExact(input, contentLength);
-        String text;
-        try { text = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(body)).toString(); }
-        catch (java.nio.charset.CharacterCodingException invalid) { write(output, 400, "{\"error\":\"请求必须使用 UTF-8\"}"); return; }
-        McpProtocol.Reply reply = McpProtocol.handle(text, authorization, token, files, host, version);
-        write(output, reply.status, reply.body);
+        write(output, 404, "{\"error\":\"没有这个入口\"}");
+        return false;
     }
 
     private static final class HttpFailure extends IOException {
@@ -230,12 +261,18 @@ final class McpHttp {
     private static final class DeadlineInput extends FilterInputStream {
         final Socket client;
         final long deadline;
+        private boolean released;
         DeadlineInput(Socket client, long deadline) throws IOException {
             super(client.getInputStream());
             this.client = client;
             this.deadline = deadline;
         }
+        void release() throws IOException {
+            released = true;
+            client.setSoTimeout(0);
+        }
         private void remaining() throws IOException {
+            if (released) { return; }
             long nanos = deadline - System.nanoTime();
             if (nanos <= 0) { throw new SocketTimeoutException(); }
             client.setSoTimeout((int) Math.max(1, TimeUnit.NANOSECONDS.toMillis(nanos)));

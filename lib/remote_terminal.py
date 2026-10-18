@@ -91,13 +91,16 @@ def initialize(client: Client):
     client.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
                               "clientInfo": {"name": "phone-remote-terminal", "version": "1"}})
     names = {item["name"] for item in client.rpc("tools/list", {}).get("tools", [])}
-    model = client.tool("station_controls_status")
-    if model.get("model", "").replace("_", "-") != "PGT-AN20" or model.get("verified") is not True:
+    if "device_status" in names:
+        model = client.tool("device_status")
+    else:
+        model = client.tool("station_controls_status")
+    if model.get("verified") is not True:
         raise DeviceMismatch("当前手机型号尚未验证，停止终端操作。")
     check_permissions(model, ["shell"])
-    if not TOOLS <= names:
+    if "shell_run" not in names and not TOOLS <= names:
         raise RemoteError("请先更新手机工位到 61 或更新版本，以支持远程交互终端。")
-    state = client.tool("station_shell_status")
+    state = client.tool("shell_run", {"action": "status"}) if "shell_run" in names else client.tool("station_shell_status")
     if not state.get("available"):
         raise RemoteError(state.get("reason") or "Shizuku 尚不可用。")
 

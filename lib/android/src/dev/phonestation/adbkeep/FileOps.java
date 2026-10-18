@@ -406,6 +406,46 @@ final class FileOps {
         return scanned(described(path), filesForScan(path));
     }
 
+    /** 拖放整份重传，不要求 targetVersion。上限是链路初始窗口。 */
+    void shareDrop(String name, byte[] body) {
+        if (body == null || body.length > 128 * 1024) {
+            throw new FileFailure("share");
+        }
+        SharePaths.phoneDownload(name);
+        Path path = resolve("Download/" + name);
+        synchronized (TRANSACTIONS) {
+            if (exists(path) && !attributes(path).isRegularFile()) {
+                throw new FileFailure("这不是普通文件");
+            }
+            Path parent = path.getParent();
+            if (parent != null && !exists(parent)) {
+                try {
+                    Files.createDirectories(parent);
+                } catch (IOException error) {
+                    throw new FileFailure("share");
+                }
+            }
+            ensureParent(path);
+            Path temp = tempBeside(path);
+            try {
+                Files.write(temp, body);
+                try {
+                    Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException error) {
+                throw new FileFailure("share");
+            } finally {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // 临时文件留在旁边，下次写入会换一个名字。
+                }
+            }
+        }
+    }
+
     Json patchBytes(String input, List<Json> patches, String version) {
         if (patches == null || patches.isEmpty() || patches.size() > 200) {
             throw new FileFailure("补丁要有 1 到 200 处");

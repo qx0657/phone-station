@@ -6,20 +6,34 @@ import android.os.SystemClock;
 final class HostPresence {
     private static final Object LOCK = new Object();
     private static long seenElapsed = -1L;
+    private static String transport = "";
 
     private HostPresence() {}
 
     static void noteLocal() {
+        noteLocal("");
+    }
+
+    static void noteLocal(String kind) {
         long now = SystemClock.elapsedRealtime();
         boolean rising;
         synchronized (LOCK) {
             rising = !HostLink.freshElapsed(seenElapsed, now);
             seenElapsed = now;
+            if ("wireless".equals(kind) || "usb".equals(kind)) {
+                transport = kind;
+            }
         }
         if (rising) {
             StationNotifications.connectionChanged();
         } else {
             StationNotifications.touchFreshness();
+        }
+    }
+
+    static String transport() {
+        synchronized (LOCK) {
+            return transport;
         }
     }
 

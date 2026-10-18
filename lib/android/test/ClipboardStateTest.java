@@ -154,6 +154,27 @@ final class ClipboardStateTest {
         state.clear();
         state.exchange(access, imageArgs("13", version), true, true, 12_100);
         expect(access.images == 3, "service restart never replays an image");
+
+        ClipboardState peers = new ClipboardState();
+        Access peersAccess = new Access();
+        peersAccess.clip = new ClipboardState.Clip("text", "phone-start");
+        Json origin = peers.exchange(peersAccess, args("1", "from-a", null), true, 100);
+        String phoneVersion = origin.get("phoneVersion").string();
+        Json pushed = peers.exchange(peersAccess, args("2", "from-a", phoneVersion), true, 200);
+        expect(pushed.get("appliedMac").boolValue() && peersAccess.writes == 1, "first Mac can still update");
+        phoneVersion = pushed.get("phoneVersion").string();
+        Json echo = peers.exchange(peersAccess, peer("b", "1", "from-a", phoneVersion), true, 300);
+        expect(!echo.get("appliedMac").boolValue() && peersAccess.writes == 1, "another Mac echoing the same text does not write");
+        Json baseline = peers.exchange(peersAccess, peer("b", "2", "from-b", phoneVersion), true, 400);
+        expect(baseline.get("appliedMac").boolValue() && "from-b".equals(baseline.get("phone").get("text").string()),
+                "another Mac can send its own later copy");
+        phoneVersion = baseline.get("phoneVersion").string();
+        Json back = peers.exchange(peersAccess, args("3", "from-b", phoneVersion), true, 500);
+        expect(!back.get("appliedMac").boolValue() && peersAccess.writes == 2, "the first Mac does not write the copy it just received");
+    }
+    private static Json peer(String client, String version, String text, String phone) {
+        return Json.obj().put("clientId", client).put("macVersion", version).put("macKind", "text")
+                .put("macText", text).put("phoneVersion", phone);
     }
     private static void expect(boolean condition, String message) { if (!condition) { throw new AssertionError(message); } }
 }

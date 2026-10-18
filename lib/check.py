@@ -12,10 +12,12 @@ import tempfile
 
 from doc_links import check as check_doc_links
 from android.websocket_deps import jars as websocket_jars
+from android.zxing_deps import jars as zxing_jars
 
 ROOT = Path(__file__).resolve().parent.parent
 MAC_TESTS = {
     "StationLocalization": ["StationLocalization"],
+    "StationInvite": ["StationInvite"],
     "RemoteEventSession": ["RemoteEventSession"],
     "RemoteScreenSession": ["ClipboardProtocol", "ScreenVideoProtocol", "RemoteScreenSession"],
     "ScreenVideoProtocol": ["ScreenVideoProtocol"],
@@ -35,7 +37,10 @@ MAC_TESTS = {
     "PairingPrompt": ["PairingPrompt"],
     "UsageCounters": ["UsageCounters", "ClipboardProtocol"],
     "LocalEventSession": ["ClipboardProtocol", "LocalEventSession"],
-    "DeviceKey": ["DeviceKey"],
+    "DeviceKey": ["DeviceKey", "LocalLinkMac"],
+    "PhoneRoster": ["PhoneRoster"],
+    "FileShare": ["FileShare"],
+    "ScreenRoute": ["ScreenRoute"],
 }
 
 
@@ -161,6 +166,7 @@ def main():
         run(["go", "-C", ROOT / "server/relay", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "lib/android/terminal", "test", "-race", "./..."])
         run(["go", "-C", ROOT / "lib/android/screen", "test", "-race", "./..."])
+        run(["go", "-C", ROOT / "lib/stationd", "test", "-race", "./..."])
         terminal_env = {**os.environ, "GOOS": "android", "GOARCH": "arm64", "CGO_ENABLED": "0"}
         run(["go", "-C", ROOT / "lib/android/terminal", "build", "-trimpath", "-o", work / "terminal-arm64", "."], env=terminal_env)
         run(["go", "-C", ROOT / "lib/android/screen", "build", "-trimpath", "-o", work / "screen-arm64", "."], env=terminal_env)
@@ -172,7 +178,7 @@ def main():
         for test in tests:
             print(f"运行 {test.relative_to(ROOT)}", flush=True)
             run([sys.executable, test])
-        java_cp = os.pathsep.join(str(p) for p in websocket_jars())
+        java_cp = os.pathsep.join(str(p) for p in [*websocket_jars(), *zxing_jars()])
         java_tests = sorted((ROOT / "lib/android/test").glob("*Test.java"))
         run(["javac", "--release", "17", "-classpath", java_cp, "-sourcepath", ROOT / "lib/android/src", "-d", work / "java", *java_tests])
         for test in java_tests:

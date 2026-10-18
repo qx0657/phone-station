@@ -56,6 +56,30 @@ final class HostLink {
         return linked ? "已连接" : "未连接";
     }
 
+    /**
+     * 本地通道名称。没连上时不把空传输写成「无线」，避免电脑的 adb 无线会话
+     * 被手机显示成「无线未连接」。连上之后，无线调试开着才标成无线，否则是 USB。
+     */
+    static String localTransport(boolean linked, String reported, boolean adbWifi) {
+        if (!linked) {
+            return "";
+        }
+        if ("wireless".equals(reported) || "usb".equals(reported)) {
+            return reported;
+        }
+        return adbWifi ? "wireless" : "usb";
+    }
+
+    static String localName(String transport) {
+        if ("usb".equals(transport)) {
+            return "USB";
+        }
+        if ("wireless".equals(transport)) {
+            return "无线";
+        }
+        return "本地";
+    }
+
     static String connectionType(long markedAtMs, long nowMs, String adbTransport, boolean remoteConnected) {
         String local = "";
         if (linked(markedAtMs, nowMs)) {

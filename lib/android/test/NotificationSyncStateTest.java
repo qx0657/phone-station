@@ -72,6 +72,17 @@ final class NotificationSyncStateTest {
         state.configure(true, Set.of("chat"));
         state.access(true);
         state.listener(true);
+        cursor = state.poll("mac", null, 19_000).get("cursor").string();
+        post(state, "chat", "shared", "for-both", 19_100);
+        Json other = state.poll("other", null, 19_110);
+        expect(other.get("events").array().isEmpty() && other.get("baseline").boolValue(), "second Mac starts without history");
+        Json first = state.poll("mac", cursor, 19_120);
+        expect(first.get("events").array().size() == 1, "second Mac does not drop the first Mac's notification");
+        Json followed = state.poll("other", other.get("cursor").string(), 19_130);
+        expect(followed.get("events").array().isEmpty(), "second Mac does not receive a notification posted before it connected");
+        post(state, "chat", "after", "both", 19_140);
+        expect(state.poll("mac", first.get("cursor").string(), 19_150).get("events").array().size() == 1, "first Mac receives the later notification");
+        expect(state.poll("other", followed.get("cursor").string(), 19_160).get("events").array().size() == 1, "second Mac receives only the later notification");
         state.poll("mac", null, 20_000);
         expect(state.untilOffline(20_000) == 15_000L, "mac stays online for the poll window");
         expect(state.untilOffline(35_000) == -1L, "poll window ends without another contact");
