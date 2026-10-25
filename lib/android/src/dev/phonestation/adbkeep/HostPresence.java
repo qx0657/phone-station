@@ -2,7 +2,7 @@ package dev.phonestation.adbkeep;
 
 import android.os.SystemClock;
 
-/** 已认证的本地 MCP 请求记在内存里，当作电脑还连着。不写系统设置。 */
+/** 本地链路上已认证的请求记在内存里，当作电脑还连着。远程调用不记。不写系统设置。 */
 final class HostPresence {
     private static final Object LOCK = new Object();
     private static long seenElapsed = -1L;

@@ -83,7 +83,7 @@ final class LinkPort implements McpHttp.Upgrade {
         try {
             List<LocalLink.Device> granted = allow.get();
             LocalLink.Session session = LocalLink.acceptHttp(socket, input, headers, self,
-                    granted == null ? List.of() : granted, receipts, this::call, files::shareDrop, this::relayInvite);
+                    granted == null ? List.of() : granted, receipts, this::localCall, files::shareDrop, this::relayInvite);
             synchronized (sessions) {
                 sessions.add(session);
             }
@@ -194,7 +194,7 @@ final class LinkPort implements McpHttp.Upgrade {
         if (remote != null) {
             return remote;
         }
-        remote = LinkRemote.open(self, endpoint, pin, allow, receipts, this::call, sealDir, remoteWatch);
+        remote = LinkRemote.open(self, endpoint, pin, allow, receipts, this::remoteCall, sealDir, remoteWatch);
         return remote;
     }
 
@@ -204,7 +204,7 @@ final class LinkPort implements McpHttp.Upgrade {
         if (running != null) {
             running.close();
         }
-        remote = LinkRemote.open(self, endpoint, pin, allow, receipts, this::call, sealDir, remoteWatch);
+        remote = LinkRemote.open(self, endpoint, pin, allow, receipts, this::remoteCall, sealDir, remoteWatch);
     }
 
     private void relayInvite(String text) {
@@ -269,10 +269,20 @@ final class LinkPort implements McpHttp.Upgrade {
         return out;
     }
 
-    private byte[] call(String method, byte[] params) {
+    /** 本地回环会话。每次调用都刷新电脑心跳。 */
+    byte[] localCall(String method, byte[] params) {
         if (host != null) {
             host.noteAuthenticated();
         }
+        return dispatch(method, params);
+    }
+
+    /** 中继上的主会话。远程调用不刷新本地心跳。 */
+    byte[] remoteCall(String method, byte[] params) {
+        return dispatch(method, params);
+    }
+
+    private byte[] dispatch(String method, byte[] params) {
         if (method != null && (method.startsWith("terminal.") || method.startsWith("shell.")
                 || method.startsWith("screen.") || method.startsWith("install."))) {
             try {

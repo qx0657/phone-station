@@ -3,7 +3,7 @@ package dev.phonestation.adbkeep;
 /**
  * 电脑有没有连上。没有 Android 依赖，构建时在电脑上跑测试。
  *
- * <p>正在使用的本地心跳是 {@link #freshElapsed}：已认证的本地 MCP 请求记下开机后时间，
+ * <p>正在使用的本地心跳是 {@link #freshElapsed}：本地链路上已认证的请求记下开机后时间，
  * {@link #FRESH_MS} 内算在线。{@link #SETTING} 上的墙钟比较留在这里，供原来的边界测试；
  * 手机不再读取这两个系统设置。
  */

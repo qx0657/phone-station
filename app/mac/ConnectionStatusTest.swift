@@ -109,7 +109,7 @@ struct ConnectionStatusTest {
             precondition(!unavailable.listening && !unavailable.remoteConnected)
         }
 
-        let link = LinkSession(feedback: StationFeedback())
+        let link = LinkSession(feedback: StationFeedback(), rememberedWirelessPeer: { false })
         var iconStates: [Bool] = []
         link.onMenuIcon = { iconStates.append($0) }
         precondition(!link.isConnected && link.isChecking)
@@ -136,7 +136,9 @@ struct ConnectionStatusTest {
         adb.noteRemoteChecking(true)
         precondition(adb.statusLabel == "已连接", "一条通道待确认不覆盖另一条已确认连接")
         let sequence = ProbeSequence()
-        let racing = LinkSession(feedback: StationFeedback(), reader: { sequence.read($0) })
+        let racing = LinkSession(feedback: StationFeedback(), reader: { sequence.read($0) },
+                                 connectCommand: { CommandResult(code: 1, output: "offline", timedOut: false) },
+                                 rememberedWirelessPeer: { false })
         var enabledSerials: [String] = []
         racing.onSerial = { if let serial = $0 { enabledSerials.append(serial) } }
         let probe = Task { await racing.probe(readingControls: false) }
@@ -147,10 +149,37 @@ struct ConnectionStatusTest {
         await Task.yield()
         sequence.release.signal()
         await probe.value
+        racing.stopWatch()
         precondition(racing.serial == nil && enabledSerials.isEmpty, "断线事件后的旧探测不能重新启用操作")
+        await reconnectWithoutDeviceChangesTest()
         await livenessTest()
         await remoteControlsTest()
         print("ConnectionStatusTest ok")
+    }
+
+    @MainActor static func reconnectWithoutDeviceChangesTest() async {
+        final class Attempts: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func connect() -> CommandResult {
+                lock.lock(); value += 1; lock.unlock()
+                return CommandResult(code: 1, output: "failed to connect: No route to host", timedOut: false)
+            }
+            var count: Int {
+                lock.lock(); defer { lock.unlock() }; return value
+            }
+        }
+        let attempts = Attempts()
+        let link = LinkSession(feedback: StationFeedback(), reader: { _ in
+            LinkReading(name: "offline", detail: "", link: .offline, reconnectable: true)
+        }, connectCommand: { attempts.connect() }, rememberedWirelessPeer: { true })
+        await link.probe(readingControls: false)
+        for _ in 0..<300 where attempts.count < 2 {
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        precondition(attempts.count == 2, "unchanged empty device list still retries after backoff")
+        precondition(!link.needsWirelessPairing, "network failure does not demand pairing")
+        link.stopWatch()
     }
 
     @MainActor static func livenessTest() async {

@@ -125,6 +125,12 @@ if [[ ${1:-} == snapshot && $# == 1 ]]; then
 fi
 
 if [[ ${1:-} == watch && $# == 1 ]]; then
+  # App-owned watch restores the computer gateway after login or a crash.
+  # This does not connect adb or change the phone's service switches.
+  # Standalone watch remains read-only.
+  if [[ ${PHONE_STATION_WATCH_STDIN:-} == 1 ]]; then
+    "$GATEWAY_BIN" start >/dev/null
+  fi
   exec "$GATEWAY_BIN" watch-status
 fi
 

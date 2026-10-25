@@ -27,8 +27,18 @@ enum WirelessConnectFailure {
         }
     }
 
-    /// 这次打开后已经连上过手机时，同样的失败只说明这条端口暂时连不上，自动重连继续。
+    /// 这次打开后已经连上过，或本机留有无线配对记录时，同样的失败只说明这条端口暂时连不上。
     static func pausesAutomaticReconnect(_ output: String, alreadyPaired: Bool) -> Bool {
         !alreadyPaired && needsQrPairing(output)
+    }
+
+    static func rememberedWirelessPeerPath(home: String = NSHomeDirectory()) -> String {
+        (home as NSString).appendingPathComponent(".android/adb_known_hosts.pb")
+    }
+
+    /// 只看配对记录在不在，不读取里面的设备。
+    static func hasRememberedWirelessPeer(at path: String = rememberedWirelessPeerPath(), fileManager: FileManager = .default) -> Bool {
+        guard let size = (try? fileManager.attributesOfItem(atPath: path))?[.size] as? NSNumber else { return false }
+        return size.int64Value > 0
     }
 }

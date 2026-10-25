@@ -46,6 +46,14 @@ struct ReconnectDecision {
         return true
     }
 
+    /// 还在退避时，距离下一次允许再找的秒数。没有等待返回 nil。
+    func pendingDelay(now: Date) -> TimeInterval? {
+        guard !holdOffline, !isInFlight else { return nil }
+        let wait = nextAttempt.timeIntervalSince(now)
+        guard wait > 0 else { return nil }
+        return wait
+    }
+
     /// 清掉暂停。已经在连接时返回 false，调用方沿用那一次。
     mutating func beginManual() -> Bool {
         holdOffline = false

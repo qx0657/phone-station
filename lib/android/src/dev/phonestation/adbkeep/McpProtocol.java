@@ -12,7 +12,6 @@ final class McpProtocol {
         if (!authorized(authorization, token)) {
             return new Reply(401, Json.obj().put("error", "需要 Authorization: Bearer").emit());
         }
-        if (host != null) { host.noteAuthenticated(); }
         Json message;
         try {
             message = Json.parse(body);
@@ -170,7 +169,6 @@ final class McpProtocol {
     }
 
     private static byte[] invokeParsed(String tool, byte[] arguments, FileOps files, StationHost host, boolean catalogGate) throws Exception {
-        if (host != null) { host.noteAuthenticated(); }
         Json args;
         if (arguments == null || arguments.length == 0) {
             args = Json.obj();

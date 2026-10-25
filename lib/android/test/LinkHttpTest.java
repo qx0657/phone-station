@@ -167,6 +167,27 @@ final class LinkHttpTest {
                 if (tools < 18) {
                     throw new AssertionError("tools " + tools);
                 }
+                int marked = presence.get();
+                byte[] ping = "{}".getBytes(StandardCharsets.UTF_8);
+                port.localCall("meta.ping", ping);
+                if (presence.get() != marked + 1) {
+                    throw new AssertionError("local ping " + presence.get());
+                }
+                marked = presence.get();
+                port.remoteCall("meta.ping", ping);
+                byte[] remoteStat = port.remoteCall("file.stat",
+                        "{\"path\":\"Download/note.txt\"}".getBytes(StandardCharsets.UTF_8));
+                McpProtocol.Reply relay = McpProtocol.handle(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", "Bearer token", "token",
+                        new FileOps(home.resolve("files")), host, "test");
+                if (presence.get() != marked || remoteStat == null || remoteStat.length == 0 || relay.status != 200) {
+                    throw new AssertionError("remote presence " + presence.get() + " " + relay.status);
+                }
+                marked = presence.get();
+                port.localCall("file.stat", "{\"path\":\"Download/note.txt\"}".getBytes(StandardCharsets.UTF_8));
+                if (presence.get() != marked + 1) {
+                    throw new AssertionError("local stat " + presence.get());
+                }
             }
             try {
                 LocalLink.dial(other, phone, "127.0.0.1", http.port());

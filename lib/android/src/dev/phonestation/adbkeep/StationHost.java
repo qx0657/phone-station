@@ -4,7 +4,7 @@ package dev.phonestation.adbkeep;
 interface StationHost {
     default void authorize(String tool) {}
 
-    /** 这次请求已经带对了本地令牌。默认什么也不做，手机上用来记心跳。 */
+    /** 本地链路已经确认这次调用来自已配对的电脑。远程会话不要调用。 */
     default void noteAuthenticated() {}
 
     Json status();

@@ -23,6 +23,14 @@ enum PairingPromptTest {
         precondition(!WirelessConnectFailure.pausesAutomaticReconnect(unpaired, alreadyPaired: true))
         precondition(!WirelessConnectFailure.pausesAutomaticReconnect(
             "failed to connect to '192.168.0.101:37547': No route to host\n没连上。", alreadyPaired: false))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("pairing-peer-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let peer = home.appendingPathComponent("adb_known_hosts.pb")
+        precondition(!WirelessConnectFailure.hasRememberedWirelessPeer(at: peer.path))
+        try! Data([1]).write(to: peer)
+        precondition(WirelessConnectFailure.hasRememberedWirelessPeer(at: peer.path))
+        try! Data().write(to: peer)
+        precondition(!WirelessConnectFailure.hasRememberedWirelessPeer(at: peer.path))
         print("pairing prompt ok")
     }
 }

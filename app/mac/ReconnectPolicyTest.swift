@@ -10,6 +10,7 @@ enum ReconnectPolicyTest {
         checkInFlight()
         checkIdleDoesNotSkipTheWait()
         checkCancelledFinishDoesNotBackoff()
+        checkPendingDelay()
         print("reconnect policy ok")
     }
 
@@ -86,5 +87,18 @@ enum ReconnectPolicyTest {
         precondition(!decision.consider(.reconnectable, now: now))
         decision.release()
         precondition(decision.consider(.reconnectable, now: now))
+    }
+
+    private static func checkPendingDelay() {
+        var decision = ReconnectDecision()
+        let now = Date(timeIntervalSince1970: 0)
+        precondition(decision.pendingDelay(now: now) == nil)
+        precondition(decision.consider(.reconnectable, now: now))
+        precondition(decision.pendingDelay(now: now) == nil)
+        decision.finish(success: false, cancelled: false, now: now)
+        let wait = decision.pendingDelay(now: now)
+        precondition(wait != nil && abs(wait! - 5) < 0.001)
+        decision.hold()
+        precondition(decision.pendingDelay(now: now) == nil)
     }
 }

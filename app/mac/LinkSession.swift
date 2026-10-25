@@ -63,6 +63,7 @@ final class LinkSession: ObservableObject {
     private var connectIsManual = false
     /// 断开进行中时又点了连接，晚到的断开结果不要把暂停写回去。
     private var connectGeneration = 0
+    private var reconnectTask: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.qx0657.phonestation", category: "link")
     private var statusRevision = 0
     private var controlEpoch = 0
@@ -81,17 +82,20 @@ final class LinkSession: ObservableObject {
     private let shellAlive: @Sendable (String) -> Bool
     private let connectCommand: @Sendable () -> CommandResult
     private let featureShell: @Sendable (String) -> String
+    private let rememberedWirelessPeer: @Sendable () -> Bool
 
     init(feedback: StationFeedback,
          reader: @escaping @Sendable (String?) -> LinkReading = { LinkSession.readLink(trustedSerial: $0) },
          shellAlive: @escaping @Sendable (String) -> Bool = { LinkSession.shellTrue($0) },
          connectCommand: @escaping @Sendable () -> CommandResult = { StationRunner.scriptResult("connect.sh", timeout: 30) },
-         featureShell: @escaping @Sendable (String) -> String = { LinkSession.readFeatureProjection($0) }) {
+         featureShell: @escaping @Sendable (String) -> String = { LinkSession.readFeatureProjection($0) },
+         rememberedWirelessPeer: @escaping @Sendable () -> Bool = { WirelessConnectFailure.hasRememberedWirelessPeer() }) {
         self.feedback = feedback
         self.reader = reader
         self.shellAlive = shellAlive
         self.connectCommand = connectCommand
         self.featureShell = featureShell
+        self.rememberedWirelessPeer = rememberedWirelessPeer
     }
 
     var isConnected: Bool { link == .connected || remoteConnected }
@@ -163,9 +167,22 @@ final class LinkSession: ObservableObject {
 
     /// 只合并显示状态；adb 操作仍须持有已验证的序列号。
     func noteRemoteConnection(_ connected: Bool) {
+        let resumed = connected && !remoteConnected
         guard remoteConnected != connected else { return }
         remoteConnected = connected
         onMenuIcon?(isConnected)
+        if resumed { resumeLocalAfterPhone() }
+    }
+
+    /// 手机恢复或重新上线后，早先一次「尚未配对」不再挡住同一局域网的本地重连。
+    private func resumeLocalAfterPhone() {
+        guard serial == nil, !decision.holdOffline, rememberedWirelessPeer() else { return }
+        if needsWirelessPairing { needsWirelessPairing = false }
+        guard decision.beginManual() else { return }
+        connectIsManual = false
+        setReconnecting(true)
+        logger.notice("Phone resumed, local connect started")
+        launchConnect()
     }
 
     func noteRemoteChecking(_ checking: Bool) {
@@ -227,6 +244,7 @@ final class LinkSession: ObservableObject {
         linkWatch?.cancel(); linkWatch = nil
         deviceStream?.stop(); deviceStream = nil
         idleTask?.cancel(); idleTask = nil
+        reconnectTask?.cancel(); reconnectTask = nil
         stopUnreachableRecheck()
     }
 
@@ -284,6 +302,8 @@ final class LinkSession: ObservableObject {
     func disconnect() {
         guard feedback.activity == nil else { return }
         decision.hold()
+        reconnectTask?.cancel()
+        reconnectTask = nil
         connectGeneration += 1
         let generation = connectGeneration
         feedback.activity = "正在断开无线连接…"
@@ -481,6 +501,8 @@ final class LinkSession: ObservableObject {
 
     private func considerReconnect(reconnectable: Bool) {
         if needsWirelessPairing {
+            reconnectTask?.cancel()
+            reconnectTask = nil
             if willReconnect { willReconnect = false }
             return
         }
@@ -497,6 +519,8 @@ final class LinkSession: ObservableObject {
         let waiting = link == .offline && reconnectable && !decision.holdOffline
         if willReconnect != waiting { willReconnect = waiting }
         guard start else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
         connectIsManual = false
         setReconnecting(true)
         logger.notice("Automatic connect started")
@@ -536,7 +560,7 @@ final class LinkSession: ObservableObject {
             needsWirelessPairing = false
             feedback.notice = nil
         } else if !result.timedOut && WirelessConnectFailure.pausesAutomaticReconnect(
-            result.output, alreadyPaired: !pairedDeviceName.isEmpty) {
+            result.output, alreadyPaired: !pairedDeviceName.isEmpty || rememberedWirelessPeer()) {
             needsWirelessPairing = true
             if manual { feedback.notice = nil }
             onPairingNeeded()
@@ -548,7 +572,22 @@ final class LinkSession: ObservableObject {
                     : StationText.reason(result.output, fallback: "连接失败。请检查无线调试或 USB 授权。")
             }
         }
+        scheduleNextReconnect()
         Task { await self.probe(readingControls: result.succeeded || manual) }
+    }
+
+    /// 设备列表不变时，到点再跑 connect.sh。手机回到同一局域网才会被这次查找看见。
+    private func scheduleNextReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        guard serial == nil, !decision.holdOffline, !needsWirelessPairing else { return }
+        guard let delay = decision.pendingDelay(now: Date()), delay > 0 else { return }
+        reconnectTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            guard self.serial == nil, !self.decision.holdOffline, !self.needsWirelessPairing else { return }
+            self.considerReconnect(reconnectable: true)
+        }
     }
 
     /// 用户已经要求保持断开，但迟到的 connect.sh 又连上了。先核对这一次还算不算数，再拆掉。
