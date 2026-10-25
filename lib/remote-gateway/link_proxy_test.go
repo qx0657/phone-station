@@ -171,3 +171,93 @@ func TestPhonePeerSealDefaultsOff(t *testing.T) {
 		t.Fatal(err, other.Seal)
 	}
 }
+
+// A slow business call must not consume the health deadline or close its session.
+func TestBusyLocalLinkProbeDoesNotChangeHealth(t *testing.T) {
+	g := testGateway("", nil)
+	g.linkLocal = true
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	g.linkCall = func(ctx context.Context, _, method string, _ []byte) (string, []byte, error) {
+		if method == "meta.ping" {
+			t.Error("probe competed with business call")
+		}
+		close(entered)
+		<-release
+		return "complete", []byte("{}"), nil
+	}
+	go func() {
+		defer close(finished)
+		_, _, err := g.callLink(context.Background(), "0123456789abcdef0123456789abcdef", "device.status", []byte("{}"))
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+	<-entered
+	defer func() { close(release); <-finished }()
+	checked := make(chan struct{})
+	go func() { g.checkLocal("", true); close(checked) }()
+	select {
+	case <-checked:
+	case <-time.After(time.Second):
+		t.Fatal("probe queued behind business call")
+	}
+	if !g.state.localOnline || g.mode() != "local" || g.state.localRevision != 0 {
+		t.Fatal("busy route was marked offline")
+	}
+	g.state.localOnline = false
+	g.state.mode = "remote"
+	g.checkLocal("", true)
+	if g.state.localOnline || g.mode() != "remote" {
+		t.Fatal("skipped probe revived offline route")
+	}
+}
+
+func TestLocalLinkProbeAllowsSlowReplyAndStillDetectsTimeout(t *testing.T) {
+	g := testGateway("", nil)
+	g.linkLocal = true
+	g.linkCall = func(ctx context.Context, _, method string, _ []byte) (string, []byte, error) {
+		if method != "meta.ping" {
+			t.Fatal(method)
+		}
+		select {
+		case <-time.After(1100 * time.Millisecond):
+			return "complete", []byte("{}"), nil
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		}
+	}
+	g.checkLocal("", true)
+	if !g.state.localOnline || g.state.localRTT < time.Second || g.mode() != "local" {
+		t.Fatal("slow successful link was marked offline")
+	}
+	g.linkCall = func(ctx context.Context, _, _ string, _ []byte) (string, []byte, error) {
+		<-ctx.Done()
+		return "", nil, ctx.Err()
+	}
+	started := time.Now()
+	g.checkLocal("", true)
+	if g.state.localOnline || g.mode() != "remote" || time.Since(started) > 4*time.Second {
+		t.Fatal("dead link did not fail over within its bounded deadline")
+	}
+}
+
+func TestExpiredQueuedLinkCallDoesNotTouchSession(t *testing.T) {
+	g := testGateway("", nil)
+	g.eventsReady = true
+	g.linkCall = func(context.Context, string, string, []byte) (string, []byte, error) {
+		t.Error("expired request reached session")
+		return "", nil, nil
+	}
+	g.linkMu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() {
+		_, _, err := g.callLink(ctx, "0123456789abcdef0123456789abcdef", "device.status", []byte("{}"))
+		finished <- err
+	}()
+	cancel()
+	g.linkMu.Unlock()
+	if err := <-finished; err != context.Canceled || !g.eventsReady {
+		t.Fatal("cancelled queue entry changed session", err)
+	}
+}

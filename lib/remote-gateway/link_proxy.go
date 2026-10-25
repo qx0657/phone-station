@@ -158,11 +158,19 @@ func (g *gateway) callLink(ctx context.Context, op, method string, params []byte
 	if method == "event.states" {
 		return g.stateSnapshot()
 	}
+	g.linkMu.Lock()
+	defer g.linkMu.Unlock()
+	return g.callLinkLocked(ctx, op, method, params)
+}
+
+// The caller owns linkMu, including session error cleanup.
+func (g *gateway) callLinkLocked(ctx context.Context, op, method string, params []byte) (string, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	if g.linkCall != nil {
 		return g.linkCall(ctx, op, method, params)
 	}
-	g.linkMu.Lock()
-	defer g.linkMu.Unlock()
 	session, err := g.ensureLinkLocked()
 	if err != nil {
 		return "", nil, err

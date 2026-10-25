@@ -31,14 +31,15 @@ import (
 )
 
 const (
-	listenAddress = "127.0.0.1:18765"
-	localAddress  = "http://127.0.0.1:18766/mcp"
-	publicAddress = "http://127.0.0.1:18765/mcp"
-	maxBody       = 18 << 20
-	probeEvery    = time.Second
-	remoteEvery   = 2 * time.Second
-	localTimeout  = time.Second
-	remoteFresh   = 6 * time.Second
+	listenAddress    = "127.0.0.1:18765"
+	localAddress     = "http://127.0.0.1:18766/mcp"
+	publicAddress    = "http://127.0.0.1:18765/mcp"
+	maxBody          = 18 << 20
+	probeEvery       = time.Second
+	remoteEvery      = 2 * time.Second
+	localTimeout     = time.Second
+	linkProbeTimeout = 3 * time.Second
+	remoteFresh      = 6 * time.Second
 )
 
 var rpcIntegerID = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
@@ -1059,6 +1060,9 @@ func (g *gateway) checkLocal(token string, sample bool) {
 	revision := g.state.localRevision
 	g.state.mu.RUnlock()
 	result := g.probeLocal(token)
+	if result.skipped {
+		return
+	}
 	g.state.mu.Lock()
 	defer g.state.mu.Unlock()
 	if revision != g.state.localRevision {
@@ -1148,16 +1152,30 @@ func (state *health) selectMode(localSample bool) {
 }
 
 type probeResult struct {
-	ok  bool
-	rtt time.Duration
+	ok      bool
+	rtt     time.Duration
+	skipped bool
 }
 
 func (g *gateway) probeLocal(token string) probeResult {
 	if g.linkLocal {
+		// Calls and file transfers own this session until their reply arrives.
+		// Waiting for them is not evidence that the route has failed.
+		if !g.linkMu.TryLock() {
+			return probeResult{skipped: true}
+		}
+		defer g.linkMu.Unlock()
+		// Handshake and initial subscriptions have their own time budgets.
+		// Start the ping deadline only once that session is ready.
+		if g.linkCall == nil {
+			if _, err := g.ensureLinkLocked(); err != nil {
+				return probeResult{}
+			}
+		}
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), linkProbeTimeout)
 		defer cancel()
-		state, _, err := g.callLink(ctx, "00000000000000000000000000000001", "meta.ping", []byte("{}"))
+		state, _, err := g.callLinkLocked(ctx, "00000000000000000000000000000001", "meta.ping", []byte("{}"))
 		if err != nil || state != "complete" {
 			return probeResult{}
 		}
