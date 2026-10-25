@@ -37,6 +37,7 @@ final class McpLoopbackTest {
             public Json controlsStatus() { return Json.obj().put("verified", true); }
             public Json screenCapture(String id) { return Json.obj().put("requestId", id); }
             public Json torch(boolean on) { return Json.obj().put("on", on); }
+            public Json findPhone(boolean on) { return Json.obj().put("ringing", on); }
 
             @Override
             public Json notify(String title, String text, String agent, String sound) {
@@ -156,6 +157,9 @@ final class McpLoopbackTest {
             expect(true, call(http.port(), "station_terminal_close", "{\"sessionId\":\"" + terminalId + "\"}")[1].contains("closed"));
             expect(true, tools[1].contains("destructiveHint"));
             expect(true, call(http.port(), "device_status", "{}")[1].contains("verified"));
+            expect(true, call(http.port(), "device_control", "{\"action\":\"find_phone\",\"on\":true}")[1].contains("true"));
+            expect(true, call(http.port(), "device_control", "{\"action\":\"find_phone\",\"on\":false}")[1].contains("false"));
+            expect(true, call(http.port(), "device_control", "{\"action\":\"find_phone\"}")[1].contains("isError"));
             expect(true, call(http.port(), "device_control", "{\"action\":\"torch\",\"on\":true}")[1].contains("true"));
             expect(true, call(http.port(), "device_control", "{\"action\":\"torch\"}")[1].contains("isError"));
 

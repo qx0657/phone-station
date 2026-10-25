@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import AppKit
 import CryptoKit
 
@@ -153,6 +154,9 @@ struct ConnectionStatusTest {
         precondition(racing.serial == nil && enabledSerials.isEmpty, "断线事件后的旧探测不能重新启用操作")
         await reconnectWithoutDeviceChangesTest()
         await livenessTest()
+        surfaceObservationTest()
+        await findPhoneStopPollingTest()
+        await findPhoneTest()
         await remoteControlsTest()
         print("ConnectionStatusTest ok")
     }
@@ -300,6 +304,123 @@ struct ConnectionStatusTest {
         await features.readProjectedFeatures()
         precondition(features.phoneFeatures?.master == true && features.phoneFeatures?.allows("shell") == false)
         precondition(features.connectionPreferences == PhoneConnectionPreferences(localMcp: false, remote: true))
+    }
+
+    @MainActor static func surfaceObservationTest() {
+        let station = Station()
+        var signals = 0
+        let observation = station.objectWillChange.sink { signals += 1 }
+        func expectForwarding(_ source: ObservableObjectPublisher, _ expected: Int, _ why: String) {
+            signals = 0
+            source.send()
+            precondition(signals == expected, why)
+        }
+        expectForwarding(station.remoteControls.objectWillChange, 0, "closed surfaces do not redraw")
+        station.panelVisible = true
+        expectForwarding(station.remoteControls.objectWillChange, 1, "opening the panel subscribes immediately using new visibility")
+        expectForwarding(station.torch.objectWillChange, 1, "other main controls redraw too")
+        station.panelVisible = false
+        expectForwarding(station.remoteControls.objectWillChange, 0, "closing the panel releases main subscriptions")
+        station.settingsOpen = true
+        expectForwarding(station.remoteControls.objectWillChange, 1, "opening settings on Home subscribes")
+        station.page = .about
+        expectForwarding(station.remoteControls.objectWillChange, 0, "page changes remove the previous page subscriptions")
+        expectForwarding(station.login.objectWillChange, 1, "page changes subscribe to the destination page")
+        station.page = .main
+        expectForwarding(station.remoteControls.objectWillChange, 1, "returning to Home resumes live button labels")
+        station.panelVisible = true
+        station.panelVisible = false
+        expectForwarding(station.remoteControls.objectWillChange, 1, "closing the panel keeps the settings window live")
+        station.settingsOpen = false
+        expectForwarding(station.remoteControls.objectWillChange, 0, "closing the last surface releases subscriptions")
+        observation.cancel()
+    }
+
+    @MainActor static func findPhoneStopPollingTest() async {
+        let feedback = StationFeedback()
+        var phoneRinging = false
+        var reads = 0
+        var writes = 0
+        let controls = RemoteControlsSession(feedback: feedback, startTimer: false, rpc: { _, _, name, args in
+            if name == "device_control" {
+                precondition(args["action"] as? String == "find_phone")
+                writes += 1
+                phoneRinging = args["on"] as! Bool
+                return try JSONSerialization.data(withJSONObject: ["ringing": phoneRinging])
+            }
+            reads += 1
+            return try JSONSerialization.data(withJSONObject: ["model": "PGT-AN20", "verified": true,
+                "stayAwake": false, "stayAwakeAvailable": true, "stayAwakeReason": "",
+                "screenshotAvailable": true, "screenshotReason": "",
+                "torch": ["on": false, "available": true, "reason": ""],
+                "findPhone": ["available": true, "ringing": phoneRinging, "until": 0, "reason": ""]])
+        })
+        controls.route = { ("fake-status-endpoint", "fake-token") }
+        controls.monitoring = true
+        controls.refresh()
+        for _ in 0..<100 where !controls.canFindPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        let idleReads = reads
+        controls.pollIfNeeded(now: Date().addingTimeInterval(1.1))
+        await Task.yield()
+        precondition(reads == idleReads, "idle controls retain the longer polling interval")
+        controls.setFindPhone(true)
+        for _ in 0..<100 where feedback.activity != nil || reads == idleReads { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(controls.findingPhone && writes == 1)
+        let ringingReads = reads
+        phoneRinging = false // Notification Stop or the phone's automatic timeout.
+        feedback.activity = "another operation"
+        controls.pollIfNeeded(now: Date().addingTimeInterval(1.1))
+        for _ in 0..<100 where controls.findingPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(reads == ringingReads + 1 && !controls.findingPhone,
+                     "phone-side stop reaches the Mac after one second, even while another action is busy")
+        precondition(writes == 1, "observing phone-side stop must not send another switch command")
+        feedback.activity = nil
+        controls.monitoring = false
+        controls.accessMonitoring = { false }
+        let stoppedReads = reads
+        controls.pollIfNeeded(now: Date().addingTimeInterval(60))
+        await Task.yield()
+        precondition(reads == stoppedReads, "inactive monitoring does not poll")
+    }
+
+    @MainActor static func findPhoneTest() async {
+        let feedback = StationFeedback()
+        var ringing = false
+        var writes = 0
+        var omitCapability = false
+        var route: (String, String)? = ("test-endpoint", "test-token")
+        let controls = RemoteControlsSession(feedback: feedback, startTimer: false, rpc: { _, _, name, args in
+            if name == "device_control" {
+                precondition(args["action"] as? String == "find_phone")
+                writes += 1
+                ringing = args["on"] as! Bool
+                if ringing { throw ClipboardRPC.Failure(message: "response lost") }
+                return try JSONSerialization.data(withJSONObject: ["ringing": false])
+            }
+            var status: [String: Any] = ["model": "PGT-AN20", "verified": true,
+                "stayAwake": false, "stayAwakeAvailable": true, "stayAwakeReason": "",
+                "screenshotAvailable": true, "screenshotReason": "",
+                "torch": ["on": false, "available": true, "reason": ""]]
+            if !omitCapability { status["findPhone"] = ["available": true, "ringing": ringing, "until": 0, "reason": ""] }
+            return try JSONSerialization.data(withJSONObject: status)
+        })
+        controls.route = { route }
+        controls.refresh()
+        for _ in 0..<100 where !controls.canFindPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(controls.canFindPhone && !controls.findingPhone)
+        controls.setFindPhone(true)
+        controls.setFindPhone(true)
+        for _ in 0..<100 where feedback.activity != nil || !controls.findingPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(writes == 1 && controls.findingPhone, "lost response is followed by status, never replayed")
+        controls.setFindPhone(false)
+        for _ in 0..<100 where feedback.activity != nil || controls.findingPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(writes == 2 && !controls.findingPhone)
+        omitCapability = true
+        controls.refresh()
+        for _ in 0..<100 where controls.canFindPhone { try? await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(!controls.canFindPhone && controls.findPhoneReason?.contains("更新") == true, "old phone is disabled with update guidance")
+        route = nil
+        precondition(!controls.canFindPhone)
     }
 
     @MainActor static func remoteControlsTest() async {

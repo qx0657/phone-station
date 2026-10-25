@@ -105,7 +105,7 @@ final class McpProtocol {
                 Json visible = Json.arr();
                 for (Json tool : McpCatalog.tools().array()) {
                     try {
-                        if (host != null) { host.authorize(McpCatalog.gate(tool.get("name").string())); }
+                        if (host != null) { McpCatalog.authorizeVisible(host, tool.get("name").string()); }
                         visible.add(tool);
                     } catch (FileFailure denied) { /* The phone owns this tool's permission. */ }
                 }
@@ -300,6 +300,7 @@ final class McpProtocol {
         if ("station_screen_capture".equals(name)) { return host(host).screenCapture(required(args, "requestId")); }
         if ("station_screen_capture_status".equals(name)) { return ScreenCapture.status(files, required(args, "requestId")); }
         if ("station_screen_capture_release".equals(name)) { return ScreenCapture.release(files, required(args, "requestId")); }
+        if ("station_find_phone".equals(name)) { return host(host).findPhone(requiredBool(args, "on")); }
         if ("station_torch".equals(name)) { return host(host).torch(requiredBool(args, "on")); }
         if ("station_notification_status".equals(name)) { return host.notificationStatus(); }
         if ("station_notification_configure".equals(name)) {
@@ -655,6 +656,8 @@ final class McpProtocol {
         tools.add(tool("station_screen_capture_release",
                 "删除本次 UUID 对应的临时截图，不进回收站。只用于下载完成后清理本次截图。",
                 false, true, schema(new String[] {"requestId"}, Json.obj().put("requestId", text("已下载截图的 UUID。")))));
+        tools.add(tool("station_find_phone", "响铃找手机：on 开始，false 停止。静音及振动模式仍通过闹钟通道播放，最多 30 秒。仅在用户明确要求时调用；结果未知只查状态，不重放。",
+                false, false, schema(new String[] {"on"}, Json.obj().put("on", bool("true 响铃，false 停止。")))));
         tools.add(tool("station_torch",
                 "通过已授权的 Shizuku 持续控制手电筒，返回实际状态。on 为 true 开灯，false 关灯。仅在用户要求时调用。手机工位或 Shizuku 停止、升级后灯会关闭，不自动重开；断线后只核实状态，不重放开关。",
                 false, false, schema(new String[] {"on"}, Json.obj().put("on", bool("true 开灯，false 关灯。")))));

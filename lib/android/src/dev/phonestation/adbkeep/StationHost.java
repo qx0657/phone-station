@@ -17,6 +17,8 @@ interface StationHost {
 
     Json torch(boolean on);
 
+    default Json findPhone(boolean on) { throw new FileFailure("请更新手机工位以支持响铃找手机"); }
+
     Json notify(String title, String text, String agent, String sound);
 
     Json clipboard(String text);

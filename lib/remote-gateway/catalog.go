@@ -121,8 +121,8 @@ func aiTools() []catalogTool {
 			field("title", "string", "Title."),
 			field("agent", "string", "Sender."),
 			field("sound", "string", "Sound path."))),
-		aiTool("device_control", "Change stay-awake, torch, or open a file.", false, false, schema([]string{"action"},
-			field("action", "string", "awake, torch, or open."),
+		aiTool("device_control", "Change stay-awake, torch, find-phone ringing, or open a file.", false, false, schema([]string{"action"},
+			field("action", "string", "awake, torch, find_phone, or open."),
 			field("on", "boolean", "Desired state."),
 			field("path", "string", "File path when action is open."))),
 		aiTool("task_status", "Read one existing task receipt.", true, false, schema([]string{"id"},
@@ -271,6 +271,8 @@ func rewriteAICall(name string, raw json.RawMessage) (aiRoute, error) {
 	case "device_control":
 		method := "stay.awake"
 		switch action {
+		case "find_phone":
+			method = "find.phone"
 		case "torch":
 			method = "torch.call"
 		case "open":

@@ -103,6 +103,8 @@ func TestRewriteAICallMapsLinkMethods(t *testing.T) {
 		{"clipboard_write", `{"text":"a"}`, "clipboard.set", ""},
 		{"phone_alert", `{"text":"a"}`, "notify.call", ""},
 		{"device_control", `{"action":"torch","on":true}`, "torch.call", ""},
+		{"device_control", `{"action":"find_phone","on":true}`, "find.phone", ""},
+		{"device_control", `{"action":"find_phone","on":false}`, "find.phone", ""},
 		{"device_control", `{"action":"open","path":"a"}`, "file.open", ""},
 		{"device_control", `{"action":"awake","on":true}`, "stay.awake", ""},
 		{"task_status", `{"id":"0123456789abcdef0123456789abcdef"}`, "operation.status", `"jobId":"0123456789abcdef0123456789abcdef"`},

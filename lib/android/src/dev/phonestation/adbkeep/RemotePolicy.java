@@ -18,7 +18,7 @@ final class RemotePolicy {
                 "station_file_truncate_bytes", "station_file_move", "station_file_copy", "station_file_delete");
         add("personal", "station_clipboard_get", "station_clipboard_set", "station_clipboard_state", "station_clipboard_configure",
                 "station_clipboard_exchange", "station_notification_poll", "station_notification_icon", "station_notification_configure");
-        add("controls", "station_file_open", "station_notify", "station_stay_awake", "station_torch", "station_screen_capture",
+        add("controls", "station_find_phone", "station_file_open", "station_notify", "station_stay_awake", "station_torch", "station_screen_capture",
                 "station_screen_capture_start", "station_screen_capture_status", "station_screen_capture_release");
         add("screen", "station_screen_open", "station_screen_status");
         add("shell", "station_shell_exec", "station_shell_start", "station_terminal_open", "station_terminal_read",

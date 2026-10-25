@@ -7,7 +7,7 @@ description: 通过手机工位 MCP 操作 Android 普通文件、剪贴板、�
 
 组件与源码归属见 `docs/architecture.md`，故障恢复见 `docs/troubleshooting.md`，版本与部署状态见 `docs/releases.md`。中继源码统一在 `server/relay/`；Mac 20 先握手取得持久会话编号，远程未知结果仍不重放。
 
-工具名和参数以当次 `tools/list` 为准。正在服务的网关是 `/Applications/手机工位.app` 里的 `phone-relay-gateway`，与这次构建的 `build/.phone-station/phone-relay-gateway` 是同一份。主令牌看到 18 个没有 `station_` 前缀的名称，`resultType` 为 complete，`ttlMs` 为 300000，`cacheScope` 为 private。带 `station_` 的调用仍由网关转发，已安装的菜单栏继续用这些名字。独立客户端令牌只看到自己权限里的名称。手机版本名是 72。路径和范围看 `device_status`。当前机制见 `docs/mcp.md`，限定日期与版本的连通验证见 `docs/history/mcp.md`。
+工具名和参数以当次 `tools/list` 为准。正在服务的网关是 `/Applications/手机工位.app` 里的 `phone-relay-gateway`，与这次构建的 `build/.phone-station/phone-relay-gateway` 是同一份。主令牌看到 18 个没有 `station_` 前缀的名称，`resultType` 为 complete，`ttlMs` 为 300000，`cacheScope` 为 private。带 `station_` 的调用仍由网关转发，已安装的菜单栏继续用这些名字。独立客户端令牌只看到自己权限里的名称。手机版本名是 73。路径和范围看 `device_status`。当前机制见 `docs/mcp.md`，限定日期与版本的连通验证见 `docs/history/mcp.md`。
 
 ## 连接
 
@@ -79,5 +79,9 @@ Mac 19 起，可为独立 MCP 客户端签发 `status`、`files.read`、`files.w
 - 截屏：生成并记录 UUID `requestId`，去掉连字符作为 `jobId`，用 `station_screen_capture_start` 提交、`station_operation_status` 查询。任务完成后按结果的 path、size、targetVersion 分块读取 PNG，核对完整大小与 SHA-256 后保存到 Mac，再用 `station_screen_capture_release` 幂等清理同一编号。单次最多 32 MiB。丢失应答时先查原任务；任务记录缺失或结果未知时，用 `station_screen_capture_status` 查原 `requestId` 的现有 PNG，不重拍、不复用编号。仅旧版没有后台接口时才用 `station_screen_capture`。安全界面仍可能是黑屏。
 - 手电筒：`station_torch` 的 `on` 为 true 开灯、false 关灯。手机端独立的 Shizuku UserService 持续持灯；普通远程 shell 不保留后台进程，不能照搬 `torch.sh` 的后台命令。手机工位或 Shizuku 停止、升级后灯会灭，重连不自动重开。
 - 操作超时或断线时只读核实 `station_controls_status`，不自动重放开关或截图。灯光跟随声音与本地脚本仍要求本机 adb；Mac 25、手机 63、中继 3 的远程实时投屏与录屏见 `docs/history/remote-screen.md`，不为只读检查启动视频会话。
+
+### 响铃找手机
+
+仅用户明确要求找手机或本次响铃时调用 `device_control`，`action: find_phone`、`on: true` 开始、false 停止；手机内部为 `station_find_phone`。先只读 `device_status` 核对机型及 findPhone 的 available/reason。Android 73 / Mac 38 起支持，本地与远程 MCP 共用闹钟音频，静音／振动仍响，最多 30 秒，手机通知可停止；勿扰禁用闹钟时不保证可听。不自动改变勿扰或申请权限。超时后只读查 findPhone.ringing/until，不重发开始请求。此操作不属于会话完成提醒，不用 notify.sh 代替。机制与恢复边界见 `docs/notify.md` 的「响铃找手机」。
 
 实现与验证见 `docs/remote-controls.md`。

@@ -15,6 +15,8 @@ shell 用户有 `CAMERA` 和 `FLASHLIGHT` 权限，所以 `lib/torch.dex` 里的
 
 相机服务把这次开灯绑在调用进程上。进程一退出，灯就灭。`on` 和指定亮度会用 `setsid` 在手机上留一个 `app_process`，不占着电脑上的终端。`off` 先结束这个进程，再显式关一次灯。
 
+持灯与声音跟随进程每秒核对一次手机工位总开关及手电筒功能。读取走固定的 `settings get global` 命令，三秒超时、返回失败或非预期值时结束持灯；旧版手机尚未投影开关时允许 `null`。不能直接用 `ActivityThread.systemMain()` 的系统 Context 读取 Settings：进程是 shell UID，系统 Context 却带 `android` 包名，Android 15 的 provider 身份检查会拒绝。现场记录见 [本地手电筒修复](history/validation.md#2026-10-25-本地手电筒功能校验修复)。
+
 ## 跟着电脑的声音
 
 `beat` 不听麦克风，也不走 BlackHole。它抓的是各进程正要送去播放的混音，耳机或扬声器都一样，播放设备不用改。

@@ -35,11 +35,20 @@ final class McpCatalog {
                 schema(new String[] {"text"}, props().put("text", text("Clipboard text.")))));
         tools.add(tool("phone_alert", "Show a notification on the phone.", false, false,
                 schema(new String[] {"text"}, props().put("text", text("Notification text.")).put("title", text("Title.")).put("agent", text("Sender.")).put("sound", text("Sound path.")))));
-        tools.add(tool("device_control", "Change stay-awake, torch, or open a file.", false, false,
-                schema(new String[] {"action"}, props().put("action", text("awake, torch, or open.")).put("on", bool("Desired state.")).put("path", text("File path when action is open.")))));
+        tools.add(tool("device_control", "Change stay-awake, torch, find-phone ringing, or open a file.", false, false,
+                schema(new String[] {"action"}, props().put("action", text("awake, torch, find_phone, or open.")).put("on", bool("Desired state.")).put("path", text("File path when action is open.")))));
         tools.add(tool("task_status", "Read one existing task receipt.", true, false,
                 schema(new String[] {"id"}, props().put("id", text("Receipt id.")))));
         return tools;
+    }
+
+    static void authorizeVisible(StationHost host, String name) {
+        if (!"device_control".equals(name)) { host.authorize(gate(name)); return; }
+        FileFailure denied = null;
+        for (String tool : new String[] {"station_stay_awake", "station_torch", "station_find_phone", "station_file_open"}) {
+            try { host.authorize(tool); return; } catch (FileFailure error) { denied = error; }
+        }
+        throw denied;
     }
 
     /** Permission name used to decide whether the tool appears. */
@@ -114,6 +123,7 @@ final class McpCatalog {
             case "phone_alert": return "station_notify";
             case "device_control":
                 switch (action) {
+                    case "find_phone": return "station_find_phone";
                     case "torch": return "station_torch";
                     case "open": return "station_file_open";
                     default: return "station_stay_awake";
@@ -136,7 +146,7 @@ final class McpCatalog {
             case "station_file_search_text": case "station_screen_capture": case "station_screen_capture_status":
             case "station_screen_capture_release": case "station_shell_exec": case "station_shell_start":
             case "station_shell_status": case "station_clipboard_get": case "station_clipboard_set":
-            case "station_notify": case "station_stay_awake": case "station_torch": case "station_file_open":
+            case "station_find_phone": case "station_notify": case "station_stay_awake": case "station_torch": case "station_file_open":
             case "station_operation_status":
                 return true;
             default:

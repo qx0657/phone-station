@@ -28,7 +28,7 @@ final class FeaturePolicy {
     static String feature(String tool) {
         if (tool.startsWith("station_clipboard_")) { return "clipboard"; }
         if (tool.startsWith("station_notification_")) { return "notifications"; }
-        if (tool.equals("station_notify")) { return "alerts"; }
+        if (tool.equals("station_notify") || tool.equals("station_find_phone")) { return "alerts"; }
         if (tool.equals("station_file_open")) { return "open"; }
         if (tool.equals("station_stay_awake")) { return "awake"; }
         if (tool.equals("station_torch")) { return "torch"; }

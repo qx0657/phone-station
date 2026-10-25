@@ -245,6 +245,10 @@ final class StationBridge implements StationHost {
         boolean controlsAllowed = access == null || RemoteStore.policy(context).allows("station_screen_capture");
         if (!StationFeatures.active(context, "torch")) { lamp = Json.obj().put("available", false).put("on", Json.nul()).put("reason", FeaturePolicy.denied(StationFeatures.master(context), "torch")); }
         else if (!controlsAllowed) { lamp = Json.obj().put("available", false).put("on", Json.nul()).put("reason", RemotePermissionInfo.denied("controls")); }
+        Json findPhone = FindPhone.status(context);
+        if (!verified || !controlsAllowed) {
+            findPhone.put("available", false).put("reason", !verified ? unsupported : RemotePermissionInfo.denied("controls"));
+        }
         Json permissions = Json.obj();
         for (String scope : RemotePolicy.SCOPES) { permissions.put(scope, RemoteStore.permission(context, scope)); }
         return Json.obj().put("model", Build.MODEL).put("verified", verified).put("appVersion", packageVersion()).put("remotePermissions", permissions).put("remotePermissionPageVersion", 1).put("features", StationFeatures.status(context))
@@ -257,6 +261,7 @@ final class StationBridge implements StationHost {
                 .put("stayAwakeReason", !StationFeatures.active(context, "awake") ? FeaturePolicy.denied(StationFeatures.master(context), "awake") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : settings ? "" : "请先在手机上授予写系统设置权限")
                 .put("screenshotAvailable", StationFeatures.active(context, "capture") && controlsAllowed && verified && storage && shell.get("available").boolValue())
                 .put("screenshotReason", !StationFeatures.active(context, "capture") ? FeaturePolicy.denied(StationFeatures.master(context), "capture") : !controlsAllowed ? RemotePermissionInfo.denied("controls") : !verified ? unsupported : !storage ? "请在手机权限页允许所有文件访问" : shell.get("reason").string())
+                .put("findPhone", findPhone)
                 .put("torch", lamp)
                 .put("localMcp", KeeperStore.mcpEnabled(context))
                 .put("remoteEnabled", RemoteStore.enabled(context));
@@ -275,6 +280,11 @@ final class StationBridge implements StationHost {
         requireVerifiedModel();
         return ScreenCapture.capture(files, request -> ShizukuShell.execute(context, request, () -> authorize("station_screen_capture")),
                 requestId, () -> authorize("station_screen_capture"));
+    }
+
+    @Override public Json findPhone(boolean on) {
+        requireVerifiedModel();
+        return FindPhone.set(context, on, () -> authorize("station_find_phone"));
     }
 
     @Override public Json torch(boolean on) {

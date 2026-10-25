@@ -19,7 +19,6 @@ public class Torch {
     private static final String PID_FILE = "/data/local/tmp/torch.pid";
 
     private CameraManager manager;
-    private Context stationContext;
     private long policyCheckedNs;
     private String cameraId;
     private int maxLevel = 1;
@@ -176,7 +175,6 @@ public class Torch {
         Class<?> activityThread = Class.forName("android.app.ActivityThread");
         Object thread = activityThread.getMethod("systemMain").invoke(null);
         Context context = (Context) activityThread.getMethod("getSystemContext").invoke(thread);
-        stationContext = context;
         Object service = context.getSystemService(Context.CAMERA_SERVICE);
         if (!(service instanceof CameraManager)) {
             throw new IllegalStateException("拿不到相机服务");
@@ -377,15 +375,34 @@ public class Torch {
         if (policyCheckedNs != 0 && now - policyCheckedNs < 1_000_000_000L) { return; }
         policyCheckedNs = now;
         try {
-            Object resolver = Context.class.getMethod("getContentResolver").invoke(stationContext);
-            java.lang.reflect.Method read = Class.forName("android.provider.Settings$Global").getMethod("getString",
-                    Class.forName("android.content.ContentResolver"), String.class);
-            String master = (String) read.invoke(null, resolver, "phonestation_enabled");
-            String feature = (String) read.invoke(null, resolver, "phonestation_feature_torch");
+            // systemMain's resolver claims package "android" although our UID
+            // is shell. Android 15 rejects that identity. The settings command
+            // uses the shell provider entry point and keeps policy checks live.
+            java.lang.Process check = new ProcessBuilder("/system/bin/sh", "-c",
+                    "settings get global phonestation_enabled && settings get global phonestation_feature_torch")
+                    .redirectErrorStream(true).start();
+            String master;
+            String feature;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(check.getInputStream()))) {
+                if (!check.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("settings timed out");
+                }
+                master = reader.readLine();
+                feature = reader.readLine();
+                if (check.exitValue() != 0 || !validPolicyValue(master) || !validPolicyValue(feature)) {
+                    throw new IllegalStateException("settings failed");
+                }
+            } finally {
+                check.destroy();
+            }
             if ("0".equals(master) || "0".equals(feature)) {
                 manager.setTorchMode(cameraId, false); say("off"); System.exit(0);
             }
         } catch (Throwable error) { fail("无法核对手机功能开关"); }
+    }
+
+    private static boolean validPolicyValue(String value) {
+        return "0".equals(value) || "1".equals(value) || "null".equals(value);
     }
 
     private void applyOnce(int level) throws CameraAccessException {

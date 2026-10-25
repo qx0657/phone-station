@@ -9,6 +9,7 @@ import org.json.JSONObject;
 public final class StationApplication extends Application {
     @Override public void onCreate() {
         super.onCreate();
+        FindPhone.recover(this);
         try (java.io.InputStream input = getAssets().open("ui-en.json")) {
             java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
             byte[] chunk = new byte[8192];

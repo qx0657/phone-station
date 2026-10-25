@@ -20,6 +20,8 @@ struct RemoteControlsReading: Decodable {
     var stayAwakeReason: String
     var screenshotAvailable: Bool
     var screenshotReason: String
+    struct FindPhone: Decodable { var available: Bool; var ringing: Bool; var until: Double; var reason: String }
+    var findPhone: FindPhone?
     var torch: Torch
     var supportedModel: Bool { verified }
 }
@@ -96,10 +98,9 @@ final class RemoteControlsSession: ObservableObject {
             try await ClipboardRPC.call(endpoint: endpoint, token: token, name: name, arguments: args, timeout: 25)
         }
         if startTimer {
-            let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, self.monitoring || self.accessMonitoring(), Date() >= self.nextPoll else { return }
-                    self.refresh()
+                    self?.pollIfNeeded()
                 }
             }
             RunLoop.main.add(timer, forMode: .common); self.timer = timer
@@ -131,6 +132,14 @@ final class RemoteControlsSession: ObservableObject {
         else { captureDefaults.removeObject(forKey: captureKey) }
     }
     var canStayAwake: Bool { current?.stayAwakeAvailable == true && feedback.activity == nil }
+    var findPhoneReason: String? {
+        guard route() != nil else { return "请先连接 MCP 服务" }
+        guard let current else { return failure ?? "正在检查找手机状态…" }
+        guard let state = current.findPhone else { return "请更新手机工位以支持响铃找手机" }
+        return state.reason.nilIfEmpty
+    }
+    var canFindPhone: Bool { current?.findPhone?.available == true && feedback.activity == nil }
+    var findingPhone: Bool { reading?.findPhone?.ringing == true }
     var canTorch: Bool { current?.torch.available == true && current?.torch.on != nil && feedback.activity == nil }
     var stayAwake: Bool { reading?.stayAwake ?? false }
     var torchOn: Bool { reading?.torch.on ?? false }
@@ -141,8 +150,14 @@ final class RemoteControlsSession: ObservableObject {
         return [reading.stayAwakeReason, reading.screenshotReason, reading.torch.reason, reading.screenReason ?? ""]
             .filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: "；").nilIfEmpty
     }
+    /// Ringing is short-lived and can be stopped on the phone. Keep its status
+    /// responsive, including while an unrelated Mac action is busy.
+    func pollIfNeeded(now: Date = Date()) {
+        guard monitoring || accessMonitoring(), now >= nextPoll else { return }
+        refresh()
+    }
     func refresh() {
-        guard !operation, feedback.activity == nil else { return }
+        guard !operation, feedback.activity == nil || findingPhone else { return }
         guard let (endpoint, token) = route() else {
             reading = nil; readRoute = nil; failure = nil; epoch += 1; return
         }
@@ -150,7 +165,7 @@ final class RemoteControlsSession: ObservableObject {
         inFlight = true
         let ticket = epoch
         Task {
-            defer { inFlight = false; nextPoll = Date().addingTimeInterval(10) }
+            defer { inFlight = false; nextPoll = Date().addingTimeInterval(findingPhone ? 1 : 10) }
             do {
                 let data = try await rpc(endpoint, token, "device_status", [:])
                 guard ticket == epoch, let now = route(), now.0 == endpoint, now.1 == token else { return }
@@ -168,6 +183,11 @@ final class RemoteControlsSession: ObservableObject {
         perform(action: "awake", on: on, activity: "正在更改远程息屏设置…",
                 notice: on ? "已保持亮屏。" : "已恢复息屏。")
     }
+    func setFindPhone(_ on: Bool) {
+        guard canFindPhone, on != findingPhone else { return }
+        perform(action: "find_phone", on: on, activity: on ? "正在让手机响铃…" : "正在停止响铃…",
+                notice: on ? "手机正在响铃，30 秒后自动停止。" : "已停止响铃。")
+    }
     func setTorch(_ on: Bool) {
         guard canTorch, on != torchOn else { return }
         perform(action: "torch", on: on, activity: on ? "正在远程打开手电筒…" : "正在远程关闭手电筒…",
@@ -180,9 +200,10 @@ final class RemoteControlsSession: ObservableObject {
             do {
                 let data = try await rpc(endpoint, token, "device_control", ["action": action, "on": on])
                 let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let key = action == "torch" ? "on" : "stayAwake"
+                let key = action == "find_phone" ? "ringing" : action == "torch" ? "on" : "stayAwake"
                 guard result?[key] as? Bool == on else { throw ClipboardRPC.Failure(message: "手机状态未确认") }
-                if action == "torch" { reading?.torch.on = on } else { reading?.stayAwake = on }
+                if action == "find_phone" { reading?.findPhone?.ringing = on }
+                else if action == "torch" { reading?.torch.on = on } else { reading?.stayAwake = on }
                 feedback.notice = notice
             } catch {
                 reading = nil

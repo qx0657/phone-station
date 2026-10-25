@@ -171,6 +171,7 @@ public final class FileMcpService extends Service {
         StationBridge.closeJobs();
         SharedClipboard.close();
         ShizukuTorch.close();
+        FindPhone.close(this);
         listening = false;
         publishListening(false);
         McpHttp running = server;

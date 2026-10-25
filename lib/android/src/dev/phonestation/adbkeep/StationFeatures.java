@@ -71,6 +71,7 @@ final class StationFeatures {
         RemoteStore.invalidate(context);
         if (!enabled) {
             ShizukuTorch.close();
+            FindPhone.close(context);
             SharedClipboard.close(); PhoneNotifications.state(context);
             StationBridge.closeJobs(); PrivilegedHelper.release(HelperPins.SHELL);
             context.stopService(new Intent(context, KeeperService.class));
@@ -103,6 +104,7 @@ final class StationFeatures {
         if (!selected(context, key)) {
             if ("screen".equals(key)) { ShizukuScreen.close(); }
             if ("shell".equals(key)) { ShizukuTerminal.close(); PrivilegedHelper.release(HelperPins.SHELL); }
+            if ("alerts".equals(key)) { FindPhone.close(context); }
             if ("torch".equals(key)) { ShizukuTorch.close(); }
             if ("awake".equals(key)) { StayAwakeController.release(context); }
         }

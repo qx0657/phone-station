@@ -76,7 +76,7 @@ struct MainPage: View {
                 .padding(.bottom, 14)
             }
             .onAppear {
-                showsControls = stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
+                showsControls = station.remoteControls.findingPhone || stayAwakeBinding.wrappedValue || torchBinding.wrappedValue || beatBinding.wrappedValue
             }
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                 guard let provider = providers.first else { return false }
@@ -167,6 +167,20 @@ struct MainPage: View {
     private var controlGroup: some View {
         DisclosureGroup(isExpanded: $showsControls) {
             VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: station.remoteControls.findingPhone ? "bell.fill" : "bell.badge")
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(StationL10n.text("找手机"))
+                        Text(StationL10n.text(station.remoteControls.findPhoneReason ?? "静音也响，临时最大音量，最多 30 秒"))
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 6)
+                    Button(StationL10n.text(station.remoteControls.findingPhone ? "停止响铃" : "响铃找手机")) {
+                        station.remoteControls.setFindPhone(!station.remoteControls.findingPhone)
+                    }.buttonStyle(.bordered).disabled(!station.remoteControls.canFindPhone)
+                }.padding(.vertical, 8).padding(.horizontal, 4)
+                StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
                 StationRows.toggleRow(StationL10n.text("保持亮屏"), symbol: "sun.max", isOn: stayAwakeBinding, enabled: station.canStayAwake)
                 StationRows.groupDivider.padding(.leading, 38).padding(.trailing, 10)
                 StationRows.toggleRow(StationL10n.text("手电筒"), symbol: torchBinding.wrappedValue ? "flashlight.on.fill" : "flashlight.off.fill",
@@ -189,10 +203,11 @@ struct MainPage: View {
 
     private var controlSummary: String {
         var active: [String] = []
+        if station.remoteControls.findingPhone { active.append(StationL10n.text("正在响铃")) }
         if stayAwakeBinding.wrappedValue { active.append(StationL10n.text("亮屏")) }
         if torchBinding.wrappedValue { active.append(StationL10n.text("手电筒")) }
         if beatBinding.wrappedValue { active.append(StationL10n.text("声音灯光")) }
-        return active.isEmpty ? StationL10n.text("亮屏与灯光") : active.joined(separator: " · ")
+        return active.isEmpty ? StationL10n.text("亮屏、灯光与找手机") : active.joined(separator: " · ")
     }
 
     private var header: some View {

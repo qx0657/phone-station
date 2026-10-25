@@ -23,13 +23,18 @@ final class Station: ObservableObject {
     let remoteControls: RemoteControlsSession
     let pairing = WirelessPairingSession()
     private var navigation = StationNavigation()
-    @Published var panelVisible = false
+    @Published var panelVisible = false {
+        didSet { surfaceVisibilityChanged(opened: panelVisible) }
+    }
     /// 设备、客户端、中继和权限在设置窗口里，不占用菜单栏快捷面板。
-    @Published var settingsOpen = false
+    @Published var settingsOpen = false {
+        didSet { surfaceVisibilityChanged(opened: settingsOpen) }
+    }
     var surfaceVisible: Bool { panelVisible || settingsOpen }
     @Published var dialog: StationDialogKind?
     @Published var page: StationPage = .main {
         didSet {
+            bindPage()
             navigation.changed(from: oldValue, to: page)
             if oldValue != page { dialog = nil }
             if oldValue != page && feedback.activity == nil { feedback.notice = nil }
@@ -54,7 +59,6 @@ final class Station: ObservableObject {
         return remoteControls.accessState.blocker(for: features)
     }
 
-    private var subscriptions = Set<AnyCancellable>()
     private var pageWatch = Set<AnyCancellable>()
 
     init() {
@@ -74,22 +78,19 @@ final class Station: ObservableObject {
         health = DeviceHealthSession()
         remoteControls = RemoteControlsSession(feedback: feedback)
         wire()
-        $panelVisible.sink { [weak self] visible in
-            self?.bindPage()
-            self?.link.notePanel(self?.surfaceVisible ?? false)
-            if visible { self?.refreshAdbFeaturesIfNeeded() }
-        }.store(in: &subscriptions)
-        $settingsOpen.sink { [weak self] visible in
-            self?.bindPage()
-            self?.link.notePanel(self?.surfaceVisible ?? false)
-            if visible { self?.refreshAdbFeaturesIfNeeded() }
-        }.store(in: &subscriptions)
-        $page.sink { [weak self] _ in self?.bindPage() }.store(in: &subscriptions)
         bindPage()
     }
 
     func startLocalEvents() { localEvents.start() }
     func stopLocalEvents() { localEvents.stop() }
+
+    // @Published publishes before storage changes. Rebind from didSet so the
+    // visibility and page checks below use the new values.
+    private func surfaceVisibilityChanged(opened: Bool) {
+        bindPage()
+        link.notePanel(surfaceVisible)
+        if opened { refreshAdbFeaturesIfNeeded() }
+    }
 
     /// 面板关闭时不转发子会话；打开时只转发当前页会读到的会话。
     private func bindPage() {
