@@ -66,13 +66,13 @@ final class TerminalJobs {
         if (result != null && result.get("state") != null && "running".equals(result.get("state").string())) {
             live.add(id);
         }
-        return result;
+        return result.put("inputReadback", true);
     }
 
     synchronized Json readNow(String id, long offset) {
         if (offset < 0) { throw new IllegalArgumentException("offset 不能为负数"); }
         if (!live.contains(id)) { return ended(id, "lost", "原会话未确认或已结束，不会重新创建"); }
-        return backend.call(request("read", id).put("offset", offset), false);
+        return backend.call(request("read", id).put("offset", offset), false).put("inputReadback", true);
     }
 
     synchronized Json inputNow(String id, long sequence, String hex) {
@@ -81,6 +81,24 @@ final class TerminalJobs {
         }
         if (!live.contains(id)) { throw new FileFailure("原终端尚未确认或已结束，请查询同一会话"); }
         return backend.call(request("input", id).put("sequence", sequence).put("hex", hex), false);
+    }
+
+    /** One durable input operation, with a read of the same PTY in its reply. */
+    synchronized Json inputReadNow(String id, long sequence, String hex, long offset) {
+        if (offset < 0) { throw new IllegalArgumentException("offset 不能为负数"); }
+        Json accepted = inputNow(id, sequence, hex);
+        // A lost/ended backend response must not turn into another input attempt.
+        if (accepted.get("nextInputSequence") == null) { return accepted; }
+        Json output = readNow(id, offset);
+        if (output.get("state") != null && "running".equals(output.get("state").string())
+                && output.get("nextOffset") != null && output.get("nextOffset").longValue() == offset) {
+            // Give the PTY reader a bounded chance to collect echo; never wait
+            // for command completion or hold the remote lane for a long poll.
+            try { Thread.sleep(8); }
+            catch (InterruptedException error) { Thread.currentThread().interrupt(); return output; }
+            output = readNow(id, offset);
+        }
+        return output;
     }
 
     synchronized Json resizeNow(String id, int columns, int rows) {

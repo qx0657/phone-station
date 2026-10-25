@@ -18,7 +18,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "dev.phonestation.adbkeep"
-CHUNK_BYTES = 512 * 1024
+# Phone control messages are one JSON text. LocalLink.Msg.parse rejects
+# anything over 8192 characters and then drops the link session. Hex plus
+# the base64 wrapper makes 2560 raw bytes about 7200 characters, under
+# that cap for an install path and a sha256 targetVersion. Larger chunks
+# never get a normal error back.
+CHUNK_BYTES = 2560
 JOB_ROOT = "/data/local/tmp/phone-station-install"
 UPLOAD_ROOT = "/storage/emulated/0/Download/手机工位/inbox"
 RECOVERY_EXTRA = "phone_station_install_job"
@@ -294,6 +299,9 @@ def file_hash(stream) -> str:
 
 def upload(client: Client, apk: dict, remote: str):
     version = None
+    sent = 0
+    total = apk["file"].stat().st_size
+    step = CHUNK_BYTES * 100
     with apk["file"].open("rb") as stream:
         for chunk in iter(lambda: stream.read(CHUNK_BYTES), b""):
             args = {"path": remote, "hex": chunk.hex()}
@@ -304,6 +312,10 @@ def upload(client: Client, apk: dict, remote: str):
             else:
                 result = client.tool("station_file_append_bytes" if version else "station_file_write_bytes", args)
             version = result["targetVersion"]
+            previous = sent
+            sent += len(chunk)
+            if previous == 0 or sent == total or previous // step != sent // step:
+                print(f"已上传 {sent}/{total}", file=sys.stderr, flush=True)
 
 
 def service_probe_command() -> str:

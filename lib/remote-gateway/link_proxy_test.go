@@ -3,12 +3,52 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"phone-station/link"
 )
+
+// Model the phone's durable receipt key: a different method/body may never
+// reuse open's operation. Exercise both the legacy and app-facing tool names.
+func TestTerminalSessionOperationsHaveSeparateReceipts(t *testing.T) {
+	const session = "0123456789abcdef0123456789abcdef"
+	for _, prefix := range []string{"station_terminal_", "terminal."} {
+		t.Run(prefix, func(t *testing.T) {
+			g := testGateway("", nil)
+			seen := map[string]string{}
+			g.linkCall = func(_ context.Context, op, method string, body []byte) (string, []byte, error) {
+				if method == "terminal.open" {
+					if op != session {
+						t.Fatalf("open must retain saved id: %s", op)
+					}
+				} else if op == session {
+					t.Fatalf("%s reused session as operation", method)
+				}
+				if previous, exists := seen[op]; exists {
+					t.Fatalf("receipt collision: %s and %s", previous, method)
+				}
+				seen[op] = method
+				return "complete", toolText(`{"sessionId":"` + session + `","state":"running","nextInputSequence":1}`), nil
+			}
+			for _, action := range []string{"open", "read", "resize", "input", "read", "input", "close"} {
+				request := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{"sessionId":%q,"sequence":0,"hex":"61"}}}`, prefix+action, session)
+				body, status := g.oneLink(context.Background(), []byte(request))
+				if status != http.StatusOK || toolPayload(t, body)["sessionId"] != session {
+					t.Fatalf("%s: %s", action, body)
+				}
+			}
+			// Creation retries still resolve to the originally saved operation.
+			params := json.RawMessage(fmt.Sprintf(`{"name":%q,"arguments":{"sessionId":%q}}`, prefix+"open", session))
+			if linkOperation("tools/call", params) != session {
+				t.Fatal("open lost durable identity")
+			}
+		})
+	}
+}
 
 func TestProxyLinkUsesDeviceLinkWithoutPhoneToken(t *testing.T) {
 	var ops, methods []string

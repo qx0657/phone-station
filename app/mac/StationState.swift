@@ -16,6 +16,35 @@ enum StationPage: Equatable {
     case features
     case clipboard
     case notifications
+
+    var title: String {
+        switch self {
+        case .main: return "手机工位"
+        case .connection: return "连接设置"
+        case .commands: return "命令与终端"
+        case .editCommand: return "编辑命令"
+        case .more: return "设置"
+        case .files: return "最近文件"
+        case .about: return "关于"
+        case .mcp: return "MCP 服务"
+        case .remotePermissions: return "远程访问范围"
+        case .features: return "手机功能管理"
+        case .remoteRelay: return "远程接入"
+        case .stationPair: return "工位配对"
+        case .clipboard: return "共享剪贴板"
+        case .notifications: return "手机通知"
+        }
+    }
+
+    var backFallback: StationPage {
+        switch self {
+        case .editCommand: return .commands
+        case .commands, .about, .features, .remotePermissions: return .more
+        case .remoteRelay: return .mcp
+        case .stationPair: return .connection
+        default: return .main
+        }
+    }
 }
 
 enum PhoneFeatureGroup: String, CaseIterable {

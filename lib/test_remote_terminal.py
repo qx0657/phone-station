@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from remote_ops import RemoteError
-from remote_terminal import Receipt, acknowledge, initialize, read_output, send_input
+from remote_terminal import Receipt, acknowledge, acknowledge_open, initialize, read_output, send_input
 
 SESSION_ID = "a" * 32
 
@@ -69,6 +69,15 @@ class TerminalTest(unittest.TestCase):
         with self.assertRaises(RemoteError):
             initialize(self.phone)
 
+    def test_open_accepts_legacy_job_and_live_link_receipts(self):
+        acknowledge_open(self.receipt, {"jobId": SESSION_ID, "kind": "terminal"})
+        acknowledge_open(self.receipt, {"sessionId": SESSION_ID, "state": "running", "nextInputSequence": 0})
+        for result in ({"sessionId": "b" * 32, "state": "running", "nextInputSequence": 0},
+                       {"sessionId": SESSION_ID, "state": "lost"},
+                       {"sessionId": SESSION_ID, "state": "running"}):
+            with self.assertRaises(RemoteError):
+                acknowledge_open(self.receipt, result)
+
     def test_lost_input_ack_queries_original_without_replay(self):
         self.phone.drop_input = True
         with self.assertRaises(RemoteError):
@@ -85,6 +94,26 @@ class TerminalTest(unittest.TestCase):
         self.assertEqual(self.receipt.value["nextInputSequence"], 1)
         self.assertEqual(len([name for name, _ in self.phone.calls if name == "station_terminal_input"]), 1)
         self.assertEqual(self.receipt.path.stat().st_mode & 0o777, 0o600)
+
+    def test_input_readback_uses_original_output_cursor_without_extra_rpc(self):
+        self.phone.terminal_readback = True
+        tool = self.phone.tool
+        def readback(name, args=None):
+            result = tool(name, args)
+            if name == "station_terminal_input":
+                self.assertEqual(args["readOffset"], 0)
+                result["inputReadback"] = True
+            return result
+        self.phone.tool = readback
+        result, data = send_input(self.phone, self.receipt, b"a")
+        self.assertEqual(data, "中".encode())
+        self.assertEqual(result["nextOffset"], 3)
+        self.assertIsNone(self.receipt.value["pendingSequence"])
+        self.assertEqual([name for name, _ in self.phone.calls], ["station_terminal_input"])
+
+    def test_old_phone_does_not_return_readback(self):
+        self.assertIsNone(send_input(self.phone, self.receipt, b"a"))
+        self.assertNotIn("readOffset", self.phone.calls[-1][1])
 
     def test_permission_denial_is_not_an_old_version_error(self):
         self.phone.permissions = {"shell": False}
@@ -128,18 +157,19 @@ class Phone:
     output = b"READY\r\n"
     def tool(self, name, args):
         if name == "station_terminal_open":
-            return {"jobId": args["sessionId"], "kind": "terminal"}
+            return {"sessionId": args["sessionId"], "state": "running", "nextInputSequence": 0}
         if name == "station_terminal_close":
             print("CLOSE_ONCE", flush=True)
             return {"sessionId": args["sessionId"], "state": "closed"}
         if name == "station_terminal_input":
             assert args["hex"] == "03", args
+            assert args["readOffset"] == len(b"READY\r\n"), args
             self.sequence += 1
             self.output += b"INTERRUPT_FORWARDED\r\n"
-        offset = args.get("offset", len(self.output))
+        offset = args.get("readOffset", args.get("offset", len(self.output)))
         return {"sessionId": args["sessionId"], "state": "running", "hex": self.output[offset:].hex(),
                 "offset": offset, "nextOffset": len(self.output), "endOffset": len(self.output),
-                "droppedBytes": 0, "nextInputSequence": self.sequence}
+                "droppedBytes": 0, "nextInputSequence": self.sequence, "inputReadback": True}
 r = Receipt("c" * 32, Path(sys.argv[1]))
 try:
     sys.exit(interact(Phone(), r))
@@ -175,6 +205,7 @@ finally:
                 previous[3] &= ~0x20000000
             self.assertEqual(restored, previous)
             self.assertEqual(captured.count(b"CLOSE_ONCE"), 1)
+            self.assertNotIn("应答未确认".encode(), captured)
         finally:
             if process.poll() is None:
                 process.kill(); process.wait()

@@ -12,7 +12,7 @@ struct RemoteRelayPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("远程接入")) { station.goBack(fallback: .mcp) }
+            StationRows.subpageHeader(StationL10n.text("远程接入"), backTitle: station.backPageTitle) { station.goBack() }
             StationPageScroll(maxHeight: showsConfiguration ? (mcp.configurePhone ? 400 : 316) : 160) {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {

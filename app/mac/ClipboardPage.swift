@@ -6,7 +6,7 @@ struct ClipboardPage: View {
     var body: some View {
         StationPageScroll(maxHeight: 640) {
             VStack(alignment: .leading, spacing: 0) {
-                StationRows.subpageHeader(StationL10n.text("共享剪贴板")) { station.goBack(fallback: .main) }
+                StationRows.subpageHeader(StationL10n.text("共享剪贴板"), backTitle: station.backPageTitle) { station.goBack() }
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(spacing: 0) {
                     StationRows.toggleRow(StationL10n.text("共享剪贴板"), symbol: "doc.on.clipboard",

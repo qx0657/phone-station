@@ -5,7 +5,7 @@ struct MorePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("设置")) { station.goBack(fallback: .main) }
+            StationRows.subpageHeader(StationL10n.text("设置"), backTitle: station.backPageTitle) { station.goBack() }
             StationPageScroll(maxHeight: 560) {
                 VStack(alignment: .leading, spacing: 16) {
                     phoneStatus
@@ -132,7 +132,7 @@ struct AboutPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("关于")) { station.goBack(fallback: .more) }
+            StationRows.subpageHeader(StationL10n.text("关于"), backTitle: station.backPageTitle) { station.goBack() }
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 12) {
                     Image(nsImage: NSApp.applicationIconImage)

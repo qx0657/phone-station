@@ -54,6 +54,41 @@ func TestSharedQueuePrioritizesInteractiveCallsWithoutStarvingBulk(t *testing.T)
 	}
 }
 
+func TestTerminalPriorityStillYieldsAfterThreeCalls(t *testing.T) {
+	gate := &remoteGate{}
+	_ = gate.acquire(context.Background())
+	order := make(chan int, 6)
+	for i, priority := range []int{0, 2, 3, 3, 3, 3} {
+		i, priority := i, priority
+		go func() {
+			if err := gate.acquirePriority(context.Background(), priority); err != nil {
+				t.Error(err)
+				return
+			}
+			order <- i
+			gate.Unlock()
+		}()
+		queued(gate, i+1, t)
+	}
+	gate.Unlock()
+	for _, want := range []int{2, 3, 4, 0, 5, 1} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Fatalf("want %d got %d", want, got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("stalled")
+		}
+	}
+	for _, name := range []string{"station_terminal_input", "station_terminal_read", "station_terminal_resize", "station_terminal_close", "terminal.input", "terminal.read", "terminal.resize", "terminal.close"} {
+		body, _ := json.Marshal(map[string]any{"method": "tools/call", "params": map[string]string{"name": name}})
+		if remotePriority(body) != 3 {
+			t.Fatalf("not interactive: %s", name)
+		}
+	}
+}
+
 func TestCLIAndAppShareTheSameRemotePermit(t *testing.T) {
 	var active, maximum, calls atomic.Int32
 	value := config{GatewayToken: "test", RemoteURL: "https://relay", RemotePin: "pin"}

@@ -8,7 +8,7 @@ struct ConnectionPage: View {
     var body: some View {
         StationPageScroll(maxHeight: 640) {
             VStack(alignment: .leading, spacing: 0) {
-                StationRows.subpageHeader(StationL10n.text("连接设置")) { station.goBack(fallback: .main) }
+                StationRows.subpageHeader(StationL10n.text("连接设置"), backTitle: station.backPageTitle) { station.goBack() }
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
                         StationRows.sectionTitle(StationL10n.text("本地连接"))

@@ -23,7 +23,7 @@ struct RemotePermissionsPage: View {
     private var legacyPage: Bool { station.remoteControls.reading != nil && !modernPage }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("远程访问范围")) { station.goBack(fallback: station.permissionReturnPage) }
+            StationRows.subpageHeader(StationL10n.text("远程访问范围"), backTitle: station.backPageTitle) { station.goBack() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(StationL10n.text(summary)).font(.subheadline)

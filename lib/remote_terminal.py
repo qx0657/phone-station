@@ -135,13 +135,32 @@ def send_input(client: Client, receipt: Receipt, data: bytes):
     sequence = receipt.value["nextInputSequence"]
     receipt.value["pendingSequence"] = sequence
     receipt.save()  # Before the only submission; raw input/commands never go to disk.
-    result = client.tool("station_terminal_input", {"sessionId": receipt.id,
-                         "sequence": sequence, "hex": data.hex()})
+    args = {"sessionId": receipt.id, "sequence": sequence, "hex": data.hex()}
+    if getattr(client, "terminal_readback", False):
+        args["readOffset"] = receipt.value["offset"]
+    result = client.tool("station_terminal_input", args)
     acknowledge(receipt, result)
+    if result.get("inputReadback") is True:
+        return decode_output(receipt, result)
+    return None
+
+
+def acknowledge_open(receipt: Receipt, result: dict):
+    # Legacy MCP starts a job; v2 link returns the live PTY directly.
+    if result.get("jobId") == receipt.id and result.get("kind") == "terminal":
+        return
+    if result.get("state") == "running" and acknowledge(receipt, result):
+        return
+    raise RemoteError("终端创建回执不匹配。")
 
 
 def read_output(client: Client, receipt: Receipt) -> tuple[dict, bytes]:
     result = client.tool("station_terminal_read", {"sessionId": receipt.id, "offset": receipt.value["offset"]})
+    client.terminal_readback = result.get("inputReadback") is True
+    return decode_output(receipt, result)
+
+
+def decode_output(receipt: Receipt, result: dict) -> tuple[dict, bytes]:
     if result.get("sessionId") != receipt.id:
         raise RemoteError("终端应答编号不匹配。")
     if "hex" not in result:
@@ -177,15 +196,14 @@ def interact(client: Client, receipt: Receipt, resume: bool = False) -> int:
         receipt.save()
         try:
             result = client.tool("station_terminal_open", {"sessionId": receipt.id, "columns": columns, "rows": rows})
-            if result.get("jobId") != receipt.id or result.get("kind") != "terminal":
-                raise RemoteError("终端创建回执不匹配。")
+            acknowledge_open(receipt, result)
         except RemoteError:
             message("创建应答未确认，正在查询原会话。")
     message(f"远程手机 shell · 会话 {receipt.id} · Ctrl-] 关闭")
     message(f"恢复原会话：{shlex.quote(str(Path(__file__).resolve().parent.parent / 'scripts/terminal.sh'))} --resume {receipt.id}")
     previous = termios.tcgetattr(fd)
     old_signals = {}
-    resized = [True]
+    resized = [resume]
     def stop(_sig, _frame):
         raise TerminalExit()
     def resize(_sig, _frame):
@@ -196,11 +214,16 @@ def interact(client: Client, receipt: Receipt, resume: bool = False) -> int:
     ending = False
     warned = False
     input_warning = False
+    next_response = None
     try:
         tty.setraw(fd)
         while True:
             try:
-                result, data = read_output(client, receipt)
+                if next_response is None:
+                    result, data = read_output(client, receipt)
+                else:
+                    result, data = next_response
+                    next_response = None
                 state = result.get("state")
                 if state == "starting":
                     time.sleep(0.2)
@@ -232,14 +255,16 @@ def interact(client: Client, receipt: Receipt, resume: bool = False) -> int:
                         client.tool("station_terminal_resize", {"sessionId": receipt.id, "columns": columns, "rows": rows})
                     except RemoteError:
                         message("窗口尺寸未确认。")
-                readable, _, _ = select.select([fd], [], [], 0 if data else 0.15)
+                # Let the next key take priority over another remote read. This
+                # also batches keystrokes already buffered during the last RTT.
+                readable, _, _ = select.select([fd], [], [], 0.03 if data else 0.15)
                 if readable:
                     entered = os.read(fd, 4096)
                     if not entered or b"\x1d" in entered:
                         raise TerminalExit()
                     if not pending and state == "running":
                         try:
-                            send_input(client, receipt, entered)
+                            next_response = send_input(client, receipt, entered)
                         except RemoteError:
                             message("输入应答未确认，正在查询原序号，不重发。")
             except RemoteError:

@@ -68,7 +68,7 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
                 let connected = self.menuBarShowsConnected ?? false
                 self.menuBarShowsConnected = nil
                 self.applyMenuBar(connected: connected)
-                self.settingsWindow?.title = StationL10n.text("设置")
+                self.settingsWindow?.title = self.station.windowTitle
                 NotificationBannerCenter.shared.refreshAppearance()
                 for window in NSApp.windows where ["手机工位 · 远程投屏", "Phone Station · Remote mirroring"].contains(window.title) {
                     window.title = StationL10n.text("手机工位 · 远程投屏")
@@ -203,14 +203,11 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
             showPhoneMenu()
             return
         }
-        guard let button = statusItem?.button, let popover else { return }
+        guard let popover else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            if station.page != .main { station.page = .main }
-            station.refresh()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            showMainPanel(offerPairing: true)
         }
     }
 
@@ -243,22 +240,34 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
     }
 
     private func togglePopoverFromMenu() {
+        showMainPanel(offerPairing: true)
+    }
+
+    private func showMainPanel(offerPairing: Bool) {
         guard let button = statusItem?.button, let popover else { return }
         if popover.isShown { return }
-        station.refresh()
+        if station.page != .main { station.page = .main }
+        // popoverDidShow refreshes the page once it is visible.
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        if offerPairing && station.link.needsWirelessPairing { station.page = .connection }
     }
 
     private func syncSettingsWindow(_ page: StationPage) {
+        // Published page changes are delivered asynchronously. Ignore an obsolete route.
+        guard page == station.page else { return }
         if page == .main {
+            // Explicit window close clears settingsOpen before resetting the route.
+            // Returning from a detail page keeps it set until home is visible again.
+            let returningHome = station.settingsOpen
             station.settingsOpen = false
             settingsWindow?.orderOut(nil)
-            statusItem?.button?.setAccessibilityChildren(nil)
+            if popover?.isShown != true { statusItem?.button?.setAccessibilityChildren(nil) }
+            if returningHome { showMainPanel(offerPairing: false) }
             return
         }
         let window = ensureSettingsWindow()
-        window.title = StationL10n.text("设置")
+        window.title = station.windowTitle
         station.settingsOpen = true
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
@@ -272,13 +281,13 @@ final class PhoneStationApp: NSObject, NSApplicationDelegate {
         if let settingsWindow { return settingsWindow }
         let host = NSHostingController(rootView: StationView(station: station))
         host.sizingOptions = .preferredContentSize
-        let window = NSWindow(contentViewController: host)
+        let window = StationDetailWindow(contentViewController: host)
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.level = .floating
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.setContentSize(NSSize(width: 360, height: 560))
-        window.title = StationL10n.text("设置")
+        window.title = station.windowTitle
         window.isReleasedWhenClosed = false
         window.delegate = self
         settingsWindow = window
@@ -368,7 +377,6 @@ extension PhoneStationApp: NSPopoverDelegate {
             statusItem?.button?.setAccessibilityChildren([view])
         }
         station.panelVisible = true
-        if station.link.needsWirelessPairing { station.page = .connection }
         station.remoteControls.monitoring = true
         station.refresh()
         station.remoteControls.refresh()

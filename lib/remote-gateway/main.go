@@ -177,7 +177,7 @@ func (gate *remoteGate) releaseLocked() {
 				}
 			}
 		}
-		if gate.pending[next].priority == 2 {
+		if gate.pending[next].priority >= 2 {
 			gate.interactiveRun++
 		} else {
 			gate.interactiveRun = 0
@@ -200,8 +200,11 @@ func remotePriority(body []byte) int {
 		return 1
 	}
 	switch request.Params.Name {
+	case "station_terminal_input", "station_terminal_read", "station_terminal_resize", "station_terminal_close",
+		"terminal.input", "terminal.read", "terminal.resize", "terminal.close":
+		return 3
 	case "station_clipboard_exchange", "station_clipboard_state", "station_notification_poll",
-		"station_operation_status", "station_device_status", "station_controls_status", "station_terminal_read", "station_screen_status":
+		"station_operation_status", "station_device_status", "station_controls_status", "station_screen_status":
 		return 2
 	case "station_file_read_bytes", "station_file_write_bytes", "station_file_append_bytes":
 		return 0

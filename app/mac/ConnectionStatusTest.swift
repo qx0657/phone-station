@@ -23,6 +23,7 @@ private final class ProbeSequence: @unchecked Sendable {
 struct ConnectionStatusTest {
     @MainActor
     static func main() async {
+        detailWindowShortcutTest()
         var navigation = StationNavigation()
         navigation.changed(from: .main, to: .more)
         navigation.changed(from: .more, to: .connection)
@@ -48,6 +49,30 @@ struct ConnectionStatusTest {
         navigation.changed(from: .remoteRelay, to: .connection)
         navigation.changed(from: .connection, to: .mcp)
         precondition(navigation.destination(fallback: .more) == .main, "return does not create connection/service cycles")
+        let routed = Station()
+        routed.page = .more
+        routed.page = .connection
+        routed.page = .remoteRelay
+        precondition(routed.backDestination == .connection)
+        precondition(routed.backPageTitle == StationL10n.text("连接设置"))
+        routed.goBack()
+        precondition(routed.page == .connection && routed.backDestination == .more)
+        routed.goBack()
+        precondition(routed.page == .more && routed.backDestination == .main)
+        routed.goBack()
+        precondition(routed.page == .main)
+        routed.page = .commands
+        routed.commands.openPage(.editCommand)
+        precondition(routed.backDestination == .commands)
+        precondition(routed.pageTitle == StationL10n.text("新建命令"))
+        routed.goBack()
+        precondition(routed.page == .commands)
+        routed.openFeatures(.screen)
+        precondition(routed.windowTitle == StationL10n.text("屏幕与手机控制") + " · " + StationL10n.text("手机工位"))
+        routed.openRemotePermissions()
+        precondition(routed.backPageTitle == StationL10n.text("屏幕与手机控制"), "return labels use the actual capability group")
+        routed.goBack()
+        precondition(routed.page == .features && routed.backDestination == .commands)
         precondition(Set(PhoneFeatureGroup.allCases.flatMap(\.keys)) == Set(PhoneFeatureState.keys), "capability grouping keeps every feature")
         precondition(PhoneFeatureGroup.allCases.flatMap(\.keys).count == PhoneFeatureState.keys.count)
         let switches = PhoneFeatureState.adb((["0"] + Array(repeating: "1", count: PhoneFeatureState.keys.count)).joined(separator: "\n"))
@@ -159,6 +184,26 @@ struct ConnectionStatusTest {
         await findPhoneTest()
         await remoteControlsTest()
         print("ConnectionStatusTest ok")
+    }
+
+    @MainActor static func detailWindowShortcutTest() {
+        _ = NSApplication.shared
+        let window = StationDetailWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 100),
+                                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        var closes = 0
+        let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                                                               object: window, queue: nil) { _ in closes += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        func key(_ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "w", charactersIgnoringModifiers: "w",
+                isARepeat: false, keyCode: 13)!
+        }
+        precondition(!window.performKeyEquivalent(with: key([.command, .option])))
+        precondition(closes == 0, "other shortcuts do not close the detail window")
+        precondition(window.performKeyEquivalent(with: key(.command)))
+        precondition(closes == 1, "Command-W uses the native close lifecycle")
     }
 
     @MainActor static func reconnectWithoutDeviceChangesTest() async {

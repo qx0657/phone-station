@@ -582,9 +582,20 @@ var linkName = regexp.MustCompile(`^[a-z]+$`)
 func linkOperation(method string, params json.RawMessage) string {
 	if method == "tools/call" {
 		var call struct {
+			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
 		}
 		if json.Unmarshal(params, &call) == nil {
+			// A session identifies the PTY, not each operation on it. Reusing
+			// open's receipt for input/resize/close causes a payload conflict.
+			name := call.Name
+			if mapped, ok := linkMethodName(name); ok {
+				name = mapped
+			}
+			switch name {
+			case "terminal.input", "terminal.read", "terminal.resize", "terminal.close":
+				return newLinkOp()
+			}
 			if op := operationField(call.Arguments); op != "" {
 				return op
 			}

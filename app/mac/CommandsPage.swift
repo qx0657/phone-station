@@ -5,7 +5,7 @@ struct CommandsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("命令与终端")) { station.goBack(fallback: .more) }
+            StationRows.subpageHeader(StationL10n.text("命令与终端"), backTitle: station.backPageTitle) { station.goBack() }
             VStack(alignment: .leading, spacing: 12) {
                 Text(station.commands.remoteRoute() == nil
                      ? StationL10n.text("点一行执行。铅笔用来修改。")
@@ -184,24 +184,10 @@ struct CommandEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
+            StationRows.subpageHeader(commands.commandDraft.id == nil ? StationL10n.text("新建命令") : StationL10n.text("编辑命令"),
+                                      backTitle: StationL10n.text("命令与终端")) {
                 commands.openPage(.commands)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left")
-                        .font(.caption.weight(.semibold))
-                        .accessibilityHidden(true)
-                    Text(commands.commandDraft.id == nil ? StationL10n.text("新建命令") : StationL10n.text("编辑命令"))
-                        .font(.system(size: 16, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(PressFadeStyle())
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .accessibilityLabel(StationL10n.text("返回"))
             VStack(alignment: .leading, spacing: 14) {
                 fieldBlock(StationL10n.text("名称")) {
                     TextField(StationL10n.text("例如 前台应用"), text: $commands.commandDraft.name)

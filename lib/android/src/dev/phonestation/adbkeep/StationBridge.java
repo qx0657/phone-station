@@ -183,6 +183,9 @@ final class StationBridge implements StationHost {
                 return terminals(context).readNow(id, longArg(args, "offset", 0));
             case "terminal.input":
                 requireVerifiedModel();
+                if (args.get("readOffset") != null) {
+                    return terminals(context).inputReadNow(id, longArg(args, "sequence", -1), textArg(args, "hex"), longArg(args, "readOffset", -1));
+                }
                 return terminals(context).inputNow(id, longArg(args, "sequence", -1), textArg(args, "hex"));
             case "terminal.resize":
                 requireVerifiedModel();

@@ -6,7 +6,7 @@ struct McpPage: View {
     var body: some View {
         StationPageScroll(maxHeight: 640) {
             VStack(alignment: .leading, spacing: 0) {
-                StationRows.subpageHeader(StationL10n.text("MCP 服务")) { station.goBack(fallback: .main) }
+                StationRows.subpageHeader(StationL10n.text("MCP 服务"), backTitle: station.backPageTitle) { station.goBack() }
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
                         Label(StationL10n.text(station.mcpPresentation.summary), systemImage: station.mcpPresentation.available ? "checkmark.circle" : "pause.circle")

@@ -5,7 +5,7 @@ struct NotificationPage: View {
     @ObservedObject var notifications: NotificationSession
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("手机通知")) { station.goBack(fallback: .main) }
+            StationRows.subpageHeader(StationL10n.text("手机通知"), backTitle: station.backPageTitle) { station.goBack() }
             StationPageScroll(maxHeight: 600) {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(spacing: 0) {

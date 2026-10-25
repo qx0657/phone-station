@@ -82,6 +82,23 @@ class RemoteOpsTest(unittest.TestCase):
         self.assertEqual(calls[2][1]["targetVersion"], "2")
         self.assertEqual(b"".join(bytes.fromhex(call[1]["hex"]) for call in calls), b"abcdefgh")
 
+    def test_upload_chunk_fits_v2_message_after_hex_and_base64(self):
+        import base64
+        # Match encoding/json: compact UTF-8, map keys sorted, wireMsg field
+        # order. Phone Msg.parse rejects control text longer than 8192 chars.
+        path = "/storage/emulated/0/Download/手机工位/inbox/install-" + "a" * 32 + "/0.apk"
+        args = {"path": path, "hex": (b"a" * ops.CHUNK_BYTES).hex(), "targetVersion": "sha256:" + "ab" * 32}
+        params = json.dumps(args, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        message = json.dumps({"type": "call", "op": "a" * 32, "method": "file.appendbytes",
+                              "params": base64.b64encode(params).decode()},
+                             separators=(",", ":"), ensure_ascii=False)
+        self.assertLessEqual(len(message), 8192)
+        too_big = dict(args, hex=(b"a" * 8192).hex())
+        big = json.dumps({"type": "call", "op": "a" * 32, "method": "file.appendbytes",
+                          "params": base64.b64encode(json.dumps(too_big, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).decode()},
+                         separators=(",", ":"), ensure_ascii=False)
+        self.assertGreater(len(big), 8192)
+
     def test_shell_transport_never_resubmits_lost_mutation(self):
         with patch.object(ops, "gateway_binary", return_value=Path("/test/gateway")):
             client = ops.Client()

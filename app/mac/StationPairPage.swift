@@ -7,7 +7,7 @@ struct StationPairPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(StationL10n.text("工位配对")) { station.goBack(fallback: .connection) }
+            StationRows.subpageHeader(StationL10n.text("工位配对"), backTitle: station.backPageTitle) { station.goBack() }
             StationPageScroll(maxHeight: 420) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(StationL10n.text("本地链路直接交换公钥。没有 adb 时，手机用系统相机拍照后在本地解码，也可以手动输入 12 位邀请码。应用不申请相机权限。"))

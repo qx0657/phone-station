@@ -49,7 +49,7 @@
 | 系统设置当通信通道 | 功能开关和 MCP 监听写在 Settings.Global（`StationFeatures.publish`、`publishListening`）。电脑心跳已经不写系统设置 | 功能开关仍会被其他应用读到 |
 | 远程调用不复用连接 | `remoteCall` 每次读钥匙串、新建 Transport 并在结束时关闭，提交前先查一次状态 | 每次多一个进程、一次 TLS 握手和一次往返 |
 | 三处串行 | 网关 `remoteGate`、中继 `device.active`、手机在控制连接的读循环里同步执行 | 传大文件时剪贴板和通知都要排队 |
-| 二进制走十六进制 JSON | `remote_ops.py` 每 512 KiB 做一次 `chunk.hex()`，手机再解析一次 | 流量约翻倍；大块数据在手机堆上多次复制 |
+| 二进制走十六进制 JSON | `remote_ops.py` 每 2560 字节做一次 `chunk.hex()`，手机再解析一次 | 流量约翻倍；控制消息超过 8192 字符会拆掉链路 |
 | SwiftUI 全树失效 | `Station` 转发 15 个子会话的 `objectWillChange` | 任一计时器触发都让面板整体重算 |
 | 安装包体积（次要） | APK 5.3 MB；两个 Go 程序解压后 7.5 MB 与 3.2 MB；dex 0.69 MB，未经 R8 | 下载与更新偏大 |
 

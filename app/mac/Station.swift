@@ -40,7 +40,18 @@ final class Station: ObservableObject {
             if oldValue != page && feedback.activity == nil { feedback.notice = nil }
         }
     }
-    func goBack(fallback: StationPage = .main) { page = navigation.destination(fallback: fallback) }
+    var backDestination: StationPage {
+        navigation.destination(fallback: page == .remotePermissions ? permissionReturnPage : page.backFallback)
+    }
+    var backPageTitle: String { backDestination == .main ? StationL10n.text("首页") : title(for: backDestination) }
+    var pageTitle: String { title(for: page) }
+    private func title(for target: StationPage) -> String {
+        if target == .features, let featureGroup { return StationL10n.text(featureGroup.title) }
+        if target == .editCommand { return StationL10n.text(commands.commandDraft.id == nil ? "新建命令" : "编辑命令") }
+        return StationL10n.text(target.title)
+    }
+    var windowTitle: String { pageTitle + " · " + StationL10n.text("手机工位") }
+    func goBack() { page = backDestination }
     @Published private(set) var featureGroup: PhoneFeatureGroup?
     func openFeatures(_ group: PhoneFeatureGroup? = nil) {
         featureGroup = group

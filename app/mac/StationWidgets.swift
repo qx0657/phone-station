@@ -88,24 +88,8 @@ enum StationRows {
             .padding(.horizontal, 2)
     }
 
-    static func subpageHeader(_ title: String, back: @escaping () -> Void) -> some View {
-        Button(action: back) {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.left")
-                    .font(.caption.weight(.semibold))
-                    .accessibilityHidden(true)
-                Text(StationL10n.text(title))
-                    .stationFont(size: 16, weight: .semibold)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressFadeStyle())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .accessibilityLabel(StationL10n.text("返回"))
-        .accessibilityHint(StationL10n.format("返回上一页，当前页面：{0}", StationL10n.text("\(title)")))
+    static func subpageHeader(_ title: String, backTitle: String, back: @escaping () -> Void) -> some View {
+        StationSubpageHeader(title: title, backTitle: backTitle, back: back)
     }
 
     static func navigationRow(_ title: String, symbol: String, detail: String? = nil,
@@ -199,6 +183,51 @@ enum StationRows {
         if short.isEmpty { return StationL10n.text("未知") }
         if build.isEmpty || build == short { return short }
         return "\(short) (\(build))"
+    }
+}
+
+private struct StationSubpageHeader: View {
+    let title: String
+    let backTitle: String
+    let back: () -> Void
+    @FocusState private var backFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: back) {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.left")
+                        .stationFont(size: 11, weight: .semibold)
+                        .accessibilityHidden(true)
+                    Text(backTitle)
+                        .stationFont(size: 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressFadeStyle())
+            .focused($backFocused)
+            .background(HoverWash(radius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(backFocused ? Color.accentColor : .clear, lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+            .padding(.leading, -6)
+            .help(StationL10n.format("返回{0}", backTitle))
+            .accessibilityLabel(StationL10n.format("返回{0}", backTitle))
+            Text(StationL10n.text(title))
+                .stationFont(size: 18, weight: .semibold)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 18)
     }
 }
 

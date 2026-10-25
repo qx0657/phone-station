@@ -70,8 +70,38 @@ final class TerminalJobsTest {
         expect(afterRestart.readNow(direct, 0).get("state").string().equals("lost"));
         expect(linked.closeNow(direct).get("state").string().equals("running"));
         expect(linked.readNow(direct, 0).get("state").string().equals("lost"));
+        testReadback(jobs);
         jobs.close();
         System.out.println("TerminalJobsTest ok");
+    }
+    private static void testReadback(OperationJobs jobs) {
+        AtomicInteger inputs = new AtomicInteger(), reads = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean delayed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean lost = new java.util.concurrent.atomic.AtomicBoolean(false);
+        TerminalJobs terminal = new TerminalJobs(jobs, (request, start) -> {
+            String op = request.get("op").string();
+            if (op.equals("input")) {
+                inputs.incrementAndGet();
+                if (lost.get()) { return TerminalJobs.ended("a".repeat(32), "lost", ""); }
+            }
+            long offset = request.get("offset") == null ? 0 : request.get("offset").longValue();
+            boolean empty = op.equals("read") && reads.incrementAndGet() == 1 && delayed.get();
+            return TerminalJobs.ended("a".repeat(32), "running", "").put("nextInputSequence", inputs.get())
+                    .put("offset", offset).put("nextOffset", empty ? offset : offset + 1).put("hex", empty ? "" : "61");
+        });
+        String id = "a".repeat(32);
+        expect(terminal.openNow(id, 80, 24, () -> {}).get("inputReadback").boolValue());
+        Json reply = terminal.inputReadNow(id, 0, "61", 7);
+        expect(reply.get("inputReadback").boolValue() && reply.get("offset").longValue() == 7);
+        expect(reply.get("hex").string().equals("61") && inputs.get() == 1 && reads.get() == 1);
+        delayed.set(true); reads.set(0);
+        terminal.inputReadNow(id, 1, "61", 8);
+        expect(inputs.get() == 2 && reads.get() == 2);
+        lost.set(true); reads.set(0);
+        expect(terminal.inputReadNow(id, 2, "61", 9).get("state").string().equals("lost"));
+        expect(inputs.get() == 3 && reads.get() == 0);
+        try { terminal.inputReadNow(id, 3, "61", -1); throw new AssertionError(); }
+        catch (IllegalArgumentException expected) { expect(inputs.get() == 3); }
     }
     private static void await(OperationJobs jobs, String id) throws Exception {
         for (int i = 0; i < 300; i++) {

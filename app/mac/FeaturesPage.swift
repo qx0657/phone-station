@@ -6,7 +6,7 @@ struct FeaturesPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StationRows.subpageHeader(station.featureGroup?.title ?? StationL10n.text("手机功能管理")) { station.goBack(fallback: .more) }
+            StationRows.subpageHeader(station.featureGroup?.title ?? StationL10n.text("手机功能管理"), backTitle: station.backPageTitle) { station.goBack() }
             StationPageScroll(maxHeight: 560) {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(station.phoneFeatures.map { $0.master ? StationL10n.text("手机工位已开启") : StationL10n.text("手机工位已暂停") } ?? StationL10n.text("手机功能状态尚未确认"))
